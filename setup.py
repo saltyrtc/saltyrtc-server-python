@@ -21,10 +21,11 @@ setup(
     name='saltyrtc.server',
     version=get_version(),
     packages=find_packages(),
-    namespace_packages=['threema'],
+    namespace_packages=['saltyrtc'],
     install_requires=[
         'libnacl>=1.4.4',
         'click>=6.3',
+        'logbook>=0.12.5',
         'websockets>=3.0',
         'asyncio>=3.4.3',
     ],

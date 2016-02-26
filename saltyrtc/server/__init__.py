@@ -8,19 +8,24 @@ import logging
 
 import websockets
 
-from . import settings
+from . import config
 from ._asyncio import gather
 
-from . import exception
+from . import exception, util
+from .util import get_logging_handler
 from .exception import *
 
 __author__ = 'Lennart Grahl <lennart.grahl@threema.ch>'
 __status__ = 'Development'
 __version__ = '0.0.1'
 __all__ = (
-
+    'serve',
+    'logging_handler',
 ) + exception.__all__
 
+# Create default logger and handler
+logging_handler = util.get_logging_handler()
+log = util.get_logger()
 
 # Globals
 paths = {}
@@ -151,17 +156,17 @@ class Path(object):
             raise MessageFlowError('Sent invalid JSON object while registering') from exc
 
         # Check type
-        type_ = data.get(settings.field_type)
-        if type_ == settings.type_hello_server:
+        type_ = data.get(config.field_type)
+        if type_ == config.type_hello_server:
             # Check for key
-            key = data.get(settings.type_key)
+            key = data.get(config.type_key)
             if key is not None:
                 # Register connection and set key
                 role = Role.server
                 self.set(ws, role, key=key)
             else:
                 raise MessageFlowError('Registered as server but key is missing')
-        elif type_ == settings.type_hello_client:
+        elif type_ == config.type_hello_client:
             # Register connection
             role = Role.client
             self.set(ws, role)
@@ -185,8 +190,8 @@ class Path(object):
 
         # Create key message
         message = {
-            settings.field_type: settings.type_key,
-            settings.field_data: self.key
+            config.field_type: config.type_key,
+            config.field_data: self.key
         }
 
         # Send key message
@@ -248,8 +253,8 @@ class Path(object):
             raise MessageFlowError(error) from exc
 
         # Check type
-        type_ = data.get(settings.field_type)
-        if type_ == settings.type_reset:
+        type_ = data.get(config.field_type)
+        if type_ == config.type_reset:
             # Dispatch silently
             yield from self.send_reset(ws, role, message)
         else:
@@ -260,7 +265,7 @@ class Path(object):
     @asyncio.coroutine
     def send_error(self, ws, role):
         # Create error message
-        message = {settings.field_type: settings.type_send_error}
+        message = {config.field_type: config.type_send_error}
 
         # Send error message
         self.logger.info('Sending send error notification to {}', role)
@@ -306,14 +311,14 @@ def keep_alive(logger, ws, role):
             logger.debug('Ping to {}', role)
             try:
                 # Send ping
-                yield from asyncio.wait_for(ws.ping(), settings.ping_timeout)
+                yield from asyncio.wait_for(ws.ping(), config.ping_timeout)
             except asyncio.TimeoutError:
                 raise PingTimeoutError(role)
             else:
                 logger.debug('Pong from {}', role)
 
             # Wait
-            yield from asyncio.sleep(settings.ping_interval)
+            yield from asyncio.sleep(config.ping_interval)
     except asyncio.CancelledError:
         logger.debug('Ping cancelled {}', role)
 
@@ -325,7 +330,7 @@ def signaling(ws, path):
 
     try:
         # Validate path
-        if len(path) != settings.path_length:
+        if len(path) != config.path_length:
             raise PathError(len(path))
     except PathError as exc:
         logging.getLogger('signaling').error(exc)
@@ -365,35 +370,18 @@ def signaling(ws, path):
         path.logger.warning('Unreachable section')
 
 
-def start_server():
-    server = websockets.serve(signaling, port=8765)
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(server)
-    loop.run_forever()
+@asyncio.coroutine
+def serve(port=8765, loop=None):
+    """
+    TODO: Describe.
+    """
+    # Get loop
+    loop = loop if loop is not None else asyncio.get_event_loop()
 
+    # Start server
+    log.debug('Starting server')
+    server = yield from websockets.serve(signaling, port=port)
 
-def setup_logging():
-    # Setup formatter and handler
-    formatter = logging.Formatter(
-        fmt=settings.logging_formatter,
-        datefmt=settings.logging_date_formatter,
-        style=settings.logging_style
-    )
-    # handler = logging.color.ColorStreamHandler()
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-
-    # Setup websockets logger
-    ws_logger = logging.getLogger('websockets')
-    ws_logger.setLevel(settings.logging_level)
-    ws_logger.addHandler(handler)
-
-    # Setup signaling logger
-    logger = logging.getLogger('signaling')
-    logger.set_level(settings.logging_level)
-    logger.add_handler(handler)
-
-
-if __name__ == '__main__':
-    setup_logging()
-    start_server()
+    # Return server
+    log.notice('Listening')
+    return server
