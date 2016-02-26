@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The command line interface for the SaltyRTC Signalling Server.
+The command line interface for the SaltyRTC signalling server.
 """
 import functools
 import asyncio
@@ -38,16 +38,27 @@ def cli(ctx):
 
 
 @cli.command(short_help='Show version information.', help="""
-Show the current version of the SaltyRTC Signalling Server.
+Show the current version of the SaltyRTC signalling server.
 """)
 def version():
     click.echo('Version: {}'.format(_version))
 
 
-@cli.command()
+@cli.command(short_help='Start the signalling server.', help="""
+Start the SaltyRTC signalling server. CERT represents the path to a
+file in PEM format containing the SSL certificate of the server.""")
+@click.argument('cert', type=click.Path(exists=True))
+@click.option('-k', '--keyfile', type=click.Path(exists=True), help="""
+Path to a file that contains the private key. Will be read from
+CERTFILE if not present.
+""")
 @aio_serve
-def serve():
-    yield from server.serve()
+def serve(**arguments):
+    certfile = arguments.get('cert')
+    keyfile = arguments.get('keyfile', None)
+    yield from server.serve(
+        certfile=certfile, keyfile=keyfile
+    )
 
 
 if __name__ == '__main__':

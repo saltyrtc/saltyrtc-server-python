@@ -4,7 +4,7 @@ TODO: Describe project
 import json
 import asyncio
 import enum
-import logging
+import ssl
 
 import websockets
 
@@ -51,7 +51,7 @@ class Path(object):
 
     def __init__(self):
         self.hash = hex(id(self))
-        self.logger = logging.getLogger('signaling.{}'.format(self))
+        self.logger = util.get_logger(self.hash)
         self.key = None
         self._client = asyncio.Future()
         self._server = asyncio.Future()
@@ -333,7 +333,7 @@ def signaling(ws, path):
         if len(path) != config.path_length:
             raise PathError(len(path))
     except PathError as exc:
-        logging.getLogger('signaling').error(exc)
+        util.get_logger().error(exc)
         return
 
     # Create path instance (if necessary)
@@ -371,16 +371,35 @@ def signaling(ws, path):
 
 
 @asyncio.coroutine
-def serve(port=8765, loop=None):
+def serve(certfile, keyfile=None, host=None, port=8765, loop=None):
     """
-    TODO: Describe.
+    Start serving SaltyRTC Signalling Clients.
+
+    Arguments:
+        - `certfile`: Path to a file in PEM format containing the
+          SSL certificate of the server.
+        - `keyfile`: Path to a file that contains the private key.
+          Will be read from `certfile` if not present.
+        - `ssl`: An `ssl.SSLContext` instance for WSS.
+        - `host`: The hostname or IP address the server will listen on.
+          Defaults to all interfaces.
+        - `port`: The port the client should connect to. Defaults to
+          `8765`.
+        - `loop`: A :class:`asyncio.BaseEventLoop` instance.
     """
     # Get loop
     loop = loop if loop is not None else asyncio.get_event_loop()
+    log.debug('Event loop: {}', loop)
+
+    # Create SSL context
+    ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ssl_context.load_cert_chain(certfile=certfile, keyfile=keyfile)
+    log.debug('Created SSL context', ssl_context)
 
     # Start server
     log.debug('Starting server')
-    server = yield from websockets.serve(signaling, port=port)
+    server = yield from websockets.serve(
+        signaling, ssl=ssl_context, host=host, port=port)
 
     # Return server
     log.notice('Listening')
