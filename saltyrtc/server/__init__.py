@@ -139,7 +139,10 @@ class Path(object):
         self.logger.debug('Waiting for register message...')
 
         # Get message
-        message = yield from ws.recv()
+        try:
+            message = yield from ws.recv()
+        except websockets.ConnectionClosed as exc:
+            raise Disconnected() from exc
 
         # Check for disconnect
         if message is None:
@@ -347,6 +350,9 @@ def signaling(ws, path):
         role = yield from path.register(ws)
     except SignalingError as exc:
         path.logger.error(exc)
+        return
+    except Disconnected:
+        # Disconnect normally
         return
 
     # Setup tasks
