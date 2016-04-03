@@ -8,6 +8,7 @@ __all__ = (
     'MessageFlowError',
     'PingTimeoutError',
     'Disconnected',
+    'MessageError',
 )
 
 
@@ -51,4 +52,10 @@ class PingTimeoutError(SignalingError):
 class Disconnected(Exception):
     """
     TODO: Describe
+    """
+
+
+class MessageError(SignalingError):
+    """
+    Raised when a message is invalid.
     """

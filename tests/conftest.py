@@ -6,6 +6,7 @@ import ssl
 
 import pytest
 import websockets
+import umsgpack
 import libnacl.public
 
 import saltyrtc.server
@@ -125,5 +126,16 @@ def client_factory(client_key, url, event_loop, server):
     return functools.partial(
         websockets.connect,
         '{}/{}'.format(url, key_path(client_key)),
-         ssl=ssl_context, loop=event_loop,
+        ssl=ssl_context, loop=event_loop,
     )
+
+
+@pytest.fixture(scope='module')
+def get_unencrypted_packet(event_loop):
+    @asyncio.coroutine
+    def _get_unencrypted_packet(client, timeout=0.1):
+        data = yield from asyncio.wait_for(client.recv(), timeout, loop=event_loop)
+        receiver = data[0]
+        message = umsgpack.unpackb(data[1:])
+        return receiver, message
+    return _get_unencrypted_packet
