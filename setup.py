@@ -27,6 +27,7 @@ setup(
         'click>=6.3',
         'logbook>=0.12.5',
         'websockets>=3.0',
+        'u-msgpack-python>=2.1',
         'asyncio>=3.4.3',
     ],
     tests_require=[

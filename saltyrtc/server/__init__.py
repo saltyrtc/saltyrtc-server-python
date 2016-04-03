@@ -15,7 +15,7 @@ from . import exception, util
 from .util import get_logging_handler
 from .exception import *
 
-__author__ = 'Lennart Grahl <lennart.grahl@threema.ch>'
+__author__ = 'Lennart Grahl <lennart.grahl@gmail.com>'
 __status__ = 'Development'
 __version__ = '0.0.1'
 __all__ = (
@@ -209,7 +209,11 @@ class Path(object):
     def send_reset(self, ws, role, message):
         sent = False
         # Relentlessly send reset until the other connection received it
+        first_try = True
         while not sent:
+            if not first_try:
+                yield from asyncio.sleep(5.0)  # Weaken infinite loop
+            first_try = False
             sent = yield from self.send(ws, role, message, send_error_message=False)
 
     @asyncio.coroutine
