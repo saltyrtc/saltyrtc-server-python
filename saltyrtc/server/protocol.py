@@ -15,7 +15,7 @@ from .common import (
 from .message import (
     unpack, AbstractMessage,
     ServerHelloMessage, ServerAuthMessage,
-    NewResponderMessage, DropResponderMessage, SendErrorMessage,
+    NewResponderMessage, SendErrorMessage,
     RawMessage,
 )
 
