@@ -23,8 +23,6 @@ class PathError(SignalingError):
     """
     TODO: Describe
     """
-    def __str__(self):
-        return 'Connection with invalid path length {}'.format(*self.args)
 
 
 class RoleError(SignalingError):

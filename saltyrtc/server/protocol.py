@@ -1,76 +1,130 @@
 import asyncio
 import os
+import binascii
 
 import websockets
+import libnacl
 import libnacl.public
 
 from saltyrtc.server import util
 from .exception import *
-from .common import KEY_LENGTH, ReceiverType, MessageType
+from .common import KEY_LENGTH, COOKIE_LENGTH, ReceiverType, MessageType
 from .message import unpack, ServerHelloMessage
 
 
 class Path:
-    __slots__ = ('log', 'initiator', 'responder')
+    __slots__ = ('number', 'log', '_initiator_key', '_slots')
 
-    def __init__(self, path):
-        self.log = util.get_logger('path.{}'.format(path))
-        self.initiator = None
-        self.responder = {
-            0x02: None,
-            0x03: None,
-        }
+    def __init__(self, number, initiator_key):
+        self.number = number
+        self.log = util.get_logger('path.{}'.format(number))
+        self._initiator_key = libnacl.public.PublicKey(initiator_key)
+        self._slots = {id_: None for id_ in range(0x01, 0xff + 1)}
+
+    @property
+    def initiator(self):
+        """Return the initiator's :class:`Client` instance or `None`."""
+        return self._slots.get(0x01)
+
+    @initiator.setter
+    def initiator(self, initiator):
+        """Set the initiator's :class:`Client` instance."""
+        self._slots[0x01] = initiator
+        # Update initiator's log name
+        initiator.update_log_name(0x01)
+
+    def get_responder(self, id_):
+        """
+        Return a responder's :class:`Client` instance or `None`.
+
+        Arguments:
+            - `id_`: The receiver identifier of the responder.
+
+        Raises :exc:`ValueError` if `id_` is not a valid responder
+        receiver identifier.
+        """
+        if not 0x02 < id_ <= 0xff:
+            raise ValueError('Invalid responder identifier')
+        return self._slots.get(id_)
+
+    def add_responder(self, responder):
+        """
+        Set a responder's :class:`Client` instance.
+
+        Arguments:
+            - `client`: A :class:`Client` instance.
+
+        Raises :exc:`PathError` if no free slot exists on the path.
+
+        Return the assigned slot identifier.
+        """
+        for id_, client in self._slots:
+            if client is None:
+                self._slots[id_] = responder
+                # Update responder's log name
+                responder.update_log_name(id_)
+                return id_
+        raise PathError('No free slots on path')
 
 
 class Client:
-    __slots__ = ('_connection', '_key', '_box', 'type', 'authenticated')
+    __slots__ = (
+        '_log', '_connection', '_client_key', '_server_key', '_box',
+        'type', 'authenticated'
+    )
 
-    def __init__(self, connection, secret_key=None):
+    def __init__(self, connection, path_number, initiator_key, server_key=None):
+        self._log = util.get_logger('path.{}.client'.format(path_number))
         self._connection = connection
-        self._key = secret_key
+        self._client_key = initiator_key
+        self._server_key = server_key
         self._box = None
         self.type = None
         self.authenticated = False
 
     @property
-    def key(self):
+    def server_key(self):
         """
-        Return the :class:`libnacl.public.SecretKey` instance.
+        Return the server's :class:`libnacl.public.SecretKey` instance.
         """
-        if self._key is None:
-            self._key = libnacl.public.SecretKey()
-        return self._key
-
-    @property
-    def box_ready(self):
-        """
-        Return `True` if keys have been exchanged and only encrypted
-        payloads must be accepted.
-        """
-        return self._box is not None
+        if self._server_key is None:
+            self._server_key = libnacl.public.SecretKey()
+        return self._server_key
 
     @property
     def box(self):
         """
         Return the :class:`libnacl.public.Box` instance.
-
-        Raises :exc:`ValueError` in case no box has been set, yet.
         """
-        if self.box is None:
-            raise ValueError('Box has not been set, yet')
+        if self._box is None:
+            self._box = libnacl.public.Box(self.server_key, self._client_key)
         return self._box
 
-    @box.setter
-    def box(self, public_key):
-        """Set the :class:`libnacl.public.Box` instance."""
-        self.box = libnacl.public.Box(self.key, public_key)
+    def set_client_key(self, public_key):
+        """
+        Set the public key of the client and update the internal box.
+
+        Arguments:
+            - `public_key`: A :class:`libnacl.public.PublicKey`.
+        """
+        self._client_key = public_key
+        self._box = libnacl.public.Box(self.server_key, public_key)
+
+    def update_log_name(self, slot_id):
+        """
+        Update the logger's name by the assigned slot identifier.
+
+        Arguments:
+            - `slot_id`: The slot identifier of the client.
+        """
+        self._log.name += '.{}'.format(slot_id)
 
     def p2p_allowed(self, receiver_type):
         """
         Return `True` if :class:`RawMessage` instances are allowed and
         can be sent to the requested :class:`ReceiverType`.
         """
-        return not self.authenticated or self.type is None or self.type == receiver_type
+        return self.authenticated and self.type != receiver_type
 
     @asyncio.coroutine
     def send(self, message):
@@ -118,18 +172,22 @@ class Protocol:
         MessageFlowError
         """
         # Extract public key from path
-        path = path.strip('/')
+        initiator_key = path.strip('/')
 
-        # Validate path
-        if len(path) != self.PATH_LENGTH:
-            raise PathError(len(path))
+        # Validate key
+        if len(initiator_key) != self.PATH_LENGTH:
+            raise PathError('Invalid path length: {}'.format(len(initiator_key)))
+        try:
+            initiator_key = binascii.unhexlify(initiator_key)
+        except binascii.Error as exc:
+            raise PathError('Could not unhexlify path') from exc
 
         # Get path instance
-        path = self._get_path(path)
+        path = self._get_path(initiator_key)
         path.log.info('New connection')
 
         # Create client instance
-        client = Client(connection)
+        client = Client(connection, path.initiator_key)
 
         # Do handshake
         yield from self._do_handshake(client)
@@ -145,29 +203,40 @@ class Protocol:
         MessageFlowError
         """
         # Send server-hello
-        my_cookie = os.urandom(16)
-        message = ServerHelloMessage.create(client, my_cookie)
+        server_cookie = os.urandom(COOKIE_LENGTH)
+        message = ServerHelloMessage.create(client.server_key.pk, server_cookie)
         yield from client.send(message)
 
         # Receive client-hello or client-auth
         message = yield from client.receive()
-        if message.type == MessageType.client_hello:
-            # Client is a responder
-            client.type = ReceiverType.responder
-        elif message.type == MessageType.client_auth:
+        if message.type == MessageType.client_auth:
             # Client is the initiator
             client.type = ReceiverType.initiator
+            yield from self._continue_handshake_initiator(client, server_cookie)
+        elif message.type == MessageType.client_hello:
+            # Client is a responder
+            client.type = ReceiverType.responder
+            yield from self._continue_handshake_responder(client, server_cookie)
+
         else:
             error = "Expected 'client-hello' or 'client-auth', got '{}'"
             raise MessageFlowError(error.format(message.type))
 
-        # TODO: Continue here
+    @asyncio.coroutine
+    def _continue_handshake_initiator(self, initiator, server_cookie):
+        # path.initiator = client  # TODO: Drop previous client
         raise NotImplementedError
 
-    def _get_path(self, path):
-        if self._paths.get(path) is None:
-            self._paths[path] = Path(path)
-        return self._paths[path]
+    @asyncio.coroutine
+    def _continue_handshake_responder(self, responder, server_cookie):
+        # path.add_responder(client)  # TODO: Drop previous client
+        # TODO: Send new-responder
+        raise NotImplementedError
+
+    def _get_path(self, initiator_key):
+        if self._paths.get(initiator_key) is None:
+            self._paths[initiator_key] = Path(initiator_key)
+        return self._paths[initiator_key]
 
     def _check_receiver_type(self, message, receiver_type):
         # TODO: unused

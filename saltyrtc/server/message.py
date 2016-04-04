@@ -5,7 +5,11 @@ import io
 import umsgpack
 
 from .exception import *
-from .common import ReceiverType, MessageType
+from .common import (
+    ReceiverType, MessageType,
+    validate_public_key, validate_cookie, validate_responder, validate_responder_list,
+    validate_hash,
+)
 
 
 def unpack(client, data):
@@ -38,13 +42,6 @@ class AbstractMessage(metaclass=abc.ABCMeta):
          """
         raise NotImplementedError
 
-    @abc.abstractmethod
-    def prepare_payload(self, client):
-        """
-        MessageError
-        """
-        raise NotImplementedError
-
     @classmethod
     @abc.abstractmethod
     def check_payload(cls, client, payload):
@@ -57,7 +54,6 @@ class AbstractMessage(metaclass=abc.ABCMeta):
 class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
     type = None
     encrypted = None
-    keys_required = None
 
     def __new__(
             cls, payload, *args,
@@ -75,12 +71,12 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         # Set message classes and if encryption is required for them
         cls._message_classes = {
             MessageType.server_hello: ServerHelloMessage,
-            MessageType.client_hello: NotImplementedError,
-            MessageType.client_auth: NotImplementedError,
-            MessageType.server_auth: NotImplementedError,
-            MessageType.new_responder: NotImplementedError,
-            MessageType.drop_responder: NotImplementedError,
-            MessageType.send_error: NotImplementedError,
+            MessageType.client_hello: ClientHelloMessage,
+            MessageType.client_auth: ClientAuthMessage,
+            MessageType.server_auth: ServerAuthMessage,
+            MessageType.new_responder: NewResponderMessage,
+            MessageType.drop_responder: DropResponderMessage,
+            MessageType.send_error: SendErrorMessage,
         }
 
         return super().__new__(cls)
@@ -106,21 +102,14 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         # Pack receiver byte
         data.write(self._pack_receiver())
 
-        # Get payload and pack
-        payload = self.prepare_payload(client)
-        try:
-            payload = umsgpack.unpack(payload)
-        except umsgpack.UnpackException as exc:
-            raise MessageError('Could not pack msgpack payload') from exc
+        # Pack payload
+        payload = self._pack_payload()
 
         # Encrypt payload if required
         if self.encrypted:
-            if not client.box_ready:
+            if not client.authenticated:
                 raise MessageFlowError('Cannot encrypt payload, no box available')
-            try:
-                payload = client.box.encrypt(payload)
-            except ValueError as exc:
-                raise MessageError('Could not encrypt payload') from exc
+            payload = self._encrypt_payload(client, payload)
 
         # Append payload and return as bytes
         data.write(payload)
@@ -138,23 +127,35 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         # or just return a raw message to be sent to another client
         payload = data[1:]
         if receiver_type == ReceiverType.server:
-            if client.box_ready:
+            if not client.authenticated:
+                payload = None
+
+                # Try client-hello (unencrypted)
                 try:
-                    payload = client.box.decrypt(payload)
-                except ValueError as exc:
-                    raise MessageError('Could not decrypt payload') from exc
+                    payload = cls._unpack_payload(payload)
+                except MessageError:
+                    pass
+
+                # Try client-auth (encrypted)
+                try:
+                    payload = cls._unpack_payload(cls._decrypt_payload(client, payload))
+                except MessageError:
+                    pass
+
+                # Still no payload?
+                if payload is None:
+                    message = 'Expected either client-hello or client-auth, got neither'
+                    raise MessageError(message)
+
+            else:
+                # Decrypt and unpack payload
+                payload = cls._unpack_payload(cls._decrypt_payload(client, payload))
         else:
-            # Is the client allowed to send messages to other peers at the moment?
+            # Is the client allowed to send messages to the receiver type?
             if client.p2p_allowed(receiver_type):
                 return RawMessage(receiver, receiver_type, payload)
             else:
                 raise MessageFlowError('Currently not allowed to dispatch P2P messages')
-
-        # Unpack payload
-        try:
-            payload = umsgpack.unpack(io.BytesIO(payload))
-        except umsgpack.UnpackException as exc:
-            raise MessageError('Could not unpack msgpack payload') from exc
 
         # Unpack type
         type_ = payload.get('type')
@@ -193,11 +194,32 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         receiver_type = ReceiverType.from_receiver(receiver)
         return receiver, receiver_type
 
+    def _pack_payload(self):
+        try:
+            return umsgpack.pack(self.payload)
+        except umsgpack.PackException as exc:
+            raise MessageError('Could not pack msgpack payload') from exc
+
     @classmethod
-    def _check_keys(cls, keys_required, payload):
-        missing_keys = [key not in payload for key in keys_required]
-        if any(missing_keys):
-            raise MessageError('Missing values for keys: {}'.format(missing_keys))
+    def _unpack_payload(cls, payload):
+        try:
+            return umsgpack.unpack(io.BytesIO(payload))
+        except umsgpack.UnpackException as exc:
+            raise MessageError('Could not unpack msgpack payload') from exc
+
+    @classmethod
+    def _encrypt_payload(cls, client, payload):
+        try:
+            return client.box.encrypt(payload)
+        except ValueError as exc:
+            raise MessageError('Could not encrypt payload') from exc
+
+    @classmethod
+    def _decrypt_payload(cls, client, payload):
+        try:
+            return client.box.decrypt(payload)
+        except ValueError as exc:
+            raise MessageError('Could not decrypt payload') from exc
 
 
 class RawMessage(AbstractMessage):
@@ -212,30 +234,151 @@ class RawMessage(AbstractMessage):
     def unpack(cls, client, data):
         return AbstractBaseMessage.unpack(client, data)
 
-    def prepare_payload(self, client):
-        return
-
     @classmethod
     def check_payload(cls, client, payload):
-        return payload
+        pass
 
 
 class ServerHelloMessage(AbstractBaseMessage):
     type = MessageType.server_hello
     encrypted = False
-    keys_required = {'key', 'm-cookie'}
 
     @classmethod
-    def create(cls, client, my_cookie):
+    def create(cls, server_public_key, server_cookie):
         # noinspection PyCallingNonCallable
         return cls({
-            'key': client.key.pk,
-            'm-cookie': my_cookie,
+            'type': cls.type.value,
+            'key': server_public_key,
+            'm-cookie': server_cookie,
         })
-
-    def prepare_payload(self, client):
-        self.check_payload(client, self.payload)
 
     @classmethod
     def check_payload(cls, client, payload):
-        cls._check_keys(cls.keys_required, payload)
+        """
+        MessageError
+        """
+        validate_public_key(payload.get('key'))
+        validate_cookie(payload.get('m-cookie'))
+
+
+class ClientHelloMessage(AbstractBaseMessage):
+    type = MessageType.client_hello
+    encrypted = False
+
+    @classmethod
+    def create(cls, client_public_key):
+        # noinspection PyCallingNonCallable
+        return cls({
+            'type': cls.type.value,
+            'key': client_public_key,
+        })
+
+    @classmethod
+    def check_payload(cls, client, payload):
+        """
+        MessageError
+        """
+        validate_public_key(payload.get('key'))
+
+
+class ClientAuthMessage(AbstractBaseMessage):
+    type = MessageType.client_auth
+    encrypted = True
+
+    @classmethod
+    def create(cls, server_cookie, client_cookie):
+        # noinspection PyCallingNonCallable
+        return cls({
+            'type': cls.type.value,
+            'y-cookie': server_cookie,
+            'm-cookie': client_cookie,
+        })
+
+    @classmethod
+    def check_payload(cls, client, payload):
+        """
+        MessageError
+        """
+        validate_cookie(payload.get('y-cookie'))
+        validate_cookie(payload.get('m-cookie'))
+
+
+class ServerAuthMessage(AbstractBaseMessage):
+    type = MessageType.server_auth
+    encrypted = True
+
+    @classmethod
+    def create(cls, client_cookie, responders):
+        # noinspection PyCallingNonCallable
+        return cls({
+            'type': cls.type.value,
+            'y-cookie': client_cookie,
+            'responders': responders,
+        })
+
+    @classmethod
+    def check_payload(cls, client, payload):
+        """
+        MessageError
+        """
+        validate_responder_list(payload.get('responders'))
+
+
+class NewResponderMessage(AbstractBaseMessage):
+    type = MessageType.new_responder
+    encrypted = True
+
+    @classmethod
+    def create(cls, responder_id):
+        # noinspection PyCallingNonCallable
+        return cls({
+            'type': cls.type.value,
+            'id': responder_id,
+        })
+
+    @classmethod
+    def check_payload(cls, client, payload):
+        """
+        MessageError
+        """
+        validate_responder(payload.get('id'))
+
+
+class DropResponderMessage(AbstractBaseMessage):
+    type = MessageType.drop_responder
+    encrypted = True
+
+    @classmethod
+    def create(cls, responder_id):
+        # noinspection PyCallingNonCallable
+        return cls({
+            'type': cls.type.value,
+            'id': responder_id,
+        })
+
+    @classmethod
+    def check_payload(cls, client, payload):
+        """
+        MessageError
+        """
+        validate_responder(payload.get('id'))
+
+
+class SendErrorMessage(AbstractBaseMessage):
+    type = MessageType.send_error
+    encrypted = True
+
+    @classmethod
+    def create(cls, message_hash):
+        # noinspection PyCallingNonCallable
+        return cls({
+            'type': cls.type.value,
+            'hash': message_hash,
+        })
+
+    @classmethod
+    def check_payload(cls, client, payload):
+        """
+        MessageError
+        """
+        validate_hash(payload.get('hash'))

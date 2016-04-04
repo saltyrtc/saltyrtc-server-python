@@ -1,7 +1,11 @@
 import enum
 
+from .exception import *
+
 
 KEY_LENGTH = 32
+COOKIE_LENGTH = 16
+HASH_LENGTH = 32
 
 
 class ReceiverType(enum.IntEnum):
@@ -26,3 +30,32 @@ class MessageType(enum.Enum):
     new_responder = 'new-responder'
     drop_responder = 'drop-responder'
     send_error = 'send-error'
+
+
+def validate_public_key(key):
+    if not isinstance(key, bytes) or len(key) != KEY_LENGTH:
+        raise MessageError('Invalid key')
+
+
+def validate_cookie(cookie):
+    if not isinstance(cookie, bytes) or len(cookie) != COOKIE_LENGTH:
+        raise MessageError('Invalid cookie')
+
+
+def validate_responder(responder):
+    if not isinstance(responder, int) or not 0x01 < responder <= 0xff:
+        raise MessageError('Invalid responder in responder list')
+
+
+def validate_responder_list(responders):
+    try:
+        iterator = iter(responders)
+    except TypeError as exc:
+        raise MessageError('Responder list is not iterable') from exc
+    for responder in iterator:
+        validate_responder(responder)
+
+
+def validate_hash(hash_):
+    if not isinstance(hash_, bytes) or len(hash_) != HASH_LENGTH:
+        raise MessageError('Invalid hash')
