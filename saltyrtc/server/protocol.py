@@ -231,7 +231,14 @@ class Protocol:
         path.log.debug('Handshake completed')
 
         # Keep alive and poll for messages
-        raise NotImplementedError
+        if client.type == ReceiverType.initiator:
+            path.log.debug('Starting runner for initiator {}', client)
+            yield from self._run_initiator(path, client)
+        elif client.type == ReceiverType.responder:
+            path.log.debug('Starting runner for responder: {}', client)
+            yield from self._run_responder(path, client)
+        else:
+            raise ValueError('Invalid receiver type: {}'.format(client.type))
 
     @asyncio.coroutine
     def _handshake(self, path, client):
@@ -329,6 +336,14 @@ class Protocol:
         message = ServerAuthMessage.create(client_cookie)
         path.log.debug('Sending server-auth without responder ids')
         yield from initiator.send(message)
+
+    @asyncio.coroutine
+    def _run_initiator(self, path, client):
+        raise NotImplementedError
+
+    @asyncio.coroutine
+    def _run_responder(self, path, client):
+        raise NotImplementedError
 
     def _get_path(self, initiator_key):
         if self._paths.get(initiator_key) is None:
