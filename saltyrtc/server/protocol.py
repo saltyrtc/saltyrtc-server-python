@@ -6,10 +6,14 @@ import websockets
 import libnacl
 import libnacl.public
 
-from saltyrtc.server import util
+from . import util
 from .exception import *
 from .common import KEY_LENGTH, COOKIE_LENGTH, ReceiverType, MessageType
-from .message import unpack, ServerHelloMessage
+from .message import (
+    unpack,
+    ServerHelloMessage, ServerAuthMessage,
+    NewResponderMessage,
+)
 
 
 class Path:
@@ -21,17 +25,25 @@ class Path:
         self._initiator_key = libnacl.public.PublicKey(initiator_key)
         self._slots = {id_: None for id_ in range(0x01, 0xff + 1)}
 
-    @property
-    def initiator(self):
+    def get_initiator(self):
         """Return the initiator's :class:`Client` instance or `None`."""
         return self._slots.get(0x01)
 
-    @initiator.setter
-    def initiator(self, initiator):
-        """Set the initiator's :class:`Client` instance."""
+    def set_initiator(self, initiator):
+        """
+        Set the initiator's :class:`Client` instance.
+
+        Arguments:
+            - `initiator`: A :class:`Client` instance.
+
+        Return the previously set initiator or `None`.
+        """
+        previous_initiator = self._slots.get(0x01)
         self._slots[0x01] = initiator
         # Update initiator's log name
         initiator.update_log_name(0x01)
+        # Return previous initiator
+        return previous_initiator
 
     def get_responder(self, id_):
         """
@@ -43,9 +55,15 @@ class Path:
         Raises :exc:`ValueError` if `id_` is not a valid responder
         receiver identifier.
         """
-        if not 0x02 < id_ <= 0xff:
+        if not 0x01 < id_ <= 0xff:
             raise ValueError('Invalid responder identifier')
         return self._slots.get(id_)
+
+    def get_responder_ids(self):
+        """
+        Return a list of responder's identifiers (slots).
+        """
+        return [id_ for id_ in self._slots.keys() if id_ > 0x01]
 
     def add_responder(self, responder):
         """
@@ -54,7 +72,7 @@ class Path:
         Arguments:
             - `client`: A :class:`Client` instance.
 
-        Raises :exc:`PathError` if no free slot exists on the path.
+        Raises :exc:`SlotsFullError` if no free slot exists on the path.
 
         Return the assigned slot identifier.
         """
@@ -63,8 +81,9 @@ class Path:
                 self._slots[id_] = responder
                 # Update responder's log name
                 responder.update_log_name(id_)
+                # Return assigned slot id
                 return id_
-        raise PathError('No free slots on path')
+        raise SlotsFullError('No free slots on path')
 
 
 class Client:
@@ -158,9 +177,11 @@ class Client:
 class Protocol:
     PATH_LENGTH = KEY_LENGTH * 2
 
-    def __init__(self, paths=None):
+    def __init__(self, paths=None, loop=None):
+        self._path_number_counter = 0
         self._log = util.get_logger('protocol')
         self._paths = {} if paths is None else paths
+        self._loop = asyncio.get_event_loop() if loop is None else loop
 
     @asyncio.coroutine
     def _new_connection(self, connection, path):
@@ -170,6 +191,7 @@ class Protocol:
         Disconnected
         MessageError
         MessageFlowError
+        SlotsFullError
         """
         # Extract public key from path
         initiator_key = path.strip('/')
@@ -187,20 +209,21 @@ class Protocol:
         path.log.info('New connection')
 
         # Create client instance
-        client = Client(connection, path.initiator_key)
+        client = Client(connection, path.number, initiator_key)
 
         # Do handshake
-        yield from self._do_handshake(client)
+        yield from self._handshake(path, client)
 
         # Keep alive and poll for messages
         raise NotImplementedError
 
     @asyncio.coroutine
-    def _do_handshake(self, client):
+    def _handshake(self, path, client):
         """
         Disconnected
         MessageError
         MessageFlowError
+        SlotsFullError
         """
         # Send server-hello
         server_cookie = os.urandom(COOKIE_LENGTH)
@@ -212,30 +235,81 @@ class Protocol:
         if message.type == MessageType.client_auth:
             # Client is the initiator
             client.type = ReceiverType.initiator
-            yield from self._continue_handshake_initiator(client, server_cookie)
+            yield from self._handshake_initiator(path, client, message, server_cookie)
         elif message.type == MessageType.client_hello:
             # Client is a responder
             client.type = ReceiverType.responder
-            yield from self._continue_handshake_responder(client, server_cookie)
+            yield from self._handshake_responder(path, client, message, server_cookie)
 
         else:
             error = "Expected 'client-hello' or 'client-auth', got '{}'"
             raise MessageFlowError(error.format(message.type))
 
     @asyncio.coroutine
-    def _continue_handshake_initiator(self, initiator, server_cookie):
-        # path.initiator = client  # TODO: Drop previous client
-        raise NotImplementedError
+    def _handshake_initiator(self, path, initiator, message, server_cookie):
+        """
+        Disconnected
+        MessageError
+        MessageFlowError
+        """
+        # Validate cookie
+        if not util.consteq(message.server_cookie, server_cookie):
+            raise MessageError('Cookies do not match')
+
+        # Authenticated
+        initiator.authenticated = True
+        previous_initiator = path.set_initiator(initiator)
+        # Drop previous initiator (we don't care about any exceptions)
+        self._loop.create_task(previous_initiator.close())
+
+        # Send server-auth
+        client_cookie = message.client_cookie
+        responder_ids = path.get_responder_ids()
+        message = ServerAuthMessage.create(client_cookie, responder_ids=responder_ids)
+        yield from initiator.send(message)
 
     @asyncio.coroutine
-    def _continue_handshake_responder(self, responder, server_cookie):
-        # path.add_responder(client)  # TODO: Drop previous client
-        # TODO: Send new-responder
-        raise NotImplementedError
+    def _handshake_responder(self, path, responder, message, server_cookie):
+        """
+        Disconnected
+        MessageError
+        MessageFlowError
+        SlotsFullError
+        """
+        # Set key on client
+        responder.set_client_key(message.client_public_key)
+
+        # Receive client-auth
+        message = yield from responder.receive()
+        if message.type != MessageType.client_auth:
+            error = "Expected 'client-auth', got '{}'"
+            raise MessageFlowError(error.format(message.type))
+
+        # Validate cookie
+        if not util.consteq(message.server_cookie, server_cookie):
+            raise MessageError('Cookies do not match')
+
+        # Authenticated
+        responder.authenticated = True
+        id_ = path.add_responder(responder)
+        client_cookie = message.client_cookie
+
+        # Send new-responder message if initiator is present
+        initiator = path.get_initiator()
+        if initiator is not None:
+            message = NewResponderMessage.create(id_)
+            # TODO: Handle exceptions?
+            self._loop.create_task(initiator.send(message))
+
+        # Send server-auth
+        responder_ids = path.get_responder_ids()
+        message = ServerAuthMessage.create(client_cookie, responder_ids=responder_ids)
+        yield from initiator.send(message)
 
     def _get_path(self, initiator_key):
         if self._paths.get(initiator_key) is None:
-            self._paths[initiator_key] = Path(initiator_key)
+            self._path_number_counter += 1
+            self._paths[initiator_key] = Path(self._path_number_counter, initiator_key)
         return self._paths[initiator_key]
 
     def _check_receiver_type(self, message, receiver_type):

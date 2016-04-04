@@ -5,11 +5,13 @@ Server.
 from contextlib import contextmanager
 
 from saltyrtc.server import config
+from streql import equals as _equals
 
 __all__ = (
     'Logger',
     'get_logger',
     'get_logging_handler',
+    'consteq',
 )
 
 
@@ -88,7 +90,7 @@ def get_logger(name=None):
     Arguments:
         - `name`: The name of a specific sub-logger.
     """
-    base_name = 'saltyrtc.server'
+    base_name = 'saltyrtc'
     name = base_name if name is None else '.'.join((base_name, name))
     return Logger(name, level=_get_log_level())
 
@@ -98,3 +100,14 @@ def get_logging_handler():
     Return the logging handler.
     """
     return _get_logging_handler()
+
+
+def consteq(left, right):
+    """
+    Check two strings/bytes for equality. This is functionally
+    equivalent to ``left == right``, but attempts to take constant time
+    relative to the size of the right hand input.
+
+    See :func:`streql.equals` for details.
+    """
+    return _equals(left, right)

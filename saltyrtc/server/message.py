@@ -2,12 +2,13 @@ import abc
 import struct
 import io
 
+# noinspection PyPackageRequirements
 import umsgpack
 
 from .exception import *
 from .common import (
     ReceiverType, MessageType,
-    validate_public_key, validate_cookie, validate_responder, validate_responder_list,
+    validate_public_key, validate_cookie, validate_responder_id, validate_responder_ids,
     validate_hash,
 )
 
@@ -51,6 +52,7 @@ class AbstractMessage(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
 
+# noinspection PyAbstractClass
 class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
     type = None
     encrypted = None
@@ -127,7 +129,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         # or just return a raw message to be sent to another client
         payload = data[1:]
         if receiver_type == ReceiverType.server:
-            if not client.authenticated:
+            if not client.authenticated and client.type is None:
                 payload = None
 
                 # Try client-hello (unencrypted)
@@ -146,7 +148,6 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
                 if payload is None:
                     message = 'Expected either client-hello or client-auth, got neither'
                     raise MessageError(message)
-
             else:
                 # Decrypt and unpack payload
                 payload = cls._unpack_payload(cls._decrypt_payload(client, payload))
@@ -260,6 +261,14 @@ class ServerHelloMessage(AbstractBaseMessage):
         validate_public_key(payload.get('key'))
         validate_cookie(payload.get('m-cookie'))
 
+    @property
+    def server_public_key(self):
+        return self.payload['key']
+
+    @property
+    def server_cookie(self):
+        return self.payload['m-cookie']
+
 
 class ClientHelloMessage(AbstractBaseMessage):
     type = MessageType.client_hello
@@ -279,6 +288,10 @@ class ClientHelloMessage(AbstractBaseMessage):
         MessageError
         """
         validate_public_key(payload.get('key'))
+
+    @property
+    def client_public_key(self):
+        return self.payload['key']
 
 
 class ClientAuthMessage(AbstractBaseMessage):
@@ -302,18 +315,26 @@ class ClientAuthMessage(AbstractBaseMessage):
         validate_cookie(payload.get('y-cookie'))
         validate_cookie(payload.get('m-cookie'))
 
+    @property
+    def server_cookie(self):
+        return self.payload['y-cookie']
+
+    @property
+    def client_cookie(self):
+        return self.payload['m-cookie']
+
 
 class ServerAuthMessage(AbstractBaseMessage):
     type = MessageType.server_auth
     encrypted = True
 
     @classmethod
-    def create(cls, client_cookie, responders):
+    def create(cls, client_cookie, responder_ids=None):
         # noinspection PyCallingNonCallable
         return cls({
             'type': cls.type.value,
             'y-cookie': client_cookie,
-            'responders': responders,
+            'responders': responder_ids,
         })
 
     @classmethod
@@ -321,7 +342,15 @@ class ServerAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_responder_list(payload.get('responders'))
+        validate_responder_ids(payload.get('responders'))
+
+    @property
+    def client_cookie(self):
+        return self.payload['y-cookie']
+
+    @property
+    def responder_ids(self):
+        return self.payload['responders']
 
 
 class NewResponderMessage(AbstractBaseMessage):
@@ -341,7 +370,11 @@ class NewResponderMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_responder(payload.get('id'))
+        validate_responder_id(payload.get('id'))
+
+    @property
+    def responder_id(self):
+        return self.payload['id']
 
 
 class DropResponderMessage(AbstractBaseMessage):
@@ -361,7 +394,11 @@ class DropResponderMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_responder(payload.get('id'))
+        validate_responder_id(payload.get('id'))
+
+    @property
+    def responder_id(self):
+        return self.payload['id']
 
 
 class SendErrorMessage(AbstractBaseMessage):
@@ -382,3 +419,7 @@ class SendErrorMessage(AbstractBaseMessage):
         MessageError
         """
         validate_hash(payload.get('hash'))
+
+    @property
+    def message_hash(self):
+        return self.payload['hash']

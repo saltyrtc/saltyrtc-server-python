@@ -42,18 +42,18 @@ def validate_cookie(cookie):
         raise MessageError('Invalid cookie')
 
 
-def validate_responder(responder):
+def validate_responder_id(responder):
     if not isinstance(responder, int) or not 0x01 < responder <= 0xff:
         raise MessageError('Invalid responder in responder list')
 
 
-def validate_responder_list(responders):
+def validate_responder_ids(responders):
     try:
         iterator = iter(responders)
     except TypeError as exc:
         raise MessageError('Responder list is not iterable') from exc
     for responder in iterator:
-        validate_responder(responder)
+        validate_responder_id(responder)
 
 
 def validate_hash(hash_):

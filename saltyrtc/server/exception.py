@@ -4,6 +4,7 @@ Contains all exceptions used for the SaltyRTC server.
 __all__ = (
     'SignalingError',
     'PathError',
+    'SlotsFullError',
     'RoleError',
     'MessageFlowError',
     'PingTimeoutError',
@@ -22,6 +23,12 @@ class SignalingError(Exception):
 class PathError(SignalingError):
     """
     TODO: Describe
+    """
+
+
+class SlotsFullError(SignalingError):
+    """
+    No free slot for a responder.
     """
 
 

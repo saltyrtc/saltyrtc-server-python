@@ -23,6 +23,7 @@ setup(
     packages=find_packages(),
     namespace_packages=['saltyrtc'],
     install_requires=[
+        'streql>=3.0.2',
         'libnacl>=1.4.4',
         'click>=6.3',
         'logbook>=0.12.5',
