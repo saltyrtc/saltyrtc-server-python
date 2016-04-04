@@ -8,11 +8,15 @@ import libnacl.public
 
 from . import util
 from .exception import *
-from .common import KEY_LENGTH, COOKIE_LENGTH, ReceiverType, MessageType
+from .common import (
+    KEY_LENGTH, COOKIE_LENGTH, RELAY_TIMEOUT, KEEP_ALIVE_TIMEOUT, KEEP_ALIVE_INTERVAL,
+    ReceiverType, MessageType,
+)
 from .message import (
-    unpack,
+    unpack, AbstractMessage,
     ServerHelloMessage, ServerAuthMessage,
-    NewResponderMessage,
+    NewResponderMessage, DropResponderMessage, SendErrorMessage,
+    RawMessage,
 )
 
 
@@ -155,9 +159,12 @@ class Client:
         """
         Disconnected
         """
-        # Pack message
-        self._log.debug('Packing message')
-        data = message.pack(self)
+        # Pack if not packed
+        if isinstance(message, AbstractMessage):
+            self._log.debug('Packing message')
+            data = message.pack(self)
+        else:
+            data = message
 
         # Send data
         self._log.debug('Sending message')
@@ -173,7 +180,6 @@ class Client:
         Disconnected
         """
         # Receive data
-        self._log.debug('Waiting for message')
         try:
             data = yield from self._connection.recv()
         except websockets.ConnectionClosed as exc:
@@ -185,20 +191,38 @@ class Client:
         self._log.debug('Unpacking message')
         return unpack(self, data)
 
+    @asyncio.coroutine
+    def ping(self):
+        """
+        Disconnected
+        """
+        self._log.debug('Sending ping')
+        try:
+            yield from self._connection.ping()
+        except websockets.ConnectionClosed as exc:
+            self._log.debug('Connection closed while pinging')
+            raise Disconnected() from exc
+
 
 class Protocol:
     PATH_LENGTH = KEY_LENGTH * 2
 
     def __init__(self, paths=None, loop=None):
-        self._path_number = 0
         self._log = util.get_logger('protocol')
-        self._paths = {} if paths is None else paths
         self._loop = asyncio.get_event_loop() if loop is None else loop
+
+        # Paths dict
+        self._path_number = 0
+        self._paths = {} if paths is None else paths
+
+        # Set to None when closed
+        self._closed_future = asyncio.Future(loop=self._loop)
 
     @asyncio.coroutine
     def _new_connection(self, connection, path):
         # TODO: As context manager? _clean_path on disconnect
         """
+        SignalingError
         PathError
         Disconnected
         MessageError
@@ -231,14 +255,33 @@ class Protocol:
         path.log.debug('Handshake completed')
 
         # Keep alive and poll for messages
+        tasks = []
         if client.type == ReceiverType.initiator:
             path.log.debug('Starting runner for initiator {}', client)
-            yield from self._run_initiator(path, client)
+            tasks.append(self._run_initiator(path, client))
         elif client.type == ReceiverType.responder:
-            path.log.debug('Starting runner for responder: {}', client)
-            yield from self._run_responder(path, client)
+            path.log.debug('Starting runner for responder {}', client)
+            tasks.append(self._run_responder(path, client))
         else:
             raise ValueError('Invalid receiver type: {}'.format(client.type))
+        path.log.debug('Starting keep-alive task for client {}', client)
+        tasks.append(self._keep_alive(path, client))
+
+        # Wait until complete
+        tasks = [self._loop.create_task(coroutine) for coroutine in tasks]
+        done, pending = yield from asyncio.wait(
+            tasks, loop=self._loop, return_when=asyncio.FIRST_EXCEPTION)
+        for task in done:
+            exc = task.exception()
+            if exc is not None:
+                # Cancel pending tasks
+                for pending_task in pending:
+                    self._log.debug('Cancelling task {}', task)
+                    pending_task.cancel()
+                raise exc
+            else:
+                self._log.error('Task {} returned unexpectedly', task)
+                raise SignalingError('Task returned too early')
 
     @asyncio.coroutine
     def _handshake(self, path, client):
@@ -338,12 +381,98 @@ class Protocol:
         yield from initiator.send(message)
 
     @asyncio.coroutine
-    def _run_initiator(self, path, client):
-        raise NotImplementedError
+    def _keep_alive(self, path, client):
+        """
+        Disconnected
+        PingTimeoutError
+        """
+        while True:
+            path.log.debug('Ping to {}', client)
+            try:
+                # Send ping
+                yield from asyncio.wait_for(
+                    client.ping(), KEEP_ALIVE_TIMEOUT, loop=self._loop)
+            except asyncio.TimeoutError:
+                raise PingTimeoutError(client)
+            else:
+                path.log.debug('Pong from {}', client)
+
+            # Wait
+            yield from asyncio.sleep(KEEP_ALIVE_INTERVAL, loop=self._loop)
 
     @asyncio.coroutine
-    def _run_responder(self, path, client):
-        raise NotImplementedError
+    def _run_initiator(self, path, initiator):
+        while not self._closed_future.done():
+            # Receive relay message or drop-responder
+            message = yield from initiator.receive()
+
+            # Relay
+            if isinstance(message, RawMessage):
+                # Lookup responder
+                responder = path.get_responder(message.receiver)
+                # Send to responder
+                coroutine = self._relay_message(path, initiator, responder, message)
+                self._loop.create_task(coroutine)
+            # Drop-responder
+            elif message.type == MessageType.drop_responder:
+                # Lookup responder
+                responder = path.get_responder(message.responder_id)
+                if responder is not None:
+                    # Drop previous initiator (we don't care about any exceptions)
+                    path.log.debug('Dropping responder: {}', responder)
+                    self._loop.create_task(responder.close())
+                else:
+                    path.log.debug('Responder already dropped, nothing to do')
+            else:
+                error = "Expected relay message or 'drop-responder', got '{}'"
+                raise MessageFlowError(error.format(message.type))
+
+    @asyncio.coroutine
+    def _run_responder(self, path, responder):
+        while not self._closed_future.done():
+            # Receive relay message
+            message = yield from responder.receive()
+
+            # Relay
+            if isinstance(message, RawMessage):
+                # Lookup initiator
+                initiator = path.get_initiator()
+                # Send to initiator
+                coroutine = self._relay_message(path, responder, initiator, message)
+                self._loop.create_task(coroutine)
+            else:
+                error = "Expected relay message, got '{}'"
+                raise MessageFlowError(error.format(message.type))
+
+    @asyncio.coroutine
+    def _relay_message(self, path, sender, receiver, message):
+        # Prepare message
+        path.log.debug('Packing relay message')
+        message_data = message.pack(sender)
+
+        @asyncio.coroutine
+        def send_error_message():
+            path.log.debug('Relaying failed, reporting send-error to {}', sender)
+            error = SendErrorMessage.create(libnacl.crypto_hash_sha256(message_data))
+            # TODO: Handle exceptions, what if sender is gone?
+            yield from sender.send(error)
+
+        # Receiver not set? Send send-error to initiator
+        if receiver is None:
+            return (yield from send_error_message())
+
+        path.log.debug('Sending relay message from {} to {}', sender, receiver)
+        try:
+            # Relay message to receiver
+            future = receiver.send(message)
+            yield from asyncio.wait_for(future, RELAY_TIMEOUT, loop=self._loop)
+        except asyncio.TimeoutError:
+            # Timed out or some other error, Send send-error to original sender
+            path.log.debug('Sending relayed message timed out')
+            yield from send_error_message()
+        except Disconnected:
+            path.log.debug('Receiver disconnected')
+            yield from send_error_message()
 
     def _get_path(self, initiator_key):
         if self._paths.get(initiator_key) is None:

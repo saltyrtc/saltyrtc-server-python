@@ -6,7 +6,9 @@ from .exception import *
 KEY_LENGTH = 32
 COOKIE_LENGTH = 16
 HASH_LENGTH = 32
-KEEP_ALIVE_INTERVAL = 60.0
+RELAY_TIMEOUT = 30.0  # TODO: Sane?
+KEEP_ALIVE_TIMEOUT = 30.0  # TODO: Sane?
+KEEP_ALIVE_INTERVAL = 60.0  # TODO: Sane?
 
 
 class ReceiverType(enum.IntEnum):

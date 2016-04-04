@@ -32,14 +32,6 @@ class SlotsFullError(SignalingError):
     """
 
 
-class RoleError(SignalingError):
-    """
-    TODO: Describe
-    """
-    def __str__(self):
-        return 'Unknown role {}'.format(*self.args)
-
-
 class MessageFlowError(SignalingError):
     """
     TODO: Describe
@@ -50,6 +42,9 @@ class PingTimeoutError(SignalingError):
     """
     TODO: Describe
     """
+    def __init__(self, client):
+        self.client = client
+
     def __str__(self):
         return 'Ping to {} timed out'.format(*self.args)
 

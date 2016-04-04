@@ -156,7 +156,8 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
             if client.p2p_allowed(receiver_type):
                 return RawMessage(receiver, receiver_type, payload)
             else:
-                raise MessageFlowError('Currently not allowed to dispatch P2P messages')
+                error = 'Not allowed to relay messages to {}'
+                raise MessageFlowError(error.format(receiver_type))
 
         # Unpack type
         type_ = payload.get('type')
