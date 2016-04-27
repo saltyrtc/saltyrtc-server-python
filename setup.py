@@ -45,7 +45,7 @@ setup(
     long_description=long_description,
     license='MIT License',
     keywords='webrtc ortc signalling signaling websocket nacl',
-    url='http://www.lgrahl.de/',
+    url='https://www.lgrahl.de/',
     classifiers=[
         'Development Status :: 4 - Beta',
         'Environment :: Console',

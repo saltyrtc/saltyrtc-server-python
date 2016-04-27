@@ -4,7 +4,6 @@ Server.
 """
 from contextlib import contextmanager
 
-from saltyrtc.server import config
 from streql import equals as _equals
 
 __all__ = (
