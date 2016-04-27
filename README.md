@@ -42,7 +42,7 @@ If you are using a virtual environment, activate it first.
 Install the module by running:
 
 ```
-$ pip install git+https://github.com/lgrahl/saltyrtc-server-python.git
+$ pip install git+https://github.com/saltyrtc/saltyrtc-server-python.git
 ```
 
 The dependency ``libnacl`` will be installed automatically. However, you may need to
