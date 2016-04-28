@@ -251,7 +251,7 @@ class ServerHelloMessage(AbstractBaseMessage):
         return cls({
             'type': cls.type.value,
             'key': server_public_key,
-            'm-cookie': server_cookie,
+            'my-cookie': server_cookie,
         })
 
     @classmethod
@@ -260,7 +260,7 @@ class ServerHelloMessage(AbstractBaseMessage):
         MessageError
         """
         validate_public_key(payload.get('key'))
-        validate_cookie(payload.get('m-cookie'))
+        validate_cookie(payload.get('my-cookie'))
 
     @property
     def server_public_key(self):
@@ -268,7 +268,7 @@ class ServerHelloMessage(AbstractBaseMessage):
 
     @property
     def server_cookie(self):
-        return self.payload['m-cookie']
+        return self.payload['my-cookie']
 
 
 class ClientHelloMessage(AbstractBaseMessage):
@@ -304,8 +304,8 @@ class ClientAuthMessage(AbstractBaseMessage):
         # noinspection PyCallingNonCallable
         return cls({
             'type': cls.type.value,
-            'y-cookie': server_cookie,
-            'm-cookie': client_cookie,
+            'your-cookie': server_cookie,
+            'my-cookie': client_cookie,
         })
 
     @classmethod
@@ -313,16 +313,16 @@ class ClientAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_cookie(payload.get('y-cookie'))
-        validate_cookie(payload.get('m-cookie'))
+        validate_cookie(payload.get('your-cookie'))
+        validate_cookie(payload.get('my-cookie'))
 
     @property
     def server_cookie(self):
-        return self.payload['y-cookie']
+        return self.payload['your-cookie']
 
     @property
     def client_cookie(self):
-        return self.payload['m-cookie']
+        return self.payload['my-cookie']
 
 
 class ServerAuthMessage(AbstractBaseMessage):
@@ -334,7 +334,7 @@ class ServerAuthMessage(AbstractBaseMessage):
         # noinspection PyCallingNonCallable
         return cls({
             'type': cls.type.value,
-            'y-cookie': client_cookie,
+            'your-cookie': client_cookie,
             'responders': responder_ids,
         })
 
@@ -347,7 +347,7 @@ class ServerAuthMessage(AbstractBaseMessage):
 
     @property
     def client_cookie(self):
-        return self.payload['y-cookie']
+        return self.payload['your-cookie']
 
     @property
     def responder_ids(self):
