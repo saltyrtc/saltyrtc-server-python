@@ -335,7 +335,7 @@ class ServerAuthMessage(AbstractBaseMessage):
         return cls({
             'type': cls.type.value,
             'your-cookie': client_cookie,
-            'responders': responder_ids,
+            'responders': [] if responder_ids is None else responder_ids,
         })
 
     @classmethod
