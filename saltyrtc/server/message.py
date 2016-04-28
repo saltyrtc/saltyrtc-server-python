@@ -331,19 +331,23 @@ class ServerAuthMessage(AbstractBaseMessage):
 
     @classmethod
     def create(cls, client_cookie, responder_ids=None):
-        # noinspection PyCallingNonCallable
-        return cls({
+        payload = {
             'type': cls.type.value,
             'your-cookie': client_cookie,
-            'responders': [] if responder_ids is None else responder_ids,
-        })
+        }
+        if responder_ids is not None:
+            payload['responders'] = responder_ids
+        # noinspection PyCallingNonCallable
+        return cls(payload)
 
     @classmethod
     def check_payload(cls, client, payload):
         """
         MessageError
         """
-        validate_responder_ids(payload.get('responders'))
+        responders = payload.get('responders')
+        if responders is not None:
+            validate_responder_ids(responders)
 
     @property
     def client_cookie(self):
@@ -351,6 +355,9 @@ class ServerAuthMessage(AbstractBaseMessage):
 
     @property
     def responder_ids(self):
+        """
+        KeyError in case the message is directed at a responder
+        """
         return self.payload['responders']
 
 
