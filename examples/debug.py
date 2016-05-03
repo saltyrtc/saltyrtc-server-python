@@ -4,24 +4,7 @@ import asyncio
 import logbook
 import logbook.more
 
-from saltyrtc.server import util, start_server
-
-
-class ColorizedStdErrHandler(logbook.more.ColorizedStderrHandler):
-    """
-    Adds a color to the NOTICE level to be able to distinguish
-    NOTICE and DEBUG levels.
-    """
-    def get_color(self, record):
-        """Returns the color for this record."""
-        if record.level >= logbook.ERROR:
-            return 'red'
-        elif record.level >= logbook.NOTICE:
-            return 'yellow'
-        elif record.level >= logbook.INFO:
-            return 'blue'
-        else:
-            return 'lightgray'
+import saltyrtc
 
 
 def main():
@@ -30,13 +13,15 @@ def main():
     """
     loop = asyncio.get_event_loop()
 
+    # Create SSL context
+    ssl_context = saltyrtc.util.create_ssl_context(
+        certfile='PATH_TO_SSL_CERTIFICATE',
+        keyfile='PATH_TO_SSL_PRIVATE_KEY',
+    )
+
     # Start server
-    server = loop.run_until_complete(start_server(
-        certfile='PATH_TO_YOUR_SSL_CERTIFICATE',
-        keyfile='PATH_TO_YOUR_PRIVATE_KEY',
-        host='127.0.0.1',
-        port=8765,
-    ))
+    coroutine = saltyrtc.serve(ssl_context, port=8765)
+    server = loop.run_until_complete(coroutine)
 
     # Wait until Ctrl+C has been pressed
     try:
@@ -55,12 +40,12 @@ if __name__ == '__main__':
     os.environ['PYTHONASYNCIODEBUG'] = '1'
 
     # Enable logging
-    util.enable_logging(level=logbook.TRACE, redirect_loggers={
+    saltyrtc.util.enable_logging(level=logbook.TRACE, redirect_loggers={
         'asyncio': logbook.DEBUG,
         'websockets': logbook.DEBUG,
     })
 
     # Run 'main'
-    logging_handler = ColorizedStdErrHandler()
+    logging_handler = logbook.more.ColorizedStderrHandler()
     with logging_handler.applicationbound():
         main()
