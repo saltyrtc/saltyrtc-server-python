@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 
 
 def get_version():
-    path = os.path.join(os.path.dirname(__file__), 'saltyrtc/server/__init__.py')
+    path = os.path.join(os.path.dirname(__file__), 'saltyrtc/__init__.py')
     with open(path) as file:
         for line in file:
             if line.startswith('__version__'):
@@ -18,10 +18,9 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 long_description = open(os.path.join(os.path.dirname(__file__), 'README.md')).read()
 
 setup(
-    name='saltyrtc.server',
+    name='saltyrtc',
     version=get_version(),
     packages=find_packages(),
-    namespace_packages=['saltyrtc'],
     install_requires=[
         'streql>=3.0.2',
         'libnacl>=1.4.4',
@@ -40,10 +39,10 @@ setup(
     # PyPI metadata
     author='Lennart Grahl',
     author_email='lennart.grahl@gmail.com',
-    description='A SaltyRTC compliant signalling server.',
+    description='A SaltyRTC compliant signalling client and server.',
     long_description=long_description,
     license='MIT License',
-    keywords='webrtc ortc signalling signaling websocket nacl',
+    keywords='webrtc ortc signalling signaling websocket websockets nacl',
     url='https://www.lgrahl.de/',
     classifiers=[
         'Development Status :: 4 - Beta',
