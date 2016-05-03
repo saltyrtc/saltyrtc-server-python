@@ -28,6 +28,9 @@ To deactivate the virtual environment, just run:
 
     $ deactivate
 
+If you want easier handling of your virtualenvs, you might also want to take a
+look at [virtualenvwrapper](https://virtualenvwrapper.readthedocs.io/).
+
 ## Installation
 
 If you are using a virtual environment, activate it first.
