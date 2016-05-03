@@ -12,6 +12,20 @@ from .common import (
     validate_hash,
 )
 
+__all__ = (
+    'unpack',
+    'AbstractMessage',
+    'AbstractBaseMessage',
+    'RawMessage',
+    'ServerHelloMessage',
+    'ClientHelloMessage',
+    'ClientAuthMessage',
+    'ServerAuthMessage',
+    'NewResponderMessage',
+    'DropResponderMessage',
+    'SendErrorMessage',
+)
+
 
 def unpack(client, data):
     """

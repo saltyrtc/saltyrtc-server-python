@@ -5,7 +5,6 @@ __all__ = (
     'SignalingError',
     'PathError',
     'SlotsFullError',
-    'RoleError',
     'MessageFlowError',
     'PingTimeoutError',
     'Disconnected',

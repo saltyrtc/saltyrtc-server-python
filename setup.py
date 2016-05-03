@@ -26,7 +26,6 @@ setup(
         'streql>=3.0.2',
         'libnacl>=1.4.4',
         'click>=6.3',
-        'logbook>=0.12.5',
         'websockets>=3.0',
         'u-msgpack-python>=2.1',
         'asyncio>=3.4.3',

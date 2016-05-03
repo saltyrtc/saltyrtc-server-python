@@ -56,7 +56,7 @@ CERTFILE if not present.
 def serve(**arguments):
     certfile = arguments.get('cert')
     keyfile = arguments.get('keyfile', None)
-    yield from server.serve(
+    yield from server.start_server(
         certfile=certfile, keyfile=keyfile
     )
 

@@ -94,7 +94,7 @@ def client_key():
 @pytest.fixture(scope='module')
 def server(request, event_loop, port):
     # Set up server
-    coroutine = saltyrtc.server.serve(
+    coroutine = saltyrtc.server.start_server(
         certfile=pytest.saltyrtc.cert, host=pytest.saltyrtc.ip, port=port,
         loop=event_loop
     )
