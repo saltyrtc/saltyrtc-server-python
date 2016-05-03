@@ -212,14 +212,14 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
     def _pack_payload(self):
         try:
-            return umsgpack.pack(self.payload)
+            return umsgpack.packb(self.payload)
         except umsgpack.PackException as exc:
             raise MessageError('Could not pack msgpack payload') from exc
 
     @classmethod
     def _unpack_payload(cls, payload):
         try:
-            return umsgpack.unpack(io.BytesIO(payload))
+            return umsgpack.unpackb(payload)
         except umsgpack.UnpackException as exc:
             raise MessageError('Could not unpack msgpack payload') from exc
 

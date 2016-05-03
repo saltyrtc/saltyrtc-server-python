@@ -9,7 +9,7 @@ import websockets
 import umsgpack
 import libnacl.public
 
-import saltyrtc.server
+import saltyrtc
 
 from contextlib import closing
 
@@ -93,25 +93,26 @@ def client_key():
 
 @pytest.fixture(scope='module')
 def server(request, event_loop, port):
-    # Set up server
-    coroutine = saltyrtc.server.start_server(
-        certfile=pytest.saltyrtc.cert, host=pytest.saltyrtc.ip, port=port,
+    """
+    Return a :class:`saltyrtc.Server` instance.
+    """
+    coroutine = saltyrtc.serve(
+        saltyrtc.util.create_ssl_context(pytest.saltyrtc.cert),
+        host=pytest.saltyrtc.ip,
+        port=port,
         loop=event_loop
     )
-    task = event_loop.create_task(coroutine)
-    event_loop.run_until_complete(task)
-    server_ = task.result()
+    server_ = event_loop.run_until_complete(coroutine)
 
     def fin():
-        # TODO: Blocks for some reason
-        # event_loop.run_until_complete(server_.wait_closed())
-        pass
+        server_.close()
+        event_loop.run_until_complete(server_.wait_closed())
 
     request.addfinalizer(fin)
 
 
 @pytest.fixture(scope='module')
-def client_factory(client_key, url, event_loop, server):
+def ws_client_factory(client_key, url, event_loop, server):
     """
     Return a simplified :class:`websockets.client.connect` wrapper
     where no parameters are required.
@@ -126,7 +127,8 @@ def client_factory(client_key, url, event_loop, server):
     return functools.partial(
         websockets.connect,
         '{}/{}'.format(url, key_path(client_key)),
-        ssl=ssl_context, loop=event_loop,
+        ssl=ssl_context,
+        loop=event_loop,
     )
 
 

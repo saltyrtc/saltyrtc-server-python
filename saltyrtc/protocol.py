@@ -32,15 +32,17 @@ class Path:
         return all((client is None for client in self._slots.values()))
 
     def get_initiator(self):
-        """Return the initiator's :class:`Client` instance or `None`."""
+        """
+        Return the initiator's :class:`PathClient` instance or `None`.
+        """
         return self._slots.get(0x01)
 
     def set_initiator(self, initiator):
         """
-        Set the initiator's :class:`Client` instance.
+        Set the initiator's :class:`PathClient` instance.
 
         Arguments:
-            - `initiator`: A :class:`Client` instance.
+            - `initiator`: A :class:`PathClient` instance.
 
         Return the previously set initiator or `None`.
         """
@@ -53,7 +55,7 @@ class Path:
 
     def get_responder(self, id_):
         """
-        Return a responder's :class:`Client` instance or `None`.
+        Return a responder's :class:`PathClient` instance or `None`.
 
         Arguments:
             - `id_`: The receiver identifier of the responder.
@@ -73,10 +75,10 @@ class Path:
 
     def add_responder(self, responder):
         """
-        Set a responder's :class:`Client` instance.
+        Set a responder's :class:`PathClient` instance.
 
         Arguments:
-            - `client`: A :class:`Client` instance.
+            - `client`: A :class:`PathClient` instance.
 
         Raises :exc:`SlotsFullError` if no free slot exists on the path.
 
@@ -200,6 +202,19 @@ class PathClient:
         except websockets.ConnectionClosed as exc:
             self._log.debug('Connection closed while pinging')
             raise Disconnected() from exc
+
+    @asyncio.coroutine
+    def close(self, exc=None):
+        if exc is not None:
+            if isinstance(exc, SignalingError):
+                code = 1002  # Protocol error
+            else:
+                code = 1011  # Internal Error
+        else:
+            code = 1000  # Normal
+
+        # Note: We are not sending a reason for security reasons.
+        yield from self._connection.close(code=code)
 
 
 class Protocol:

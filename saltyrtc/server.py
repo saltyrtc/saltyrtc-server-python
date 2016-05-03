@@ -56,7 +56,6 @@ def serve(ssl_context, paths=None, host=None, port=8765, loop=None):
 
 
     """
-
     if loop is None:
         loop = asyncio.get_event_loop()
 
@@ -108,7 +107,7 @@ class Server(Protocol):
             return
 
         # Set closing future
-        self._log.debug('Closing')
+        self._log.info('Closing')
         self._closing_future.set_result(None)
 
         # Clean up task
@@ -124,24 +123,37 @@ class Server(Protocol):
         yield from self.ws_server.wait_closed()
 
         # Set closed
-        self._log.debug('Closed')
+        self._log.info('Closed')
         self._closed_future.set_result(None)
 
     @asyncio.coroutine
-    def serve_client(self, connection, path):
-        # TODO: As context manager? _clean_path on disconnect
-        """
-        SignalingError
-        PathError
-        Disconnected
-        MessageError
-        MessageFlowError
-        SlotsFullError
-        """
-        self._log.debug('New connection')
+    def serve_client(self, connection, ws_path):
+        self._log.debug('New connection on WS path {}', ws_path)
 
+        # Get path and client instance as early as possible
+        try:
+            path, client = self._get_path_client(connection, ws_path)
+        except PathError:
+            yield from connection.close(code=1002)  # Protocol error
+            return
+        path.log.debug('Worker started')
+
+        # Handle client until disconnected or an exception occurred
+        try:
+            yield from self._handle_client(path, client)
+        except Disconnected:
+            path.log.notice('Connection closed by remote')
+        except SignalingError as exc:
+            path.log.warning('Closing due to protocol error: {}', str(exc))
+            yield from client.close(exc=exc)
+        except Exception as exc:
+            path.log.exception('Closing due to exception:', exc)
+            yield from client.close(exc=exc)
+        path.log.debug('Worker stopped')
+
+    def _get_path_client(self, connection, ws_path):
         # Extract public key from path
-        initiator_key = path.strip('/')
+        initiator_key = ws_path.strip('/')
 
         # Validate key
         if len(initiator_key) != self.PATH_LENGTH:
@@ -153,11 +165,23 @@ class Server(Protocol):
 
         # Get path instance
         path = self._get_path(initiator_key)
-        path.log.debug('New connection')
 
         # Create client instance
         client = PathClient(connection, path.number, initiator_key)
 
+        # Return path and client
+        return path, client
+
+    @asyncio.coroutine
+    def _handle_client(self, path, client):
+        """
+        SignalingError
+        PathError
+        Disconnected
+        MessageError
+        MessageFlowError
+        SlotsFullError
+        """
         # Do handshake
         path.log.debug('Starting handshake')
         yield from self._handshake(path, client)
@@ -167,10 +191,10 @@ class Server(Protocol):
         tasks = []
         if client.type == ReceiverType.initiator:
             path.log.debug('Starting runner for initiator {}', client)
-            tasks.append(self._run_initiator(path, client))
+            tasks.append(self._handle_initiator(path, client))
         elif client.type == ReceiverType.responder:
             path.log.debug('Starting runner for responder {}', client)
-            tasks.append(self._run_responder(path, client))
+            tasks.append(self._handle_responder(path, client))
         else:
             raise ValueError('Invalid receiver type: {}'.format(client.type))
         path.log.debug('Starting keep-alive task for client {}', client)
@@ -185,11 +209,11 @@ class Server(Protocol):
             if exc is not None:
                 # Cancel pending tasks
                 for pending_task in pending:
-                    self._log.debug('Cancelling task {}', task)
+                    path.log.debug('Cancelling task {}', task)
                     pending_task.cancel()
                 raise exc
             else:
-                self._log.error('Task {} returned unexpectedly', task)
+                path.log.error('Task {} returned unexpectedly', task)
                 raise SignalingError('Task returned too early')
 
     @asyncio.coroutine
@@ -310,7 +334,7 @@ class Server(Protocol):
             yield from asyncio.sleep(KEEP_ALIVE_INTERVAL, loop=self._loop)
 
     @asyncio.coroutine
-    def _run_initiator(self, path, initiator):
+    def _handle_initiator(self, path, initiator):
         while not self._closing_future.done():
             # Receive relay message or drop-responder
             message = yield from initiator.receive()
@@ -337,7 +361,7 @@ class Server(Protocol):
                 raise MessageFlowError(error.format(message.type))
 
     @asyncio.coroutine
-    def _run_responder(self, path, responder):
+    def _handle_responder(self, path, responder):
         while not self._closing_future.done():
             # Receive relay message
             message = yield from responder.receive()
