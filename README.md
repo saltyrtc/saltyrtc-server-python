@@ -10,30 +10,26 @@ On machines where Python 3 is not the default Python runtime, you should use
 
 ## Prerequisites
 
-```
-$ sudo apt-get install python3 python3-pip
-```
+    $ sudo apt-get install python3 python3-pip
 
-We recommend using the [virtualenv](https://virtualenv.readthedocs.org/en/latest/)
-package to create an isolated Python environment:
+We recommend using [venv](https://docs.python.org/3/library/venv.html) to
+create an isolated Python environment:
 
-```
-$ sudo pip install virtualenv
-$ virtualenv -p python3 saltyrtc-server-venv
-```
+    $ pyvenv venv
 
-You can switch into the created virtual environment *saltyrtc-server-venv*
-by running this command:
+You can switch into the created virtual environment *venv* by running this
+command:
 
-```
-$ source saltyrtc-server-venv/bin/activate
-```
+    $ source venv/bin/activate
+
+All packages you install now with `pip` will be installed into your virtualenv.
 
 To deactivate the virtual environment, just run:
 
-```
-$ deactivate
-```
+    $ deactivate
+
+If you want easier handling of your virtualenvs, you might also want to take a
+look at [virtualenvwrapper](https://virtualenvwrapper.readthedocs.io/).
 
 ## Installation
 
