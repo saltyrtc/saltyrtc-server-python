@@ -9,6 +9,7 @@ __all__ = (
     'RELAY_TIMEOUT',
     'KEEP_ALIVE_TIMEOUT',
     'KEEP_ALIVE_INTERVAL',
+    'CloseCode',
     'ReceiverType',
     'MessageType',
     'validate_public_key',
@@ -27,6 +28,14 @@ KEEP_ALIVE_TIMEOUT = 30.0  # TODO: Sane?
 KEEP_ALIVE_INTERVAL = 60.0  # TODO: Sane?
 
 
+@enum.unique
+class CloseCode(enum.IntEnum):
+    path_full_error = 3000
+    protocol_error = 3001
+    internal_error = 3002
+
+
+@enum.unique
 class ReceiverType(enum.IntEnum):
     server = 0x00
     initiator = 0x01
@@ -40,6 +49,7 @@ class ReceiverType(enum.IntEnum):
             return cls(receiver)
 
 
+@enum.unique
 class MessageType(enum.Enum):
     """left out client-to-client message types"""
     server_hello = 'server-hello'

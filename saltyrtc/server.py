@@ -14,6 +14,7 @@ from .common import (
     RELAY_TIMEOUT,
     KEEP_ALIVE_INTERVAL,
     KEEP_ALIVE_TIMEOUT,
+    CloseCode,
     ReceiverType,
     MessageType,
 )
@@ -134,7 +135,7 @@ class Server(Protocol):
         try:
             path, client = self._get_path_client(connection, ws_path)
         except PathError:
-            yield from connection.close(code=1002)  # Protocol error
+            yield from connection.close(code=CloseCode.protocol_error.value)
             return
         path.log.debug('Worker started')
 
@@ -143,12 +144,15 @@ class Server(Protocol):
             yield from self._handle_client(path, client)
         except Disconnected:
             path.log.notice('Connection closed by remote')
+        except SlotsFullError as exc:
+            path.log.info('Closing because all path slots are full: {}', str(exc))
+            yield from client.close(code=CloseCode.path_full_error.value)
         except SignalingError as exc:
             path.log.warning('Closing due to protocol error: {}', str(exc))
-            yield from client.close(exc=exc)
+            yield from client.close(code=CloseCode.protocol_error.value)
         except Exception as exc:
             path.log.exception('Closing due to exception:', exc)
-            yield from client.close(exc=exc)
+            yield from client.close(code=CloseCode.internal_error.value)
         path.log.debug('Worker stopped')
 
     def _get_path_client(self, connection, ws_path):

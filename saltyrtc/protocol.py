@@ -204,15 +204,7 @@ class PathClient:
             raise Disconnected() from exc
 
     @asyncio.coroutine
-    def close(self, exc=None):
-        if exc is not None:
-            if isinstance(exc, SignalingError):
-                code = 1002  # Protocol error
-            else:
-                code = 1011  # Internal Error
-        else:
-            code = 1000  # Normal
-
+    def close(self, code=1000):
         # Note: We are not sending a reason for security reasons.
         yield from self._connection.close(code=code)
 
