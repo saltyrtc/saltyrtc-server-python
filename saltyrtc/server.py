@@ -117,7 +117,7 @@ class Server(Protocol):
     @asyncio.coroutine
     def _clean_up(self, timeout):
         # TODO: Wait for pending tasks to return or cancel them after a timeout
-        yield from asyncio.sleep(timeout, loop=self._loop)
+        # yield from asyncio.sleep(timeout, loop=self._loop)
 
         # Wait until WebSockets server is closed
         self.ws_server.close()
