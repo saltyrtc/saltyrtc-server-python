@@ -1,7 +1,6 @@
 import os
 import asyncio
 
-import logbook
 import logbook.more
 
 import saltyrtc

@@ -22,7 +22,8 @@ command:
 
     $ source venv/bin/activate
 
-All packages you install now with `pip` will be installed into your virtualenv.
+While the virtual environment is active, all packages installed using `pip` will be
+installed into this environment.
 
 To deactivate the virtual environment, just run:
 
@@ -42,8 +43,8 @@ $ pip install git+https://github.com/saltyrtc/saltyrtc-server-python.git
 ```
 
 The dependency ``libnacl`` will be installed automatically. However, you may need to
-[install ``libsodium``](https://download.libsodium.org/doc/installation/index.html) for ``libnacl``
-to work. 
+[install ``libsodium``](https://download.libsodium.org/doc/installation/index.html)
+for ``libnacl`` to work. 
 
 ## Command Line Usage
 
