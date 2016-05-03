@@ -11,7 +11,7 @@ class TestPrerequisities:
     def test_server_handshake(self, ws_client_factory):
         """
         Make sure the server is reachable and we can do a simple
-        WebSocket handshake.
+        WebSocket handshake using the correct subprotocol.
         """
         client = yield from ws_client_factory()
         assert isinstance(client, websockets.client.WebSocketClientProtocol)

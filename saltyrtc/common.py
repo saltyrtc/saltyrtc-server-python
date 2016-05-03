@@ -9,6 +9,7 @@ __all__ = (
     'RELAY_TIMEOUT',
     'KEEP_ALIVE_TIMEOUT',
     'KEEP_ALIVE_INTERVAL',
+    'SubProtocol',
     'CloseCode',
     'ReceiverType',
     'MessageType',
@@ -26,6 +27,11 @@ HASH_LENGTH = 32
 RELAY_TIMEOUT = 30.0  # TODO: Sane?
 KEEP_ALIVE_TIMEOUT = 30.0  # TODO: Sane?
 KEEP_ALIVE_INTERVAL = 60.0  # TODO: Sane?
+
+
+@enum.unique
+class SubProtocol(enum.Enum):
+    saltyrtc_v1_0 = 'saltyrtc-1.0'
 
 
 @enum.unique

@@ -6,6 +6,9 @@ import libnacl.public
 
 from . import util
 from .exception import *
+from .common import (
+    KEY_LENGTH,
+)
 from .message import (
     unpack,
     AbstractMessage,
@@ -210,4 +213,4 @@ class PathClient:
 
 
 class Protocol:
-    pass
+    PATH_LENGTH = KEY_LENGTH * 2

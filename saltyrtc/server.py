@@ -9,11 +9,11 @@ import libnacl.public
 from . import util
 from .exception import *
 from .common import (
-    KEY_LENGTH,
     COOKIE_LENGTH,
     RELAY_TIMEOUT,
     KEEP_ALIVE_INTERVAL,
     KEEP_ALIVE_TIMEOUT,
+    SubProtocol,
     CloseCode,
     ReceiverType,
     MessageType,
@@ -33,10 +33,28 @@ from .message import (
 
 __all__ = (
     'serve',
+    'ServerProtocol',
+    'Paths',
     'Server',
 )
 
-_server_log = util.get_logger('server')
+_sub_protocol = None
+
+
+def _get_protocol_class(sub_protocol):
+    """
+    Return the matching :class:`ServerProtocol` class for a
+    :class:`SubProtocol`.
+
+    Raises :class:`KeyError` in case no matching protocol has been
+    found.
+    """
+    global _sub_protocol
+    if _sub_protocol is None:
+        _sub_protocol = {
+            SubProtocol.saltyrtc_v1_0: Server
+        }
+    return _sub_protocol[sub_protocol]
 
 
 @asyncio.coroutine
@@ -46,9 +64,9 @@ def serve(ssl_context, paths=None, host=None, port=8765, loop=None):
 
     Arguments:
         - `ssl_context`: An `ssl.SSLContext` instance for WSS.
-        - `paths`: A dictionary that maps path names to :class:`Path`
-          instances. Can be used to share paths on multiple WebSockets.
-          Defaults to an empty dictionary.
+        - `paths`: A :class:`Paths` instance that maps path names to
+          :class:`Path` instances. Can be used to share paths on
+          multiple WebSockets. Defaults to an empty paths instance.
         - `host`: The hostname or IP address the server will listen on.
           Defaults to all interfaces.
         - `port`: The port the client should connect to. Defaults to
@@ -60,88 +78,77 @@ def serve(ssl_context, paths=None, host=None, port=8765, loop=None):
     if loop is None:
         loop = asyncio.get_event_loop()
 
+    # Create paths if not given
+    if paths is None:
+        paths = Paths()
+
     # Create server
     server = Server(paths=paths, loop=loop)
 
-    # Start server and set WS instance on server
-    _server_log.debug('Starting WebSockets server')
+    @asyncio.coroutine
+    def protocol_factory(connection, ws_path):
+        protocol = ServerProtocol(server, loop=loop)
+        protocol.connection_made(connection, ws_path)
+
+    # Start server
     ws_server = yield from websockets.serve(
-        server.serve_client,
+        protocol_factory,
         ssl=ssl_context,
         host=host,
         port=port
     )
-    server.ws_server = ws_server
-    _server_log.notice('Listening')
+
+    # Set server instance
+    server.server = ws_server
 
     # Return server
     return server
 
 
-# TODO: Extract common methods of server and client into Protocol class
-# TODO: Remember create_task tasks and clean up when closing
-class Server(Protocol):
-    PATH_LENGTH = KEY_LENGTH * 2
+class ServerProtocol(Protocol):
+    __slots__ = ('_log', '_loop', '_server', 'path', 'client', 'handler_task')
 
-    def __init__(self, paths=None, loop=None):
+    def __init__(self, server, loop=None):
         self._log = util.get_logger('server.protocol')
         self._loop = asyncio.get_event_loop() if loop is None else loop
 
-        # WebSocket server instance
-        self.ws_server = None
+        # Server instance
+        self._server = server
 
-        # Paths dict
-        self._path_number = 0
-        self._paths = {} if paths is None else paths
+        # Path and client instance
+        self.path = None
+        self.client = None
 
-        # Set to None when closing
-        self._closing_future = asyncio.Future(loop=self._loop)
-        # Set to None when closed
-        self._closed_future = asyncio.Future(loop=self._loop)
+        # Handler task that is set after 'connection_made' has been called
+        self.handler_task = None
 
-    @asyncio.coroutine
-    def wait_closed(self):
-        yield from asyncio.shield(self._closed_future, loop=self._loop)
-
-    def close(self, timeout=3.0):
-        if self._closing_future.done() or self._closed_future.done():
-            return
-
-        # Set closing future
-        self._log.info('Closing')
-        self._closing_future.set_result(None)
-
-        # Clean up task
-        self._loop.create_task(self._clean_up(timeout))
+    def connection_made(self, connection, ws_path):
+        self.handler_task = self._loop.create_task(self.handler(connection, ws_path))
 
     @asyncio.coroutine
-    def _clean_up(self, timeout):
-        # TODO: Wait for pending tasks to return or cancel them after a timeout
-        # yield from asyncio.sleep(timeout, loop=self._loop)
-
-        # Wait until WebSockets server is closed
-        self.ws_server.close()
-        yield from self.ws_server.wait_closed()
-
-        # Set closed
-        self._log.info('Closed')
-        self._closed_future.set_result(None)
+    def close(self, code=1000):
+        yield from self.client.close(code=code)
 
     @asyncio.coroutine
-    def serve_client(self, connection, ws_path):
+    def handler(self, connection, ws_path):
         self._log.debug('New connection on WS path {}', ws_path)
 
         # Get path and client instance as early as possible
         try:
-            path, client = self._get_path_client(connection, ws_path)
+            path, client = self.get_path_client(connection, ws_path)
         except PathError:
             yield from connection.close(code=CloseCode.protocol_error.value)
             return
         path.log.debug('Worker started')
 
+        # Store path and client
+        self.path = path
+        self.client = client
+        self._server.register(self)
+
         # Handle client until disconnected or an exception occurred
         try:
-            yield from self._handle_client(path, client)
+            yield from self.handle_client(path, client)
         except Disconnected:
             path.log.notice('Connection closed by remote')
         except SlotsFullError as exc:
@@ -153,9 +160,10 @@ class Server(Protocol):
         except Exception as exc:
             path.log.exception('Closing due to exception:', exc)
             yield from client.close(code=CloseCode.internal_error.value)
+        self._server.unregister(self)
         path.log.debug('Worker stopped')
 
-    def _get_path_client(self, connection, ws_path):
+    def get_path_client(self, connection, ws_path):
         # Extract public key from path
         initiator_key = ws_path.strip('/')
 
@@ -168,7 +176,7 @@ class Server(Protocol):
             raise PathError('Could not unhexlify path') from exc
 
         # Get path instance
-        path = self._get_path(initiator_key)
+        path = self._server.paths.get(initiator_key)
 
         # Create client instance
         client = PathClient(connection, path.number, initiator_key)
@@ -177,7 +185,7 @@ class Server(Protocol):
         return path, client
 
     @asyncio.coroutine
-    def _handle_client(self, path, client):
+    def handle_client(self, path, client):
         """
         SignalingError
         PathError
@@ -188,21 +196,21 @@ class Server(Protocol):
         """
         # Do handshake
         path.log.debug('Starting handshake')
-        yield from self._handshake(path, client)
+        yield from self.handshake(path, client)
         path.log.debug('Handshake completed')
 
         # Keep alive and poll for messages
         tasks = []
         if client.type == ReceiverType.initiator:
             path.log.debug('Starting runner for initiator {}', client)
-            tasks.append(self._handle_initiator(path, client))
+            tasks.append(self.initiator_loop(path, client))
         elif client.type == ReceiverType.responder:
             path.log.debug('Starting runner for responder {}', client)
-            tasks.append(self._handle_responder(path, client))
+            tasks.append(self.responder_loop(path, client))
         else:
             raise ValueError('Invalid receiver type: {}'.format(client.type))
         path.log.debug('Starting keep-alive task for client {}', client)
-        tasks.append(self._keep_alive(path, client))
+        tasks.append(self.keep_alive(path, client))
 
         # Wait until complete
         tasks = [self._loop.create_task(coroutine) for coroutine in tasks]
@@ -221,7 +229,7 @@ class Server(Protocol):
                 raise SignalingError('Task returned too early')
 
     @asyncio.coroutine
-    def _handshake(self, path, client):
+    def handshake(self, path, client):
         """
         Disconnected
         MessageError
@@ -241,19 +249,19 @@ class Server(Protocol):
             path.log.debug('Received client-auth')
             # Client is the initiator
             client.type = ReceiverType.initiator
-            yield from self._handshake_initiator(path, client, message, server_cookie)
+            yield from self.handshake_initiator(path, client, message, server_cookie)
         elif message.type == MessageType.client_hello:
             path.log.debug('Received client-hello')
             # Client is a responder
             client.type = ReceiverType.responder
-            yield from self._handshake_responder(path, client, message, server_cookie)
+            yield from self.handshake_responder(path, client, message, server_cookie)
 
         else:
             error = "Expected 'client-hello' or 'client-auth', got '{}'"
             raise MessageFlowError(error.format(message.type))
 
     @asyncio.coroutine
-    def _handshake_initiator(self, path, initiator, message, server_cookie):
+    def handshake_initiator(self, path, initiator, message, server_cookie):
         """
         Disconnected
         MessageError
@@ -279,7 +287,7 @@ class Server(Protocol):
         yield from initiator.send(message)
 
     @asyncio.coroutine
-    def _handshake_responder(self, path, responder, message, server_cookie):
+    def handshake_responder(self, path, responder, message, server_cookie):
         """
         Disconnected
         MessageError
@@ -318,7 +326,7 @@ class Server(Protocol):
         yield from initiator.send(message)
 
     @asyncio.coroutine
-    def _keep_alive(self, path, client):
+    def keep_alive(self, path, client):
         """
         Disconnected
         PingTimeoutError
@@ -338,8 +346,8 @@ class Server(Protocol):
             yield from asyncio.sleep(KEEP_ALIVE_INTERVAL, loop=self._loop)
 
     @asyncio.coroutine
-    def _handle_initiator(self, path, initiator):
-        while not self._closing_future.done():
+    def initiator_loop(self, path, initiator):
+        while not self.client.connection_closed.done():
             # Receive relay message or drop-responder
             message = yield from initiator.receive()
 
@@ -348,7 +356,7 @@ class Server(Protocol):
                 # Lookup responder
                 responder = path.get_responder(message.receiver)
                 # Send to responder
-                coroutine = self._relay_message(path, initiator, responder, message)
+                coroutine = self.relay_message(path, initiator, responder, message)
                 self._loop.create_task(coroutine)
             # Drop-responder
             elif message.type == MessageType.drop_responder:
@@ -365,8 +373,8 @@ class Server(Protocol):
                 raise MessageFlowError(error.format(message.type))
 
     @asyncio.coroutine
-    def _handle_responder(self, path, responder):
-        while not self._closing_future.done():
+    def responder_loop(self, path, responder):
+        while not self.client.connection_closed.done():
             # Receive relay message
             message = yield from responder.receive()
 
@@ -375,14 +383,14 @@ class Server(Protocol):
                 # Lookup initiator
                 initiator = path.get_initiator()
                 # Send to initiator
-                coroutine = self._relay_message(path, responder, initiator, message)
+                coroutine = self.relay_message(path, responder, initiator, message)
                 self._loop.create_task(coroutine)
             else:
                 error = "Expected relay message, got '{}'"
                 raise MessageFlowError(error.format(message.type))
 
     @asyncio.coroutine
-    def _relay_message(self, path, sender, receiver, message):
+    def relay_message(self, path, sender, receiver, message):
         # Prepare message
         path.log.debug('Packing relay message')
         message_data = message.pack(sender)
@@ -411,14 +419,76 @@ class Server(Protocol):
             path.log.debug('Receiver disconnected')
             yield from send_error_message()
 
-    def _get_path(self, initiator_key):
-        if self._paths.get(initiator_key) is None:
-            self._path_number += 1
-            self._paths[initiator_key] = Path(initiator_key, self._path_number)
-            self._log.debug('Created new path: {}', self._path_number)
-        return self._paths[initiator_key]
 
-    def _clean_path(self, path):
+class Paths:
+    __slots__ = ('_log', 'number', 'paths')
+
+    def __init__(self):
+        self._log = util.get_logger('paths')
+        self.number = 0
+        self.paths = {}
+
+    def get(self, initiator_key):
+        if self.paths.get(initiator_key) is None:
+            self.number += 1
+            self.paths[initiator_key] = Path(initiator_key, self.number)
+            self._log.debug('Created new path: {}', self.number)
+        return self.paths[initiator_key]
+
+    def clean(self, path):
         if path.empty:
-            del self._paths[path.initiator_key]
+            del self.paths[path.initiator_key]
             self._log.debug('Removed empty path: {}', path.number)
+
+
+class Server(asyncio.AbstractServer):
+    def __init__(self, paths, loop=None):
+        self._log = util.get_logger('server')
+        self._loop = asyncio.get_event_loop() if loop is None else loop
+
+        # WebSocket server instance
+        self._server = None
+
+        # Store paths
+        self.paths = paths
+
+        # Store server protocols
+        self.protocols = set()
+
+    @property
+    def server(self):
+        return self._server
+
+    @server.setter
+    def server(self, server):
+        self._server = server
+        self._log.debug('Server instance: {}', server)
+
+    def register(self, protocol):
+        self.protocols.add(protocol)
+        self._log.debug('Protocol registered: {}', protocol)
+
+    def unregister(self, protocol):
+        self.protocols.remove(protocol)
+        self._log.debug('Protocol unregistered: {}', protocol)
+        self.paths.clean(protocol.path)
+
+    def close(self):
+        """
+        Close open connections and the server.
+        """
+        self._log.debug('Closing protocols')
+        for protocol in self.protocols:
+            self._loop.create_task(protocol.close())
+        self._log.debug('Closing server')
+        self.server.close()
+
+    @asyncio.coroutine
+    def wait_closed(self):
+        """
+        Wait until all connections are closed.
+        """
+        if len(self.protocols) > 0:
+            tasks = [protocol.handler_task for protocol in self.protocols]
+            yield from asyncio.wait(tasks, loop=self._loop)
+        yield from self.server.wait_closed()
