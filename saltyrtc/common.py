@@ -36,6 +36,7 @@ class SubProtocol(enum.Enum):
 
 @enum.unique
 class CloseCode(enum.IntEnum):
+    sub_protocol_error = 1002
     path_full_error = 3000
     protocol_error = 3001
     internal_error = 3002

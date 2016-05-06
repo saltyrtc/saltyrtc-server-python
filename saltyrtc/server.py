@@ -38,24 +38,6 @@ __all__ = (
     'Server',
 )
 
-_sub_protocol = None
-
-
-def _get_protocol_class(sub_protocol):
-    """
-    Return the matching :class:`ServerProtocol` class for a
-    :class:`SubProtocol`.
-
-    Raises :class:`KeyError` in case no matching protocol has been
-    found.
-    """
-    global _sub_protocol
-    if _sub_protocol is None:
-        _sub_protocol = {
-            SubProtocol.saltyrtc_v1_0: Server
-        }
-    return _sub_protocol[sub_protocol]
-
 
 @asyncio.coroutine
 def serve(ssl_context, paths=None, host=None, port=8765, loop=None):
@@ -85,17 +67,13 @@ def serve(ssl_context, paths=None, host=None, port=8765, loop=None):
     # Create server
     server = Server(paths=paths, loop=loop)
 
-    @asyncio.coroutine
-    def protocol_factory(connection, ws_path):
-        protocol = ServerProtocol(server, loop=loop)
-        protocol.connection_made(connection, ws_path)
-
     # Start server
     ws_server = yield from websockets.serve(
-        protocol_factory,
+        server.handler,
         ssl=ssl_context,
         host=host,
-        port=port
+        port=port,
+        subprotocols=server.sub_protocols
     )
 
     # Set server instance
@@ -148,7 +126,7 @@ class ServerProtocol(Protocol):
 
         # Handle client until disconnected or an exception occurred
         try:
-            yield from self.handle_client(path, client)
+            yield from self.handle_client()
         except Disconnected:
             path.log.notice('Connection closed by remote')
         except SlotsFullError as exc:
@@ -185,7 +163,7 @@ class ServerProtocol(Protocol):
         return path, client
 
     @asyncio.coroutine
-    def handle_client(self, path, client):
+    def handle_client(self):
         """
         SignalingError
         PathError
@@ -194,19 +172,21 @@ class ServerProtocol(Protocol):
         MessageFlowError
         SlotsFullError
         """
+        path, client = self.path, self.client
+
         # Do handshake
         path.log.debug('Starting handshake')
-        yield from self.handshake(path, client)
+        yield from self.handshake()
         path.log.debug('Handshake completed')
 
         # Keep alive and poll for messages
         tasks = []
         if client.type == ReceiverType.initiator:
             path.log.debug('Starting runner for initiator {}', client)
-            tasks.append(self.initiator_loop(path, client))
+            tasks.append(self.initiator_loop())
         elif client.type == ReceiverType.responder:
             path.log.debug('Starting runner for responder {}', client)
-            tasks.append(self.responder_loop(path, client))
+            tasks.append(self.responder_loop())
         else:
             raise ValueError('Invalid receiver type: {}'.format(client.type))
         path.log.debug('Starting keep-alive task for client {}', client)
@@ -229,13 +209,15 @@ class ServerProtocol(Protocol):
                 raise SignalingError('Task returned too early')
 
     @asyncio.coroutine
-    def handshake(self, path, client):
+    def handshake(self):
         """
         Disconnected
         MessageError
         MessageFlowError
         SlotsFullError
         """
+        path, client = self.path, self.client
+
         # Send server-hello
         server_cookie = os.urandom(COOKIE_LENGTH)
         message = ServerHelloMessage.create(client.server_key.pk, server_cookie)
@@ -249,24 +231,26 @@ class ServerProtocol(Protocol):
             path.log.debug('Received client-auth')
             # Client is the initiator
             client.type = ReceiverType.initiator
-            yield from self.handshake_initiator(path, client, message, server_cookie)
+            yield from self.handshake_initiator(message, server_cookie)
         elif message.type == MessageType.client_hello:
             path.log.debug('Received client-hello')
             # Client is a responder
             client.type = ReceiverType.responder
-            yield from self.handshake_responder(path, client, message, server_cookie)
+            yield from self.handshake_responder(message, server_cookie)
 
         else:
             error = "Expected 'client-hello' or 'client-auth', got '{}'"
             raise MessageFlowError(error.format(message.type))
 
     @asyncio.coroutine
-    def handshake_initiator(self, path, initiator, message, server_cookie):
+    def handshake_initiator(self, message, server_cookie):
         """
         Disconnected
         MessageError
         MessageFlowError
         """
+        path, initiator = self.path, self.client
+
         # Validate cookie
         path.log.debug('Validating cookie')
         if not util.consteq(message.server_cookie, server_cookie):
@@ -287,13 +271,15 @@ class ServerProtocol(Protocol):
         yield from initiator.send(message)
 
     @asyncio.coroutine
-    def handshake_responder(self, path, responder, message, server_cookie):
+    def handshake_responder(self, message, server_cookie):
         """
         Disconnected
         MessageError
         MessageFlowError
         SlotsFullError
         """
+        path, responder = self.path, self.client
+
         # Set key on client
         responder.set_client_key(message.client_public_key)
 
@@ -326,11 +312,13 @@ class ServerProtocol(Protocol):
         yield from initiator.send(message)
 
     @asyncio.coroutine
-    def keep_alive(self, path, client):
+    def keep_alive(self):
         """
         Disconnected
         PingTimeoutError
         """
+        path, client = self.path, self.client
+
         while True:
             path.log.debug('Ping to {}', client)
             try:
@@ -346,8 +334,9 @@ class ServerProtocol(Protocol):
             yield from asyncio.sleep(KEEP_ALIVE_INTERVAL, loop=self._loop)
 
     @asyncio.coroutine
-    def initiator_loop(self, path, initiator):
-        while not self.client.connection_closed.done():
+    def initiator_loop(self):
+        path, initiator = self.path, self.client
+        while not initiator.connection_closed.done():
             # Receive relay message or drop-responder
             message = yield from initiator.receive()
 
@@ -356,7 +345,7 @@ class ServerProtocol(Protocol):
                 # Lookup responder
                 responder = path.get_responder(message.receiver)
                 # Send to responder
-                coroutine = self.relay_message(path, initiator, responder, message)
+                coroutine = self.relay_message(responder, message)
                 self._loop.create_task(coroutine)
             # Drop-responder
             elif message.type == MessageType.drop_responder:
@@ -373,8 +362,9 @@ class ServerProtocol(Protocol):
                 raise MessageFlowError(error.format(message.type))
 
     @asyncio.coroutine
-    def responder_loop(self, path, responder):
-        while not self.client.connection_closed.done():
+    def responder_loop(self):
+        path, responder = self.path, self.client
+        while not responder.connection_closed.done():
             # Receive relay message
             message = yield from responder.receive()
 
@@ -383,14 +373,16 @@ class ServerProtocol(Protocol):
                 # Lookup initiator
                 initiator = path.get_initiator()
                 # Send to initiator
-                coroutine = self.relay_message(path, responder, initiator, message)
+                coroutine = self.relay_message(initiator, message)
                 self._loop.create_task(coroutine)
             else:
                 error = "Expected relay message, got '{}'"
                 raise MessageFlowError(error.format(message.type))
 
     @asyncio.coroutine
-    def relay_message(self, path, sender, receiver, message):
+    def relay_message(self, receiver, message):
+        path, sender = self.path, self.client
+
         # Prepare message
         path.log.debug('Packing relay message')
         message_data = message.pack(sender)
@@ -442,6 +434,10 @@ class Paths:
 
 
 class Server(asyncio.AbstractServer):
+    sub_protocols = [
+        SubProtocol.saltyrtc_v1_0
+    ]
+
     def __init__(self, paths, loop=None):
         self._log = util.get_logger('server')
         self._loop = asyncio.get_event_loop() if loop is None else loop
@@ -463,6 +459,17 @@ class Server(asyncio.AbstractServer):
     def server(self, server):
         self._server = server
         self._log.debug('Server instance: {}', server)
+
+    @asyncio.coroutine
+    def handler(self, connection, ws_path):
+        # Determine ServerProtocol instance by selected sub-protocol
+        if connection.subprotocol != SubProtocol.saltyrtc_v1_0:
+            self._log.notice("Unsupported sub-protocol '{}', dropping client",
+                             connection.subprotocol)
+            yield from connection.close(code=CloseCode.sub_protocol_error.value)
+        else:
+            protocol = ServerProtocol(self, loop=self._loop)
+            protocol.connection_made(connection, ws_path)
 
     def register(self, protocol):
         self.protocols.add(protocol)
