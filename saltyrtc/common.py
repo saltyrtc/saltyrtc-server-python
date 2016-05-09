@@ -40,6 +40,7 @@ class CloseCode(enum.IntEnum):
     path_full_error = 3000
     protocol_error = 3001
     internal_error = 3002
+    data_channel_handover = 3003
 
 
 @enum.unique
