@@ -53,6 +53,13 @@ def key_path(key_pair):
     return key_pair.hex_pk().decode()
 
 
+def _cookie():
+    """
+    Return a random cookie for the client.
+    """
+    return os.urandom(16)
+
+
 @asyncio.coroutine
 def _sleep(timeout=None):
     """
@@ -114,6 +121,14 @@ def sleep():
 
 
 @pytest.fixture(scope='module')
+def cookie():
+    """
+    Return a random cookie for the client.
+    """
+    return _cookie()
+
+
+@pytest.fixture(scope='module')
 def server(request, event_loop, port):
     """
     Return a :class:`saltyrtc.Server` instance.
@@ -134,24 +149,24 @@ def server(request, event_loop, port):
 
 
 class Client:
-    def __init__(self, ws_client, pack_message, unpack_message, key=None, timeout=0.1):
+    def __init__(self, ws_client, pack_message, unpack_message, timeout=0.1):
         self.ws_client = ws_client
         self.pack_and_send = pack_message
         self.recv_and_unpack = unpack_message
-        self.permanent_key = key
-        self.session_key = None
         self.timeout = timeout
+        self.session_key = None
+        self.box = None
 
-    def send(self, receiver, message):
+    def send(self, receiver, message, nonce=None):
         yield from self.pack_and_send(
             self.ws_client, receiver, message,
-            key=self.permanent_key, timeout=self.timeout
+            nonce=nonce, box=self.box, timeout=self.timeout
         )
 
     def recv(self):
         return (yield from self.recv_and_unpack(
             self.ws_client,
-            key=self.permanent_key, timeout=self.timeout
+            box=self.box, timeout=self.timeout
         ))
 
 
@@ -193,7 +208,7 @@ def client_factory(client_key, url, event_loop, server, pack_message, unpack_mes
     ssl_context.load_verify_locations(cafile=pytest.saltyrtc.cert)
 
     @asyncio.coroutine
-    def _client_factory(path=client_key, key=client_key, timeout=0.1, **kwargs):
+    def _client_factory(path=client_key, timeout=0.1, **kwargs):
         _kwargs = {
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
@@ -206,7 +221,7 @@ def client_factory(client_key, url, event_loop, server, pack_message, unpack_mes
         )
         return Client(
             ws_client, pack_message, unpack_message,
-            key=key, timeout=timeout
+            timeout=timeout
         )
     return _client_factory
 
@@ -214,19 +229,29 @@ def client_factory(client_key, url, event_loop, server, pack_message, unpack_mes
 @pytest.fixture(scope='module')
 def unpack_message(event_loop):
     @asyncio.coroutine
-    def _unpack_message(client, key=None, timeout=0.1):
+    def _unpack_message(client, box=None, timeout=0.1):
         data = yield from asyncio.wait_for(client.recv(), timeout, loop=event_loop)
         receiver = data[0]
-        message = umsgpack.unpackb(data[1:])
-        return receiver, message
+        data = data[1:]
+        if box is not None:
+            nonce = data[:16]
+            data = box.decrypt(data[16:], nonce=nonce)
+        else:
+            nonce = None
+        message = umsgpack.unpackb(data)
+        return receiver, message, nonce
     return _unpack_message
 
 
 @pytest.fixture(scope='module')
 def pack_message(event_loop):
     @asyncio.coroutine
-    def _pack_message(client, receiver, message, key=None, timeout=0.1):
+    def _pack_message(client, receiver, message, nonce=None, box=None, timeout=0.1):
         receiver = struct.pack('!B', receiver)
-        data = b''.join((receiver, umsgpack.packb(message)))
+        data = umsgpack.packb(message)
+        if box is not None:
+            assert nonce is not None
+            data = box.encrypt(data, nonce=nonce)
+        data = b''.join((receiver, data))
         yield from asyncio.wait_for(client.send(data), timeout, loop=event_loop)
     return _pack_message
