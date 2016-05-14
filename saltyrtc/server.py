@@ -478,6 +478,7 @@ class Server(asyncio.AbstractServer):
         else:
             protocol = ServerProtocol(self, loop=self._loop)
             protocol.connection_made(connection, ws_path)
+            yield from protocol.handler_task
 
     def register(self, protocol):
         self.protocols.add(protocol)
