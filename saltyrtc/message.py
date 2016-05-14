@@ -83,18 +83,6 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         if cls.encrypted is not True and cls.encrypted is not False:
             message = 'Cannot instantiate class {} with invalid encrypted flag: {}'
             raise TypeError(message.format(cls.__name__, cls.encrypted))
-
-        # Set message classes and if encryption is required for them
-        cls._message_classes = {
-            MessageType.server_hello: ServerHelloMessage,
-            MessageType.client_hello: ClientHelloMessage,
-            MessageType.client_auth: ClientAuthMessage,
-            MessageType.server_auth: ServerAuthMessage,
-            MessageType.new_responder: NewResponderMessage,
-            MessageType.drop_responder: DropResponderMessage,
-            MessageType.send_error: SendErrorMessage,
-        }
-
         return super().__new__(cls)
 
     def __init__(self, payload, receiver=ReceiverType.server.value, receiver_type=None):
@@ -102,6 +90,20 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
             receiver_type = ReceiverType.from_receiver(receiver)
         super().__init__(receiver, receiver_type)
         self.payload = {} if payload is None else payload
+
+    @classmethod
+    def _get_message_classes(cls):
+        if getattr(cls, '_message_classes', None) is None:
+            cls._message_classes = {
+                MessageType.server_hello: ServerHelloMessage,
+                MessageType.client_hello: ClientHelloMessage,
+                MessageType.client_auth: ClientAuthMessage,
+                MessageType.server_auth: ServerAuthMessage,
+                MessageType.new_responder: NewResponderMessage,
+                MessageType.drop_responder: DropResponderMessage,
+                MessageType.send_error: SendErrorMessage,
+            }
+        return cls._message_classes
 
     def pack(self, client):
         """
@@ -141,20 +143,20 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
         # Decrypt if directed at us and keys have been exchanged
         # or just return a raw message to be sent to another client
-        payload = data[1:]
+        data = data[1:]
         if receiver_type == ReceiverType.server:
             if not client.authenticated and client.type is None:
                 payload = None
 
                 # Try client-hello (unencrypted)
                 try:
-                    payload = cls._unpack_payload(payload)
+                    payload = cls._unpack_payload(data)
                 except MessageError:
                     pass
 
                 # Try client-auth (encrypted)
                 try:
-                    payload = cls._unpack_payload(cls._decrypt_payload(client, payload))
+                    payload = cls._unpack_payload(cls._decrypt_payload(client, data))
                 except MessageError:
                     pass
 
@@ -164,11 +166,11 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
                     raise MessageError(message)
             else:
                 # Decrypt and unpack payload
-                payload = cls._unpack_payload(cls._decrypt_payload(client, payload))
+                payload = cls._unpack_payload(cls._decrypt_payload(client, data))
         else:
             # Is the client allowed to send messages to the receiver type?
             if client.p2p_allowed(receiver_type):
-                return RawMessage(receiver, receiver_type, payload)
+                return RawMessage(receiver, receiver_type, data)
             else:
                 error = 'Not allowed to relay messages to {}'
                 raise MessageFlowError(error.format(receiver_type))
@@ -181,7 +183,11 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
             raise MessageError('Unknown message type: {}'.format(type_)) from exc
 
         # Check and convert payload on appropriate message class
-        message_class = cls._message_classes[type_]
+        try:
+            message_class = cls._get_message_classes()[type_]
+        except KeyError as exc:
+            error_message = 'Can not handle valid message type: {}'
+            raise MessageError(error_message.format(type_)) from exc
         message_class.check_payload(client, payload)
 
         # Return instance
@@ -202,7 +208,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         MessageError
         """
         try:
-            receiver = struct.unpack('!B', data)
+            receiver, *_ = struct.unpack('!B', data[:1])
         except struct.error as exc:
             raise MessageError('Could not unpack receiver byte') from exc
 
