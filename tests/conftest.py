@@ -19,6 +19,9 @@ def pytest_namespace():
         'ip': '127.0.0.1',
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
+        'subprotocols': [
+            saltyrtc.SubProtocol.saltyrtc_v1_0.value
+        ]
     }}
 
 
@@ -127,6 +130,7 @@ def ws_client_factory(client_key, url, event_loop, server):
     return functools.partial(
         websockets.connect,
         '{}/{}'.format(url, key_path(client_key)),
+        subprotocols=pytest.saltyrtc.subprotocols,
         ssl=ssl_context,
         loop=event_loop,
     )
