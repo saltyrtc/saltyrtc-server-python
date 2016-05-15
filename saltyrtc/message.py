@@ -191,7 +191,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         message_class.check_payload(client, payload)
 
         # Return instance
-        return message_class(receiver, payload, receiver_type=receiver_type)
+        return message_class(payload, receiver=receiver, receiver_type=receiver_type)
 
     def _pack_receiver(self):
         """

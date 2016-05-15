@@ -190,7 +190,7 @@ class ServerProtocol(Protocol):
         else:
             raise ValueError('Invalid receiver type: {}'.format(client.type))
         path.log.debug('Starting keep-alive task for client {}', client)
-        tasks.append(self.keep_alive(path, client))
+        tasks.append(self.keep_alive())
 
         # Wait until complete
         tasks = [self._loop.create_task(coroutine) for coroutine in tasks]
@@ -259,9 +259,10 @@ class ServerProtocol(Protocol):
         # Authenticated
         initiator.authenticated = True
         previous_initiator = path.set_initiator(initiator)
-        # Drop previous initiator (we don't care about any exceptions)
-        path.log.debug('Dropping previous initiator: {}', previous_initiator)
-        self._loop.create_task(previous_initiator.close())
+        if previous_initiator is not None:
+            # Drop previous initiator (we don't care about any exceptions)
+            path.log.debug('Dropping previous initiator: {}', previous_initiator)
+            self._loop.create_task(previous_initiator.close())
 
         # Send server-auth
         client_cookie = message.client_cookie
@@ -320,18 +321,20 @@ class ServerProtocol(Protocol):
         path, client = self.path, self.client
 
         while True:
+            # Wait
+            yield from asyncio.sleep(KEEP_ALIVE_INTERVAL, loop=self._loop)
+
+            # Send ping and wait for pong
             path.log.debug('Ping to {}', client)
             try:
-                # Send ping
-                yield from asyncio.wait_for(
+                pong_future = yield from asyncio.wait_for(
                     client.ping(), KEEP_ALIVE_TIMEOUT, loop=self._loop)
+                yield from asyncio.wait_for(
+                    pong_future, KEEP_ALIVE_TIMEOUT, loop=self._loop)
             except asyncio.TimeoutError:
                 raise PingTimeoutError(client)
             else:
                 path.log.debug('Pong from {}', client)
-
-            # Wait
-            yield from asyncio.sleep(KEEP_ALIVE_INTERVAL, loop=self._loop)
 
     @asyncio.coroutine
     def initiator_loop(self):

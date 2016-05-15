@@ -8,6 +8,7 @@ import pytest
 import websockets
 import umsgpack
 import libnacl.public
+import logbook
 
 import saltyrtc
 
@@ -22,6 +23,7 @@ def pytest_namespace():
         'subprotocols': [
             saltyrtc.SubProtocol.saltyrtc_v1_0.value
         ],
+        'debug': True,
         'timeout': 0.01,
     }}
 
@@ -60,14 +62,24 @@ def _cookie():
     return os.urandom(16)
 
 
+def _get_timeout(timeout):
+    """
+    Return the defined timeout. In case 'debug' has been activated,
+    the timeout will be multiplied by 10.
+    """
+    if timeout is None:
+        timeout = pytest.saltyrtc.timeout
+        if pytest.saltyrtc.debug:
+            timeout *= 10
+    return timeout
+
+
 @asyncio.coroutine
 def _sleep(timeout=None):
     """
     Sleep *timeout* seconds.
     """
-    if timeout is None:
-        timeout = pytest.saltyrtc.timeout
-    yield from asyncio.sleep(timeout)
+    yield from asyncio.sleep(_get_timeout(timeout))
 
 
 @pytest.fixture(scope='module')
@@ -133,6 +145,21 @@ def server(request, event_loop, port):
     """
     Return a :class:`saltyrtc.Server` instance.
     """
+    if pytest.saltyrtc.debug:
+        # Enable asyncio debug logging
+        os.environ['PYTHONASYNCIODEBUG'] = '1'
+
+        # Enable logging
+        saltyrtc.util.enable_logging(level=logbook.TRACE, redirect_loggers={
+            'asyncio': logbook.DEBUG,
+            'websockets': logbook.DEBUG,
+        })
+
+        # Push handler
+        logging_handler = logbook.StderrHandler()
+        logging_handler.push_application()
+
+    # Setup server
     coroutine = saltyrtc.serve(
         saltyrtc.util.create_ssl_context(pytest.saltyrtc.cert),
         host=pytest.saltyrtc.ip,
@@ -144,29 +171,34 @@ def server(request, event_loop, port):
     def fin():
         server_.close()
         event_loop.run_until_complete(server_.wait_closed())
+        logging_handler.pop_application()
 
     request.addfinalizer(fin)
 
 
 class Client:
-    def __init__(self, ws_client, pack_message, unpack_message, timeout=0.1):
+    def __init__(self, ws_client, pack_message, unpack_message, timeout=None):
         self.ws_client = ws_client
         self.pack_and_send = pack_message
         self.recv_and_unpack = unpack_message
-        self.timeout = timeout
+        self.timeout = _get_timeout(timeout)
         self.session_key = None
         self.box = None
 
-    def send(self, receiver, message, nonce=None):
+    def send(self, receiver, message, nonce=None, timeout=None):
+        if timeout is None:
+            timeout = self.timeout
         yield from self.pack_and_send(
             self.ws_client, receiver, message,
-            nonce=nonce, box=self.box, timeout=self.timeout
+            nonce=nonce, box=self.box, timeout=timeout
         )
 
-    def recv(self):
+    def recv(self, timeout=None):
+        if timeout is None:
+            timeout = self.timeout
         return (yield from self.recv_and_unpack(
             self.ws_client,
-            box=self.box, timeout=self.timeout
+            box=self.box, timeout=timeout
         ))
 
 
@@ -208,7 +240,7 @@ def client_factory(client_key, url, event_loop, server, pack_message, unpack_mes
     ssl_context.load_verify_locations(cafile=pytest.saltyrtc.cert)
 
     @asyncio.coroutine
-    def _client_factory(path=client_key, timeout=0.1, **kwargs):
+    def _client_factory(path=client_key, timeout=None, **kwargs):
         _kwargs = {
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
@@ -229,13 +261,14 @@ def client_factory(client_key, url, event_loop, server, pack_message, unpack_mes
 @pytest.fixture(scope='module')
 def unpack_message(event_loop):
     @asyncio.coroutine
-    def _unpack_message(client, box=None, timeout=0.1):
+    def _unpack_message(client, box=None, timeout=None):
+        timeout = _get_timeout(timeout)
         data = yield from asyncio.wait_for(client.recv(), timeout, loop=event_loop)
-        receiver = data[0]
+        receiver, *_ = struct.unpack('!B', data[:1])
         data = data[1:]
         if box is not None:
-            nonce = data[:16]
-            data = box.decrypt(data[16:], nonce=nonce)
+            nonce = data[:24]
+            data = box.decrypt(data[24:], nonce=nonce)
         else:
             nonce = None
         message = umsgpack.unpackb(data)
@@ -246,12 +279,13 @@ def unpack_message(event_loop):
 @pytest.fixture(scope='module')
 def pack_message(event_loop):
     @asyncio.coroutine
-    def _pack_message(client, receiver, message, nonce=None, box=None, timeout=0.1):
+    def _pack_message(client, receiver, message, nonce=None, box=None, timeout=None):
         receiver = struct.pack('!B', receiver)
         data = umsgpack.packb(message)
         if box is not None:
             assert nonce is not None
             data = box.encrypt(data, nonce=nonce)
         data = b''.join((receiver, data))
+        timeout = _get_timeout(timeout)
         yield from asyncio.wait_for(client.send(data), timeout, loop=event_loop)
     return _pack_message

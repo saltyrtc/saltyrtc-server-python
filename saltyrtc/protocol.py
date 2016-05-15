@@ -113,6 +113,14 @@ class PathClient:
         self.authenticated = False
 
     @property
+    def connection_closed(self):
+        """
+        Return the 'connection_closed' future of the underlying
+        WebSocket connection.
+        """
+        return self._connection.connection_closed
+
+    @property
     def server_key(self):
         """
         Return the server's :class:`libnacl.public.SecretKey` instance.
