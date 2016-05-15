@@ -105,23 +105,26 @@ class TestProtocol:
 
         # server-hello, already checked in another test
         _, message, _ = yield from client.recv()
-        cn, sn = 0, 0
+        server_cookie = message['my-cookie']
+        cn, csn, ssn = 0, 0, 0
         client.box = libnacl.public.Box(sk=client_key, pk=message['key'])
 
         # client-auth
         yield from client.send(0x00, {
             'type': 'client-auth',
-            'your-cookie': message['my-cookie'],
+            'your-cookie': server_cookie,
             'my-cookie': cookie
-        }, nonce=cookie + struct.pack('!2I', cn, sn))
-        sn += 1
+        }, nonce=cookie + struct.pack('!2I', cn, csn))
+        csn += 1
 
         # server-auth
         _, message, nonce = yield from client.recv()
+        assert nonce == server_cookie + struct.pack('!2I', cn, ssn)
         assert message['type'] == 'server-auth'
         assert message['your-cookie'] == cookie
         assert 'initiator-connected' not in message
         assert len(message['responders']) == 0
+        ssn += 1
 
         # ...
         raise NotImplementedError
