@@ -74,7 +74,8 @@ class Path:
         """
         Return a list of responder's identifiers (slots).
         """
-        return [id_ for id_ in self._slots.keys() if id_ > 0x01]
+        return [id_ for id_, responder in self._slots.items()
+                if id_ > 0x01 and responder is not None]
 
     def add_responder(self, responder):
         """
