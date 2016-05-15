@@ -8,7 +8,11 @@ import umsgpack
 from .exception import *
 from .common import (
     ReceiverType, MessageType,
-    validate_public_key, validate_cookie, validate_responder_id, validate_responder_ids,
+    validate_public_key,
+    validate_cookies,
+    validate_cookie,
+    validate_responder_id,
+    validate_responder_ids,
     validate_hash,
 )
 
@@ -333,8 +337,10 @@ class ClientAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_cookie(payload.get('your-cookie'))
-        validate_cookie(payload.get('my-cookie'))
+        validate_cookies(
+            payload.get('your-cookie'),
+            payload.get('my-cookie')
+        )
 
     @property
     def server_cookie(self):

@@ -100,13 +100,36 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
+    def test_duplicated_cookie(self, sleep, initiator_key, client_factory):
+        client = yield from client_factory()
+
+        # server-hello, already checked in another test
+        _, message, _ = yield from client.recv()
+        cookie = message['my-cookie']
+        cn, csn, ssn = 0, 0, 0
+        client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
+
+        # client-auth
+        yield from client.send(0x00, {
+            'type': 'client-auth',
+            'your-cookie': cookie,
+            'my-cookie': cookie
+        }, nonce=cookie + struct.pack('!2I', cn, csn))
+        csn += 1
+
+        # Expect protocol error
+        yield from sleep()
+        assert not client.ws_client.open
+        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
     def test_initiator_handshake(self, cookie, initiator_key, client_factory):
         client = yield from client_factory()
 
         # server-hello, already checked in another test
         _, message, _ = yield from client.recv()
         server_cookie = message['my-cookie']
-        cn, csn, ssn = 0, 0, 0  # TODO: Set channel number
+        cn, csn, ssn = 0, 0, 0
         client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # client-auth
@@ -140,7 +163,7 @@ class TestProtocol:
             'key': responder_key.pk,
         })
 
-        cn, csn, ssn = 0, 0, 0  # TODO: Set channel number
+        cn, csn, ssn = 0, 0, 0
         client.box = libnacl.public.Box(sk=responder_key, pk=message['key'])
 
         # client-auth

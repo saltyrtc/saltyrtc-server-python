@@ -14,6 +14,7 @@ __all__ = (
     'ReceiverType',
     'MessageType',
     'validate_public_key',
+    'validate_cookies',
     'validate_cookie',
     'validate_responder_id',
     'validate_responder_ids',
@@ -72,6 +73,13 @@ class MessageType(enum.Enum):
 def validate_public_key(key):
     if not isinstance(key, bytes) or len(key) != KEY_LENGTH:
         raise MessageError('Invalid key')
+
+
+def validate_cookies(*cookies):
+    if len(cookies) > len(set(cookies)):
+        raise MessageError('Duplicate cookies detected')
+    for cookie in cookies:
+        validate_cookie(cookie)
 
 
 def validate_cookie(cookie):
