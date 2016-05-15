@@ -100,14 +100,14 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_initiator_handshake(self, cookie, client_factory, client_key):
+    def test_initiator_handshake(self, cookie, initiator_key, client_factory):
         client = yield from client_factory()
 
         # server-hello, already checked in another test
         _, message, _ = yield from client.recv()
         server_cookie = message['my-cookie']
-        cn, csn, ssn = 0, 0, 0
-        client.box = libnacl.public.Box(sk=client_key, pk=message['key'])
+        cn, csn, ssn = 0, 0, 0  # TODO: Set channel number
+        client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # client-auth
         yield from client.send(0x00, {
@@ -126,5 +126,36 @@ class TestProtocol:
         assert len(message['responders']) == 0
         ssn += 1
 
-        # ...
-        raise NotImplementedError
+    @pytest.mark.asyncio
+    def test_responder_handshake(self, cookie, responder_key, client_factory):
+        client = yield from client_factory()
+
+        # server-hello, already checked in another test
+        _, message, _ = yield from client.recv()
+        server_cookie = message['my-cookie']
+
+        # client-hello
+        yield from client.send(0x00, {
+            'type': 'client-hello',
+            'key': responder_key.pk,
+        })
+
+        cn, csn, ssn = 0, 0, 0  # TODO: Set channel number
+        client.box = libnacl.public.Box(sk=responder_key, pk=message['key'])
+
+        # client-auth
+        yield from client.send(0x00, {
+            'type': 'client-auth',
+            'your-cookie': server_cookie,
+            'my-cookie': cookie
+        }, nonce=cookie + struct.pack('!2I', cn, csn))
+        csn += 1
+
+        # server-auth
+        _, message, nonce = yield from client.recv()
+        assert nonce == server_cookie + struct.pack('!2I', cn, ssn)
+        assert message['type'] == 'server-auth'
+        assert message['your-cookie'] == cookie
+        assert not message['initiator-connected']
+        ssn += 1
+

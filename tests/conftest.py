@@ -117,9 +117,17 @@ def server_key():
 
 
 @pytest.fixture(scope='module')
-def client_key():
+def initiator_key():
     """
-    Return a client NaCl key pair to be used by the client only.
+    Return a client NaCl key pair to be used by the initiator only.
+    """
+    return key_pair()
+
+
+@pytest.fixture(scope='module')
+def responder_key():
+    """
+    Return a client NaCl key pair to be used by the responder only.
     """
     return key_pair()
 
@@ -203,7 +211,7 @@ class Client:
 
 
 @pytest.fixture(scope='module')
-def ws_client_factory(client_key, url, event_loop, server):
+def ws_client_factory(initiator_key, url, event_loop, server):
     """
     Return a simplified :class:`websockets.client.connect` wrapper
     where no parameters are required.
@@ -216,7 +224,7 @@ def ws_client_factory(client_key, url, event_loop, server):
 
     def _ws_client_factory(path=None, **kwargs):
         if path is None:
-            path = '{}/{}'.format(url, key_path(client_key))
+            path = '{}/{}'.format(url, key_path(initiator_key))
         _kwargs = {
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
@@ -228,7 +236,7 @@ def ws_client_factory(client_key, url, event_loop, server):
 
 
 @pytest.fixture(scope='module')
-def client_factory(client_key, url, event_loop, server, pack_message, unpack_message):
+def client_factory(initiator_key, url, event_loop, server, pack_message, unpack_message):
     """
     Return a simplified :class:`websockets.client.connect` wrapper
     where no parameters are required.
@@ -240,7 +248,7 @@ def client_factory(client_key, url, event_loop, server, pack_message, unpack_mes
     ssl_context.load_verify_locations(cafile=pytest.saltyrtc.cert)
 
     @asyncio.coroutine
-    def _client_factory(path=client_key, timeout=None, **kwargs):
+    def _client_factory(path=initiator_key, timeout=None, **kwargs):
         _kwargs = {
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,

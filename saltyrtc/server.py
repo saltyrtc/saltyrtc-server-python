@@ -138,6 +138,11 @@ class ServerProtocol(Protocol):
         except Exception as exc:
             path.log.exception('Closing due to exception:', exc)
             yield from client.close(code=CloseCode.internal_error.value)
+
+        # Remove client from path
+        path.remove_client(client)
+
+        # Remove protocol from server and stop
         self._server.unregister(self)
         path.log.debug('Worker stopped')
 
@@ -310,7 +315,7 @@ class ServerProtocol(Protocol):
         # Send server-auth
         message = ServerAuthMessage.create(client_cookie)
         path.log.debug('Sending server-auth without responder ids')
-        yield from initiator.send(message)
+        yield from responder.send(message)
 
     @asyncio.coroutine
     def keep_alive(self):

@@ -32,7 +32,21 @@ class Path:
 
     @property
     def empty(self):
-        return all((client is None for client in self._slots.values()))
+        """
+        Return `True` in case the path is empty. A call to this property
+        will also remove clients from the path whose connections are
+        closed but have not been removed from the path. (However, in
+        case that the path is not empty, this property does not ensure
+        that all disconnected clients will be removed.)
+        """
+        for id_, client in self._slots.items():
+            if client is not None:
+                if client.connection_closed.done():
+                    self.remove_client(id_)
+                    self.log.warning('Removed dead client')
+                else:
+                    return False
+        return True
 
     def get_initiator(self):
         """
@@ -51,8 +65,11 @@ class Path:
         """
         previous_initiator = self._slots.get(0x01)
         self._slots[0x01] = initiator
+        self.log.debug('Set initiator {}', initiator)
         # Update initiator's log name
         initiator.update_log_name(0x01)
+        # Assign id
+        initiator.id = 0x01
         # Return previous initiator
         return previous_initiator
 
@@ -88,19 +105,37 @@ class Path:
 
         Return the assigned slot identifier.
         """
-        for id_, client in self._slots:
-            if client is None:
+        for id_, client in self._slots.items():
+            if id_ > 0x01 and client is None:
                 self._slots[id_] = responder
+                self.log.debug('Added responder {}', responder)
                 # Update responder's log name
                 responder.update_log_name(id_)
-                # Return assigned slot id
+                # Set and return assigned slot id
+                responder.id = id_
                 return id_
         raise SlotsFullError('No free slots on path')
+
+    def remove_client(self, client):
+        """
+        Remove a client (initiator or responder) from the
+        :class:`Path`.
+
+        Arguments:
+             - `client`: The :class:`PathClient` instance.
+        """
+        id_ = client.id
+        if id_ is None:
+            # Client has not been assigned an id, yet. Nothing to do.
+            return
+        assert 0x00 < id_ <= 0xff
+        self._slots[id_] = None
+        self.log.debug('Removed {}', 'initiator' if id_ == 0x01 else 'responder')
 
 
 class PathClient:
     __slots__ = (
-        '_log', '_connection', '_client_key', '_server_key', '_box',
+        '_log', '_connection', '_client_key', '_server_key', '_box', '_id',
         'type', 'authenticated'
     )
 
@@ -110,6 +145,7 @@ class PathClient:
         self._client_key = initiator_key
         self._server_key = server_key
         self._box = None
+        self._id = None
         self.type = None
         self.authenticated = False
 
@@ -129,6 +165,21 @@ class PathClient:
         if self._server_key is None:
             self._server_key = libnacl.public.SecretKey()
         return self._server_key
+
+    @property
+    def id(self):
+        """
+        Return the assigned id on the :class:`Path`.
+        """
+        return self._id
+
+    @id.setter
+    def id(self, id_):
+        """
+        Assign the id. Only :class:`Path` may set the id!
+        """
+        self._id = id_
+        self._log.debug('Assigned id: {}', id_)
 
     @property
     def box(self):
