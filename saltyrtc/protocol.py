@@ -225,6 +225,7 @@ class PathClient:
         # Pack if not packed
         if isinstance(message, AbstractMessage):
             self._log.debug('Packing message')
+            self._log.trace('Server >> {}', message)
             data = message.pack(self)
         else:
             data = message
@@ -251,8 +252,10 @@ class PathClient:
         self._log.debug('Received message')
 
         # Unpack data and return
-        self._log.debug('Unpacking message')
-        return unpack(self, data)
+        data = unpack(self, data)
+        self._log.debug('Unpacked message')
+        self._log.trace('Server << {}', data)
+        return data
 
     @asyncio.coroutine
     def ping(self):

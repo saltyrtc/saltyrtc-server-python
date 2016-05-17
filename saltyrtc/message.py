@@ -95,6 +95,10 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         super().__init__(receiver, receiver_type)
         self.payload = {} if payload is None else payload
 
+    def __str__(self):
+        return '{}(encrypted={}, data={})'.format(
+            self.__class__.__name__, self.encrypted, self.payload)
+
     @classmethod
     def _get_message_classes(cls):
         if getattr(cls, '_message_classes', None) is None:
