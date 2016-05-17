@@ -114,7 +114,8 @@ class ServerProtocol(Protocol):
         # Get path and client instance as early as possible
         try:
             path, client = self.get_path_client(connection, ws_path)
-        except PathError:
+        except PathError as exc:
+            self._log.warning('Closing due to path error: {}', exc)
             yield from connection.close(code=CloseCode.protocol_error.value)
             return
         path.log.debug('Worker started')
@@ -130,10 +131,10 @@ class ServerProtocol(Protocol):
         except Disconnected:
             path.log.notice('Connection closed by remote')
         except SlotsFullError as exc:
-            path.log.info('Closing because all path slots are full: {}', str(exc))
+            path.log.info('Closing because all path slots are full: {}', exc)
             yield from client.close(code=CloseCode.path_full_error.value)
         except SignalingError as exc:
-            path.log.warning('Closing due to protocol error: {}', str(exc))
+            path.log.warning('Closing due to protocol error: {}', exc)
             yield from client.close(code=CloseCode.protocol_error.value)
         except Exception as exc:
             path.log.exception('Closing due to exception:', exc)
