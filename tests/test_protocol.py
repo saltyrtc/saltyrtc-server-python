@@ -54,7 +54,7 @@ class TestProtocol:
         assert receiver == 0x00
         assert message['type'] == 'server-hello'
         assert len(message['key']) == 32
-        assert len(message['my-cookie']) == 16
+        assert len(message['my_cookie']) == 16
         yield from client.ws_client.close()
 
     @pytest.mark.asyncio
@@ -105,15 +105,15 @@ class TestProtocol:
 
         # server-hello, already checked in another test
         _, message, _ = yield from client.recv()
-        cookie = message['my-cookie']
+        cookie = message['my_cookie']
         cn, csn, ssn = 0, 0, 0
         client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # client-auth
         yield from client.send(0x00, {
             'type': 'client-auth',
-            'your-cookie': cookie,
-            'my-cookie': cookie
+            'your_cookie': cookie,
+            'my_cookie': cookie
         }, nonce=cookie + struct.pack('!2I', cn, csn))
         csn += 1
 
@@ -128,15 +128,15 @@ class TestProtocol:
 
         # server-hello, already checked in another test
         _, message, _ = yield from client.recv()
-        server_cookie = message['my-cookie']
+        server_cookie = message['my_cookie']
         cn, csn, ssn = 0, 0, 0
         client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # client-auth
         yield from client.send(0x00, {
             'type': 'client-auth',
-            'your-cookie': server_cookie,
-            'my-cookie': cookie
+            'your_cookie': server_cookie,
+            'my_cookie': cookie
         }, nonce=b'\x00' * 16 + struct.pack('!2I', cn, csn))
         csn += 1
 
@@ -151,15 +151,15 @@ class TestProtocol:
 
         # server-hello, already checked in another test
         _, message, _ = yield from client.recv()
-        server_cookie = message['my-cookie']
+        server_cookie = message['my_cookie']
         cn, csn, ssn = 0, 0, 0
         client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # client-auth
         yield from client.send(0x00, {
             'type': 'client-auth',
-            'your-cookie': server_cookie,
-            'my-cookie': cookie
+            'your_cookie': server_cookie,
+            'my_cookie': cookie
         }, nonce=cookie + struct.pack('!2I', cn, csn))
         csn += 1
 
@@ -167,8 +167,8 @@ class TestProtocol:
         _, message, nonce = yield from client.recv()
         assert nonce == server_cookie + struct.pack('!2I', cn, ssn)
         assert message['type'] == 'server-auth'
-        assert message['your-cookie'] == cookie
-        assert 'initiator-connected' not in message
+        assert message['your_cookie'] == cookie
+        assert 'initiator_connected' not in message
         assert len(message['responders']) == 0
         ssn += 1
 
@@ -178,7 +178,7 @@ class TestProtocol:
 
         # server-hello, already checked in another test
         _, message, _ = yield from client.recv()
-        server_cookie = message['my-cookie']
+        server_cookie = message['my_cookie']
 
         # client-hello
         yield from client.send(0x00, {
@@ -192,8 +192,8 @@ class TestProtocol:
         # client-auth
         yield from client.send(0x00, {
             'type': 'client-auth',
-            'your-cookie': server_cookie,
-            'my-cookie': cookie
+            'your_cookie': server_cookie,
+            'my_cookie': cookie
         }, nonce=cookie + struct.pack('!2I', cn, csn))
         csn += 1
 
@@ -201,7 +201,7 @@ class TestProtocol:
         _, message, nonce = yield from client.recv()
         assert nonce == server_cookie + struct.pack('!2I', cn, ssn)
         assert message['type'] == 'server-auth'
-        assert message['your-cookie'] == cookie
-        assert not message['initiator-connected']
+        assert message['your_cookie'] == cookie
+        assert not message['initiator_connected']
         ssn += 1
 
