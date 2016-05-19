@@ -1,6 +1,5 @@
 import asyncio
 import binascii
-import os
 
 import websockets
 import libnacl
@@ -9,13 +8,12 @@ import libnacl.public
 from . import util
 from .exception import *
 from .common import (
-    COOKIE_LENGTH,
     RELAY_TIMEOUT,
     KEEP_ALIVE_INTERVAL,
     KEEP_ALIVE_TIMEOUT,
     SubProtocol,
     CloseCode,
-    ReceiverType,
+    AddressType,
     MessageType,
 )
 from .protocol import (
@@ -187,14 +185,14 @@ class ServerProtocol(Protocol):
 
         # Keep alive and poll for messages
         tasks = []
-        if client.type == ReceiverType.initiator:
+        if client.type == AddressType.initiator:
             path.log.debug('Starting runner for initiator {}', client)
             tasks.append(self.initiator_loop())
-        elif client.type == ReceiverType.responder:
+        elif client.type == AddressType.responder:
             path.log.debug('Starting runner for responder {}', client)
             tasks.append(self.responder_loop())
         else:
-            raise ValueError('Invalid receiver type: {}'.format(client.type))
+            raise ValueError('Invalid address type: {}'.format(client.type))
         path.log.debug('Starting keep-alive task for client {}', client)
         tasks.append(self.keep_alive())
 
@@ -225,8 +223,7 @@ class ServerProtocol(Protocol):
         path, client = self.path, self.client
 
         # Send server-hello
-        server_cookie = os.urandom(COOKIE_LENGTH)
-        message = ServerHelloMessage.create(client.server_key.pk, server_cookie)
+        message = ServerHelloMessage.create(0x00, client.id, client.server_key.pk)
         path.log.debug('Sending server-hello')
         yield from client.send(message)
 
@@ -236,20 +233,20 @@ class ServerProtocol(Protocol):
         if message.type == MessageType.client_auth:
             path.log.debug('Received client-auth')
             # Client is the initiator
-            client.type = ReceiverType.initiator
-            yield from self.handshake_initiator(message, server_cookie)
+            client.type = AddressType.initiator
+            yield from self.handshake_initiator(message)
         elif message.type == MessageType.client_hello:
             path.log.debug('Received client-hello')
             # Client is a responder
-            client.type = ReceiverType.responder
-            yield from self.handshake_responder(message, server_cookie)
+            client.type = AddressType.responder
+            yield from self.handshake_responder(message)
 
         else:
             error = "Expected 'client-hello' or 'client-auth', got '{}'"
             raise MessageFlowError(error.format(message.type))
 
     @asyncio.coroutine
-    def handshake_initiator(self, message, server_cookie):
+    def handshake_initiator(self, message):
         """
         Disconnected
         MessageError
@@ -258,12 +255,9 @@ class ServerProtocol(Protocol):
         path, initiator = self.path, self.client
 
         # Validate cookie
-        path.log.debug('Validating cookie')
-        if not util.consteq(message.server_cookie, server_cookie):
-            raise MessageError('Cookies do not match')
+        self._validate_cookie(path, message.server_cookie, initiator.cookie_out)
 
         # Authenticated
-        initiator.authenticated = True
         previous_initiator = path.set_initiator(initiator)
         if previous_initiator is not None:
             # Drop previous initiator (we don't care about any exceptions)
@@ -271,14 +265,14 @@ class ServerProtocol(Protocol):
             self._loop.create_task(previous_initiator.close())
 
         # Send server-auth
-        client_cookie = message.client_cookie
         responder_ids = path.get_responder_ids()
-        message = ServerAuthMessage.create(client_cookie, responder_ids=responder_ids)
+        message = ServerAuthMessage.create(
+            0x00, initiator.id, initiator.cookie_in, responder_ids=responder_ids)
         path.log.debug('Sending server-auth including responder ids')
         yield from initiator.send(message)
 
     @asyncio.coroutine
-    def handshake_responder(self, message, server_cookie):
+    def handshake_responder(self, message):
         """
         Disconnected
         MessageError
@@ -297,24 +291,24 @@ class ServerProtocol(Protocol):
             raise MessageFlowError(error.format(message.type))
 
         # Validate cookie
-        if not util.consteq(message.server_cookie, server_cookie):
-            raise MessageError('Cookies do not match')
+        self._validate_cookie(path, message.server_cookie, responder.cookie_out)
 
         # Authenticated
-        responder.authenticated = True
         id_ = path.add_responder(responder)
-        client_cookie = message.client_cookie
 
         # Send new-responder message if initiator is present
         initiator = path.get_initiator()
-        if initiator is not None:
-            message = NewResponderMessage.create(id_)
+        initiator_connected = initiator is not None
+        if initiator_connected:
+            message = NewResponderMessage.create(0x00, responder.id, id_)
             path.log.debug('Sending new-responder to initiator')
             # TODO: Handle exceptions?
             self._loop.create_task(initiator.send(message))
 
         # Send server-auth
-        message = ServerAuthMessage.create(client_cookie)
+        message = ServerAuthMessage.create(
+            0x00, responder.id, responder.cookie_in,
+            initiator_connected=initiator_connected)
         path.log.debug('Sending server-auth without responder ids')
         yield from responder.send(message)
 
@@ -352,7 +346,7 @@ class ServerProtocol(Protocol):
             # Relay
             if isinstance(message, RawMessage):
                 # Lookup responder
-                responder = path.get_responder(message.receiver)
+                responder = path.get_responder(message.destination)
                 # Send to responder
                 coroutine = self.relay_message(responder, message)
                 self._loop.create_task(coroutine)
@@ -389,7 +383,7 @@ class ServerProtocol(Protocol):
                 raise MessageFlowError(error.format(message.type))
 
     @asyncio.coroutine
-    def relay_message(self, receiver, message):
+    def relay_message(self, destination, message):
         path, sender = self.path, self.client
 
         # Prepare message
@@ -399,18 +393,22 @@ class ServerProtocol(Protocol):
         @asyncio.coroutine
         def send_error_message():
             path.log.debug('Relaying failed, reporting send-error to {}', sender)
-            error = SendErrorMessage.create(libnacl.crypto_hash_sha256(message_data))
+            error = SendErrorMessage.create(
+                0x00, sender.id, libnacl.crypto_hash_sha256(message_data))
             # TODO: Handle exceptions, what if sender is gone?
             yield from sender.send(error)
 
-        # Receiver not set? Send send-error to initiator
-        if receiver is None:
+        # Destination not set? Send send-error to sender
+        if destination is None:
+            error_message = ('Cannot relay message from {}, no connection for given '
+                             'destination id {}')
+            path.log.notice(error_message, sender, destination)
             return (yield from send_error_message())
 
-        path.log.debug('Sending relay message from {} to {}', sender, receiver)
+        path.log.debug('Sending relay message from {} to {}', sender, destination)
         try:
-            # Relay message to receiver
-            future = receiver.send(message)
+            # Relay message to destination
+            future = destination.send(message)
             yield from asyncio.wait_for(future, RELAY_TIMEOUT, loop=self._loop)
         except asyncio.TimeoutError:
             # Timed out or some other error, Send send-error to original sender
@@ -419,6 +417,12 @@ class ServerProtocol(Protocol):
         except Disconnected:
             path.log.debug('Receiver disconnected')
             yield from send_error_message()
+
+    @classmethod
+    def _validate_cookie(cls, path, expected_cookie, actual_cookie):
+        path.log.debug('Validating cookie')
+        if not util.consteq(expected_cookie, actual_cookie):
+            raise MessageError('Cookies do not match')
 
 
 class Paths:

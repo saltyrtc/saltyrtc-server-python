@@ -193,12 +193,12 @@ class Client:
         self.session_key = None
         self.box = None
 
-    def send(self, receiver, message, nonce=None, timeout=None):
+    def send(self, nonce, message, timeout=None):
         if timeout is None:
             timeout = self.timeout
         yield from self.pack_and_send(
-            self.ws_client, receiver, message,
-            nonce=nonce, box=self.box, timeout=timeout
+            self.ws_client, nonce, message,
+            box=self.box, timeout=timeout
         )
 
     def recv(self, timeout=None):
@@ -208,6 +208,9 @@ class Client:
             self.ws_client,
             box=self.box, timeout=timeout
         ))
+
+    def close(self):
+        return self.ws_client.close()
 
 
 @pytest.fixture(scope='module')
@@ -272,28 +275,47 @@ def unpack_message(event_loop):
     def _unpack_message(client, box=None, timeout=None):
         timeout = _get_timeout(timeout)
         data = yield from asyncio.wait_for(client.recv(), timeout, loop=event_loop)
-        receiver, *_ = struct.unpack('!B', data[:1])
-        data = data[1:]
+        nonce = data[:saltyrtc.NONCE_LENGTH]
+        (cookie, source, destination, channel_fragment,
+         sequence_number) = struct.unpack(saltyrtc.NONCE_FORMATTER, nonce)
+        data = data[saltyrtc.NONCE_LENGTH:]
         if box is not None:
-            nonce = data[:24]
-            data = box.decrypt(data[24:], nonce=nonce)
+            data = box.decrypt(data, nonce=nonce)
         else:
             nonce = None
         message = umsgpack.unpackb(data)
-        return receiver, message, nonce
+        return (
+            message,
+            nonce,
+            cookie,
+            source, destination,
+            channel_fragment,
+            sequence_number,
+        )
     return _unpack_message
+
+
+@pytest.fixture(scope='module')
+def pack_nonce():
+    def _pack_nonce(cookie, source, destination, channel_fragment, sequence_number):
+        return struct.pack(
+            saltyrtc.NONCE_FORMATTER,
+            cookie,
+            source, destination,
+            channel_fragment,
+            sequence_number
+        )
+    return _pack_nonce
 
 
 @pytest.fixture(scope='module')
 def pack_message(event_loop):
     @asyncio.coroutine
-    def _pack_message(client, receiver, message, nonce=None, box=None, timeout=None):
-        receiver = struct.pack('!B', receiver)
+    def _pack_message(client, nonce, message, box=None, timeout=None):
         data = umsgpack.packb(message)
         if box is not None:
-            assert nonce is not None
-            data = box.encrypt(data, nonce=nonce)
-        data = b''.join((receiver, data))
+            _, data = box.encrypt(data, nonce=nonce, pack_nonce=False)
+        data = b''.join((nonce, data))
         timeout = _get_timeout(timeout)
         yield from asyncio.wait_for(client.send(data), timeout, loop=event_loop)
     return _pack_message

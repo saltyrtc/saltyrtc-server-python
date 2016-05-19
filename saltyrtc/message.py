@@ -1,16 +1,21 @@
 import abc
 import struct
 import io
+import binascii
 
 # noinspection PyPackageRequirements
 import umsgpack
 
 from .exception import *
 from .common import (
-    ReceiverType, MessageType,
+    NONCE_LENGTH,
+    NONCE_FORMATTER,
+    COOKIE_LENGTH,
+    AddressType,
+    MessageType,
     validate_public_key,
-    validate_cookies,
     validate_cookie,
+    validate_initiator_connected,
     validate_responder_id,
     validate_responder_ids,
     validate_hash,
@@ -40,9 +45,12 @@ def unpack(client, data):
 
 
 class AbstractMessage(metaclass=abc.ABCMeta):
-    def __init__(self, receiver, receiver_type):
-        self.receiver = receiver
-        self.receiver_type = receiver_type
+    def __init__(self, source, destination):
+        self.source = source
+        self.destination = destination
+        self.source_type = AddressType.from_address(source)
+        self.destination_type = AddressType.from_address(destination)
+        self._nonce = None
 
     @abc.abstractmethod
     def pack(self, client):
@@ -75,29 +83,35 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
     type = None
     encrypted = None
 
-    def __new__(
-            cls, payload, *args,
-            receiver=ReceiverType.server.value, receiver_type=None, **kwargs
-    ):
+    def __new__(cls, payload, *args, **kwargs):
         # Ensure the class has implemented a class-level `type` attribute
         if cls.type not in MessageType:
             message = 'Cannot instantiate class {} with invalid message type: {}'
             raise TypeError(message.format(cls.__name__, cls.type))
+
         # Ensure the class has implemented a class-level `encrypted` flag
         if cls.encrypted is not True and cls.encrypted is not False:
             message = 'Cannot instantiate class {} with invalid encrypted flag: {}'
             raise TypeError(message.format(cls.__name__, cls.encrypted))
+
         return super().__new__(cls)
 
-    def __init__(self, payload, receiver=ReceiverType.server.value, receiver_type=None):
-        if receiver_type is None:
-            receiver_type = ReceiverType.from_receiver(receiver)
-        super().__init__(receiver, receiver_type)
+    def __init__(self, source, destination, payload):
+        super().__init__(source, destination)
         self.payload = {} if payload is None else payload
 
     def __str__(self):
-        return '{}(encrypted={}, data={})'.format(
-            self.__class__.__name__, self.encrypted, self.payload)
+        hex_cookie_length = COOKIE_LENGTH * 2
+        nonce_as_hex = binascii.hexlify(self._nonce).decode('ascii')
+        nonce_as_hex = '|'.join((
+            nonce_as_hex[:hex_cookie_length],
+            nonce_as_hex[hex_cookie_length:hex_cookie_length + 2],
+            nonce_as_hex[hex_cookie_length + 2:hex_cookie_length + 4],
+            nonce_as_hex[hex_cookie_length + 4:hex_cookie_length + 8],
+            nonce_as_hex[hex_cookie_length + 8:]
+        ))
+        return '{}(encrypted={}, nonce={}, data={})'.format(
+            self.__class__.__name__, self.encrypted, nonce_as_hex, self.payload)
 
     @classmethod
     def _get_message_classes(cls):
@@ -120,13 +134,10 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         """
         data = io.BytesIO()
 
-        # Check receiver type
-        is_from_server = self.receiver_type == ReceiverType.server
-        if not is_from_server and not client.p2p_allowed(self.receiver_type):
-            raise MessageFlowError('Currently not allowed to dispatch P2P messages')
-
-        # Pack receiver byte
-        data.write(self._pack_receiver())
+        # Pack nonce
+        nonce = self._pack_nonce(client)
+        self._nonce = nonce  # Stored for str representation
+        data.write(nonce)
 
         # Pack payload
         payload = self._pack_payload()
@@ -135,7 +146,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         if self.encrypted:
             if not client.authenticated:
                 raise MessageFlowError('Cannot encrypt payload, no box available')
-            payload = self._encrypt_payload(client, payload)
+            payload = self._encrypt_payload(client, nonce, payload)
 
         # Append payload and return as bytes
         data.write(payload)
@@ -147,12 +158,13 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         MessageError
         MessageFlowError
         """
-        receiver, receiver_type = cls._unpack_receiver(data)
+        nonce, source, destination = cls._unpack_nonce(data, client)
+        destination_type = AddressType.from_address(destination)
 
         # Decrypt if directed at us and keys have been exchanged
         # or just return a raw message to be sent to another client
-        data = data[1:]
-        if receiver_type == ReceiverType.server:
+        data = data[NONCE_LENGTH:]
+        if destination_type == AddressType.server:
             if not client.authenticated and client.type is None:
                 payload = None
 
@@ -164,7 +176,8 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
                 # Try client-auth (encrypted)
                 try:
-                    payload = cls._unpack_payload(cls._decrypt_payload(client, data))
+                    payload = cls._unpack_payload(
+                        cls._decrypt_payload(client, nonce, data))
                 except MessageError:
                     pass
 
@@ -174,14 +187,17 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
                     raise MessageError(message)
             else:
                 # Decrypt and unpack payload
-                payload = cls._unpack_payload(cls._decrypt_payload(client, data))
+                payload = cls._unpack_payload(
+                    cls._decrypt_payload(client, nonce, data))
         else:
-            # Is the client allowed to send messages to the receiver type?
-            if client.p2p_allowed(receiver_type):
-                return RawMessage(receiver, receiver_type, data)
+            # Is the client allowed to send messages to the address type?
+            if client.p2p_allowed(destination_type):
+                message = RawMessage(source, destination, data)
+                message._nonce = nonce  # Stored for str representation
+                return message
             else:
                 error = 'Not allowed to relay messages to {}'
-                raise MessageFlowError(error.format(receiver_type))
+                raise MessageFlowError(error.format(destination_type))
 
         # Unpack type
         type_ = payload.get('type')
@@ -199,30 +215,57 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         message_class.check_payload(client, payload)
 
         # Return instance
-        return message_class(payload, receiver=receiver, receiver_type=receiver_type)
+        message = message_class(source, destination, payload)
+        message._nonce = nonce  # Stored for str representation
+        return message
 
-    def _pack_receiver(self):
+    def _pack_nonce(self, client):
         """
         MessageError
         """
         try:
-            return struct.pack('!B', self.receiver)
+            return struct.pack(
+                NONCE_FORMATTER,
+                client.cookie_out,
+                self.source, self.destination,
+                client.channel_fragment_out,
+                client.sequence_number_out
+            )
         except struct.error as exc:
-            raise MessageError('Could not pack receiver byte') from exc
+            raise MessageError('Could not pack nonce') from exc
 
     @classmethod
-    def _unpack_receiver(cls, data):
+    def _unpack_nonce(cls, data, client):
         """
         MessageError
         """
+        nonce = data[:NONCE_LENGTH]  # TODO: Catch slice error?
         try:
-            receiver, *_ = struct.unpack('!B', data[:1])
+            (cookie_in,
+             source, destination,
+             channel_fragment_in,
+             sequence_number_in) = struct.unpack(NONCE_FORMATTER, nonce)
         except struct.error as exc:
-            raise MessageError('Could not unpack receiver byte') from exc
+            raise MessageError('Could not unpack nonce') from exc
 
-        # Determine receiver type
-        receiver_type = ReceiverType.from_receiver(receiver)
-        return receiver, receiver_type
+        # Validate source
+        if source != client.id:
+            error_message = 'Identities do not match, expected {}, got {}'
+            raise MessageError(error_message.format(client.id, source))
+
+        # Validate sequence number
+        if sequence_number_in != client.sequence_number_in:
+            raise MessageError('Invalid sequence number, expected {}, got {}'.format(
+                client.sequence_number_in, sequence_number_in))
+
+        # Validate cookie and channel fragment
+        if not client.valid_cookie(cookie_in):
+            raise MessageError('Invalid cookie: {}'.format(cookie_in))
+        if not client.valid_channel_fragment(channel_fragment_in):
+            error_message = 'Invalid channel fragment: {}'
+            raise MessageError(error_message.format(channel_fragment_in))
+
+        return nonce, source, destination
 
     def _pack_payload(self):
         try:
@@ -238,23 +281,24 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
             raise MessageError('Could not unpack msgpack payload') from exc
 
     @classmethod
-    def _encrypt_payload(cls, client, payload):
+    def _encrypt_payload(cls, client, nonce, payload):
         try:
-            return client.box.encrypt(payload)
+            _, data = client.box.encrypt(payload, nonce=nonce, pack_nonce=False)
+            return data
         except ValueError as exc:
             raise MessageError('Could not encrypt payload') from exc
 
     @classmethod
-    def _decrypt_payload(cls, client, payload):
+    def _decrypt_payload(cls, client, nonce, data):
         try:
-            return client.box.decrypt(payload)
+            return client.box.decrypt(data, nonce=nonce)
         except ValueError as exc:
             raise MessageError('Could not decrypt payload') from exc
 
 
 class RawMessage(AbstractMessage):
-    def __init__(self, receiver, receiver_type, data):
-        super().__init__(receiver, receiver_type)
+    def __init__(self, source, destination, data):
+        super().__init__(source, destination)
         self._data = data
 
     def pack(self, client):
@@ -274,12 +318,11 @@ class ServerHelloMessage(AbstractBaseMessage):
     encrypted = False
 
     @classmethod
-    def create(cls, server_public_key, server_cookie):
+    def create(cls, source, destination, server_public_key):
         # noinspection PyCallingNonCallable
-        return cls({
+        return cls(source, destination, {
             'type': cls.type.value,
             'key': server_public_key,
-            'my_cookie': server_cookie,
         })
 
     @classmethod
@@ -288,15 +331,10 @@ class ServerHelloMessage(AbstractBaseMessage):
         MessageError
         """
         validate_public_key(payload.get('key'))
-        validate_cookie(payload.get('my_cookie'))
 
     @property
     def server_public_key(self):
         return self.payload['key']
-
-    @property
-    def server_cookie(self):
-        return self.payload['my_cookie']
 
 
 class ClientHelloMessage(AbstractBaseMessage):
@@ -304,9 +342,9 @@ class ClientHelloMessage(AbstractBaseMessage):
     encrypted = False
 
     @classmethod
-    def create(cls, client_public_key):
+    def create(cls, source, destination, client_public_key):
         # noinspection PyCallingNonCallable
-        return cls({
+        return cls(source, destination, {
             'type': cls.type.value,
             'key': client_public_key,
         })
@@ -328,12 +366,11 @@ class ClientAuthMessage(AbstractBaseMessage):
     encrypted = True
 
     @classmethod
-    def create(cls, server_cookie, client_cookie):
+    def create(cls, source, destination, server_cookie):
         # noinspection PyCallingNonCallable
-        return cls({
+        return cls(source, destination, {
             'type': cls.type.value,
             'your_cookie': server_cookie,
-            'my_cookie': client_cookie,
         })
 
     @classmethod
@@ -341,18 +378,11 @@ class ClientAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_cookies(
-            payload.get('your_cookie'),
-            payload.get('my_cookie')
-        )
+        validate_cookie(payload.get('your_cookie'))
 
     @property
     def server_cookie(self):
         return self.payload['your_cookie']
-
-    @property
-    def client_cookie(self):
-        return self.payload['my_cookie']
 
 
 class ServerAuthMessage(AbstractBaseMessage):
@@ -360,15 +390,20 @@ class ServerAuthMessage(AbstractBaseMessage):
     encrypted = True
 
     @classmethod
-    def create(cls, client_cookie, responder_ids=None):
+    def create(
+            cls, source, destination, client_cookie,
+            initiator_connected=None, responder_ids=None
+    ):
         payload = {
             'type': cls.type.value,
             'your_cookie': client_cookie,
         }
+        if initiator_connected is not None:
+            payload['initiator_connected'] = initiator_connected
         if responder_ids is not None:
             payload['responders'] = responder_ids
         # noinspection PyCallingNonCallable
-        return cls(payload)
+        return cls(source, destination, payload)
 
     @classmethod
     def check_payload(cls, client, payload):
@@ -378,6 +413,9 @@ class ServerAuthMessage(AbstractBaseMessage):
         responders = payload.get('responders')
         if responders is not None:
             validate_responder_ids(responders)
+        initiator_connected = payload.get('initiator_connected')
+        if initiator_connected is not None:
+            validate_initiator_connected(responders)
 
     @property
     def client_cookie(self):
@@ -396,9 +434,9 @@ class NewResponderMessage(AbstractBaseMessage):
     encrypted = True
 
     @classmethod
-    def create(cls, responder_id):
+    def create(cls, source, destination, responder_id):
         # noinspection PyCallingNonCallable
-        return cls({
+        return cls(source, destination, {
             'type': cls.type.value,
             'id': responder_id,
         })
@@ -420,9 +458,9 @@ class DropResponderMessage(AbstractBaseMessage):
     encrypted = True
 
     @classmethod
-    def create(cls, responder_id):
+    def create(cls, source, destination, responder_id):
         # noinspection PyCallingNonCallable
-        return cls({
+        return cls(source, destination, {
             'type': cls.type.value,
             'id': responder_id,
         })
@@ -444,9 +482,9 @@ class SendErrorMessage(AbstractBaseMessage):
     encrypted = True
 
     @classmethod
-    def create(cls, message_hash):
+    def create(cls, source, destination, message_hash):
         # noinspection PyCallingNonCallable
-        return cls({
+        return cls(source, destination, {
             'type': cls.type.value,
             'hash': message_hash,
         })

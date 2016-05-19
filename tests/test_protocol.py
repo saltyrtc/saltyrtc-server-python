@@ -50,11 +50,11 @@ class TestProtocol:
         The server must send a valid `server-hello` on connection.
         """
         client = yield from client_factory()
-        receiver, message, _ = yield from client.recv()
-        assert receiver == 0x00
+        message, _, sck, s, d, scf, ssn = yield from client.recv()
+        assert s == d == 0x00
+        assert ssn == 0
         assert message['type'] == 'server-hello'
         assert len(message['key']) == 32
-        assert len(message['my_cookie']) == 16
         yield from client.ws_client.close()
 
     @pytest.mark.asyncio
@@ -65,7 +65,7 @@ class TestProtocol:
         """
         client = yield from client_factory()
         yield from client.recv()
-        yield from client.send(0x00, {'type': 'meow-hello'})
+        yield from client.send(b'\x00' * 24, {'type': 'meow-hello'})
         yield from sleep()
         assert not client.ws_client.open
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
@@ -78,7 +78,7 @@ class TestProtocol:
         """
         client = yield from client_factory()
         yield from client.recv()
-        yield from client.send(0x00, {'type': 'client-hello'})
+        yield from client.send(b'\x00' * 24, {'type': 'client-hello'})
         yield from sleep()
         assert not client.ws_client.open
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
@@ -91,7 +91,7 @@ class TestProtocol:
         """
         client = yield from client_factory()
         yield from client.recv()
-        yield from client.send(0x00, {
+        yield from client.send(b'\x00' * 24, {
             'type': 'client-hello',
             'key': b'meow?'
         })
@@ -100,21 +100,19 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_duplicated_cookie(self, sleep, initiator_key, client_factory):
+    def test_duplicated_cookie(self, sleep, initiator_key, pack_nonce, client_factory):
         client = yield from client_factory()
 
         # server-hello, already checked in another test
-        _, message, _ = yield from client.recv()
-        cookie = message['my_cookie']
-        cn, csn, ssn = 0, 0, 0
+        message, _, sck, s, d, scf, ssn = yield from client.recv()
         client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # client-auth
-        yield from client.send(0x00, {
+        cck, ccf, csn = sck, b'\x11\x11', 0
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccf, csn), {
             'type': 'client-auth',
-            'your_cookie': cookie,
-            'my_cookie': cookie
-        }, nonce=cookie + struct.pack('!2I', cn, csn))
+            'your_cookie': sck,
+        })
         csn += 1
 
         # Expect protocol error
@@ -123,85 +121,68 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_invalid_cookie(self, sleep, cookie, initiator_key, client_factory):
+    def test_initiator_handshake(self, cookie, initiator_key, pack_nonce, client_factory):
         client = yield from client_factory()
 
         # server-hello, already checked in another test
-        _, message, _ = yield from client.recv()
-        server_cookie = message['my_cookie']
-        cn, csn, ssn = 0, 0, 0
+        message, _, sck, s, d, scf, ssn = yield from client.recv()
         client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # client-auth
-        yield from client.send(0x00, {
+        cck, ccf, csn = cookie, b'\x11\x11', 0
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccf, csn), {
             'type': 'client-auth',
-            'your_cookie': server_cookie,
-            'my_cookie': cookie
-        }, nonce=b'\x00' * 16 + struct.pack('!2I', cn, csn))
-        csn += 1
-
-        # Expect protocol error
-        yield from sleep()
-        assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
-
-    @pytest.mark.asyncio
-    def test_initiator_handshake(self, cookie, initiator_key, client_factory):
-        client = yield from client_factory()
-
-        # server-hello, already checked in another test
-        _, message, _ = yield from client.recv()
-        server_cookie = message['my_cookie']
-        cn, csn, ssn = 0, 0, 0
-        client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
-
-        # client-auth
-        yield from client.send(0x00, {
-            'type': 'client-auth',
-            'your_cookie': server_cookie,
-            'my_cookie': cookie
-        }, nonce=cookie + struct.pack('!2I', cn, csn))
+            'your_cookie': sck,
+        })
         csn += 1
 
         # server-auth
-        _, message, nonce = yield from client.recv()
-        assert nonce == server_cookie + struct.pack('!2I', cn, ssn)
+        message, _, ck, s, d, cf, ssn = yield from client.recv()
+        assert s == 0x00
+        assert d == 0x01
+        assert sck == ck
+        assert scf == cf
+        assert ssn == 1
         assert message['type'] == 'server-auth'
-        assert message['your_cookie'] == cookie
+        assert message['your_cookie'] == cck
         assert 'initiator_connected' not in message
         assert len(message['responders']) == 0
-        ssn += 1
+
+        yield from client.close()
 
     @pytest.mark.asyncio
-    def test_responder_handshake(self, cookie, responder_key, client_factory):
+    def test_responder_handshake(self, cookie, responder_key, pack_nonce, client_factory):
         client = yield from client_factory()
 
         # server-hello, already checked in another test
-        _, message, _ = yield from client.recv()
-        server_cookie = message['my_cookie']
+        message, _, sck, s, d, scf, ssn = yield from client.recv()
 
         # client-hello
-        yield from client.send(0x00, {
+        cck, ccf, csn = cookie, b'\x11\x11', 0
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccf, csn), {
             'type': 'client-hello',
             'key': responder_key.pk,
         })
-
-        cn, csn, ssn = 0, 0, 0
-        client.box = libnacl.public.Box(sk=responder_key, pk=message['key'])
+        csn += 1
 
         # client-auth
-        yield from client.send(0x00, {
+        client.box = libnacl.public.Box(sk=responder_key, pk=message['key'])
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccf, csn), {
             'type': 'client-auth',
-            'your_cookie': server_cookie,
-            'my_cookie': cookie
-        }, nonce=cookie + struct.pack('!2I', cn, csn))
+            'your_cookie': sck,
+        })
         csn += 1
 
         # server-auth
-        _, message, nonce = yield from client.recv()
-        assert nonce == server_cookie + struct.pack('!2I', cn, ssn)
+        message, _, ck, s, d, cf, ssn = yield from client.recv()
+        assert s == 0x00
+        assert 0x01 < d <= 0xff
+        assert sck == ck
+        assert scf == cf
+        assert ssn == 1
         assert message['type'] == 'server-auth'
-        assert message['your_cookie'] == cookie
+        assert message['your_cookie'] == cck
+        assert 'responders' not in message
         assert not message['initiator_connected']
-        ssn += 1
 
+        yield from client.close()

@@ -4,6 +4,8 @@ from .exception import *
 
 __all__ = (
     'KEY_LENGTH',
+    'NONCE_LENGTH',
+    'NONCE_FORMATTER',
     'COOKIE_LENGTH',
     'HASH_LENGTH',
     'RELAY_TIMEOUT',
@@ -11,11 +13,11 @@ __all__ = (
     'KEEP_ALIVE_INTERVAL',
     'SubProtocol',
     'CloseCode',
-    'ReceiverType',
+    'AddressType',
     'MessageType',
     'validate_public_key',
-    'validate_cookies',
     'validate_cookie',
+    'validate_initiator_connected',
     'validate_responder_id',
     'validate_responder_ids',
     'validate_hash',
@@ -23,6 +25,8 @@ __all__ = (
 
 
 KEY_LENGTH = 32
+NONCE_LENGTH = 24
+NONCE_FORMATTER = '!16s2B2sI'
 COOKIE_LENGTH = 16
 HASH_LENGTH = 32
 RELAY_TIMEOUT = 30.0  # TODO: Sane?
@@ -45,17 +49,17 @@ class CloseCode(enum.IntEnum):
 
 
 @enum.unique
-class ReceiverType(enum.IntEnum):
+class AddressType(enum.IntEnum):
     server = 0x00
     initiator = 0x01
     responder = 0xff
 
     @classmethod
-    def from_receiver(cls, receiver):
-        if receiver > 0x01:
+    def from_address(cls, address):
+        if address > 0x01:
             return cls.responder
         else:
-            return cls(receiver)
+            return cls(address)
 
 
 @enum.unique
@@ -75,16 +79,14 @@ def validate_public_key(key):
         raise MessageError('Invalid key')
 
 
-def validate_cookies(*cookies):
-    if len(cookies) > len(set(cookies)):
-        raise MessageError('Duplicate cookies detected')
-    for cookie in cookies:
-        validate_cookie(cookie)
-
-
 def validate_cookie(cookie):
     if not isinstance(cookie, bytes) or len(cookie) != COOKIE_LENGTH:
         raise MessageError('Invalid cookie')
+
+
+def validate_initiator_connected(initiator_connected):
+    if not isinstance(initiator_connected, bool):
+        raise MessageError("Invalid value for field 'initiator_connected'")
 
 
 def validate_responder_id(responder):

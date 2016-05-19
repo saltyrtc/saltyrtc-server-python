@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 import websockets
 import libnacl
@@ -8,6 +9,7 @@ from . import util
 from .exception import *
 from .common import (
     KEY_LENGTH,
+    AddressType,
 )
 from .message import (
     unpack,
@@ -68,7 +70,8 @@ class Path:
         self.log.debug('Set initiator {}', initiator)
         # Update initiator's log name
         initiator.update_log_name(0x01)
-        # Assign id
+        # Authenticated, assign id
+        initiator.authenticated = True
         initiator.id = 0x01
         # Return previous initiator
         return previous_initiator
@@ -78,10 +81,10 @@ class Path:
         Return a responder's :class:`PathClient` instance or `None`.
 
         Arguments:
-            - `id_`: The receiver identifier of the responder.
+            - `id_`: The identifier of the responder.
 
         Raises :exc:`ValueError` if `id_` is not a valid responder
-        receiver identifier.
+        identifier.
         """
         if not 0x01 < id_ <= 0xff:
             raise ValueError('Invalid responder identifier')
@@ -111,7 +114,8 @@ class Path:
                 self.log.debug('Added responder {}', responder)
                 # Update responder's log name
                 responder.update_log_name(id_)
-                # Set and return assigned slot id
+                # Authenticated, set and return assigned slot id
+                responder.authenticated = True
                 responder.id = id_
                 return id_
         raise SlotsFullError('No free slots on path')
@@ -124,10 +128,11 @@ class Path:
         Arguments:
              - `client`: The :class:`PathClient` instance.
         """
-        id_ = client.id
-        if id_ is None:
-            # Client has not been assigned an id, yet. Nothing to do.
+
+        if not client.authenticated:
+            # Client has not been authenticated. Nothing to do.
             return
+        id_ = client.id
         assert 0x00 < id_ <= 0xff
         self._slots[id_] = None
         self.log.debug('Removed {}', 'initiator' if id_ == 0x01 else 'responder')
@@ -135,8 +140,10 @@ class Path:
 
 class PathClient:
     __slots__ = (
-        '_log', '_connection', '_client_key', '_server_key', '_box', '_id',
-        'type', 'authenticated'
+        '_log', '_connection', '_client_key', '_server_key',
+        '_sequence_number_out', '_sequence_number_in', '_cookie_out', '_cookie_in',
+        '_channel_fragment_out', '_channel_fragment_in',
+        '_box', '_id', 'type', 'authenticated'
     )
 
     def __init__(self, connection, path_number, initiator_key, server_key=None):
@@ -144,8 +151,14 @@ class PathClient:
         self._connection = connection
         self._client_key = initiator_key
         self._server_key = server_key
+        self._sequence_number_out = 0
+        self._sequence_number_in = 0
+        self._cookie_out = None
+        self._cookie_in = None
+        self._channel_fragment_out = None
+        self._channel_fragment_in = None
         self._box = None
-        self._id = None
+        self._id = 0x00
         self.type = None
         self.authenticated = False
 
@@ -156,15 +169,6 @@ class PathClient:
         WebSocket connection.
         """
         return self._connection.connection_closed
-
-    @property
-    def server_key(self):
-        """
-        Return the server's :class:`libnacl.public.SecretKey` instance.
-        """
-        if self._server_key is None:
-            self._server_key = libnacl.public.SecretKey()
-        return self._server_key
 
     @property
     def id(self):
@@ -182,6 +186,15 @@ class PathClient:
         self._log.debug('Assigned id: {}', id_)
 
     @property
+    def server_key(self):
+        """
+        Return the server's :class:`libnacl.public.SecretKey` instance.
+        """
+        if self._server_key is None:
+            self._server_key = libnacl.public.SecretKey()
+        return self._server_key
+
+    @property
     def box(self):
         """
         Return the :class:`libnacl.public.Box` instance.
@@ -189,6 +202,52 @@ class PathClient:
         if self._box is None:
             self._box = libnacl.public.Box(self.server_key, self._client_key)
         return self._box
+
+    @property
+    def sequence_number_out(self):
+        """
+        Return the sequence number of the server (outgoing messages).
+        """
+        return self._sequence_number_out
+
+    @property
+    def sequence_number_in(self):
+        """
+        Return the sequence number of the client (incoming messages).
+        """
+        return self._sequence_number_in
+
+    @property
+    def cookie_out(self):
+        """
+        Return the cookie of the server (outgoing messages).
+        """
+        if self._cookie_out is None:
+            self._cookie_out = os.urandom(16)
+        return self._cookie_out
+
+    @property
+    def cookie_in(self):
+        """
+        Return the cookie of the client (incoming messages).
+        """
+        return self._cookie_in
+
+    @property
+    def channel_fragment_out(self):
+        """
+        Return the channel fragment of the server (outgoing messages).
+        """
+        if self._channel_fragment_out is None:
+            self._channel_fragment_out = os.urandom(2)
+        return self._channel_fragment_out
+
+    @property
+    def channel_fragment_in(self):
+        """
+        Return the channel fragment of the client (incoming messages).
+        """
+        return self._channel_fragment_in
 
     def set_client_key(self, public_key):
         """
@@ -210,28 +269,63 @@ class PathClient:
         """
         self._log.name += '.{}'.format(slot_id)
 
-    def p2p_allowed(self, receiver_type):
+    def valid_cookie(self, cookie_in):
+        """
+        Return `True` if the 16 byte cookie is the valid cookie of the
+        client (or the cookie has not been set, yet).
+        """
+        if self.cookie_in is None:
+            # Ensure that the client uses another cookie than we do
+            if cookie_in == self.cookie_out:
+                return False
+
+            # First message: Set cookie
+            self._cookie_in = cookie_in
+            return True
+        else:
+            return cookie_in == self.cookie_in
+
+    def valid_channel_fragment(self, channel_fragment_in):
+        """
+        Return `True` if the 2 byte channel fragment is the valid
+        channel fragment of the client (or the channel fragment has not
+        been set, yet).
+        """
+        if self.channel_fragment_in is None:
+            self._channel_fragment_in = channel_fragment_in
+            return True
+        else:
+            return channel_fragment_in == self.channel_fragment_in
+
+    def p2p_allowed(self, destination_type):
         """
         Return `True` if :class:`RawMessage` instances are allowed and
-        can be sent to the requested :class:`ReceiverType`.
+        can be sent to the requested :class:`AddressType`.
         """
-        return self.authenticated and self.type != receiver_type
+        return self.authenticated and self.type != destination_type
 
     @asyncio.coroutine
     def send(self, message):
         """
         Disconnected
+        MessageFlowError
         """
+        # Check source and destination type
+        is_from_server = message.source_type == AddressType.server
+        if not is_from_server and not self.p2p_allowed(message.destination_type):
+            raise MessageFlowError('Currently not allowed to dispatch P2P messages')
+
         # Pack if not packed
         if isinstance(message, AbstractMessage):
             self._log.debug('Packing message')
-            self._log.trace('server >> {}', message)
             data = message.pack(self)
+            self._log.trace('server >> {}', message)
         else:
             data = message
 
         # Send data
         self._log.debug('Sending message')
+        self._sequence_number_out += 1
         try:
             yield from self._connection.send(data)
         except websockets.ConnectionClosed as exc:
@@ -253,6 +347,7 @@ class PathClient:
 
         # Unpack data and return
         data = unpack(self, data)
+        self._sequence_number_in += 1
         self._log.debug('Unpacked message')
         self._log.trace('server << {}', data)
         return data
