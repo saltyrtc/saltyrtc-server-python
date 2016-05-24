@@ -1,9 +1,22 @@
 import os
+import sys
 import asyncio
 
 import logbook.more
 
 import saltyrtc
+
+
+def env(name, default=None):
+    return os.environ.get(name, default)
+
+
+def require_env(name):
+    value = env(name)
+    if value is None:
+        print("Missing '{}' env variable".format(name))
+        sys.exit(1)
+    return value
 
 
 def main():
@@ -14,8 +27,8 @@ def main():
 
     # Create SSL context
     ssl_context = saltyrtc.util.create_ssl_context(
-        certfile='PATH_TO_SSL_CERTIFICATE',
-        keyfile='PATH_TO_SSL_PRIVATE_KEY',
+        certfile=require_env('SALTYRTC_TLS_CERT'),
+        keyfile=require_env('SALTYRTC_TLS_KEY'),
     )
 
     # Start server
