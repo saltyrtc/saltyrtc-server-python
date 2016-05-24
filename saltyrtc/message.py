@@ -45,11 +45,15 @@ def unpack(client, data):
 
 
 class AbstractMessage(metaclass=abc.ABCMeta):
-    def __init__(self, source, destination):
+    def __init__(self, source, destination, source_type=None, destination_type=None):
+        if source_type is None:
+            AddressType.from_address(source)
+        if destination_type is None:
+            AddressType.from_address(destination)
         self.source = source
         self.destination = destination
-        self.source_type = AddressType.from_address(source)
-        self.destination_type = AddressType.from_address(destination)
+        self.source_type = source_type
+        self.destination_type = destination_type
         self._nonce = None
 
     @abc.abstractmethod
@@ -96,8 +100,14 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
         return super().__new__(cls)
 
-    def __init__(self, source, destination, payload):
-        super().__init__(source, destination)
+    def __init__(
+            self, source, destination, payload,
+            source_type=None, destination_type=None
+    ):
+        super().__init__(
+            source, destination,
+            source_type=source_type, destination_type=destination_type
+        )
         self.payload = {} if payload is None else payload
 
     def __str__(self):
@@ -158,8 +168,10 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         MessageError
         MessageFlowError
         """
-        nonce, source, destination = cls._unpack_nonce(data, client)
-        destination_type = AddressType.from_address(destination)
+        # Unpack and check nonce
+        (nonce,
+         source, source_type,
+         destination, destination_type) = cls._unpack_nonce(data, client)
 
         # Decrypt if directed at us and keys have been exchanged
         # or just return a raw message to be sent to another client
@@ -190,14 +202,12 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
                 payload = cls._unpack_payload(
                     cls._decrypt_payload(client, nonce, data))
         else:
-            # Is the client allowed to send messages to the address type?
-            if client.p2p_allowed(destination_type):
-                message = RawMessage(source, destination, data)
-                message._nonce = nonce  # Stored for str representation
-                return message
-            else:
-                error = 'Not allowed to relay messages to {}'
-                raise MessageFlowError(error.format(destination_type))
+            message = RawMessage(
+                source, destination, data,
+                source_type=source_type, destination_type=destination_type
+            )
+            message._nonce = nonce  # Stored for str representation
+            return message
 
         # Unpack type
         type_ = payload.get('type')
@@ -215,7 +225,10 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         message_class.check_payload(client, payload)
 
         # Return instance
-        message = message_class(source, destination, payload)
+        message = message_class(
+            source, destination, payload,
+            source_type=source_type, destination_type=destination_type
+        )
         message._nonce = nonce  # Stored for str representation
         return message
 
@@ -228,8 +241,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
                 NONCE_FORMATTER,
                 client.cookie_out,
                 self.source, self.destination,
-                client.channel_fragment_out,
-                client.sequence_number_out
+                struct.pack('!Q', client.combined_sequence_number_out)[2:]
             )
         except struct.error as exc:
             raise MessageError('Could not pack nonce') from exc
@@ -238,34 +250,45 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
     def _unpack_nonce(cls, data, client):
         """
         MessageError
+        MessageFlowError
         """
         nonce = data[:NONCE_LENGTH]  # TODO: Catch slice error?
         try:
             (cookie_in,
              source, destination,
-             channel_fragment_in,
-             sequence_number_in) = struct.unpack(NONCE_FORMATTER, nonce)
+             combined_sequence_number_in) = struct.unpack(NONCE_FORMATTER, nonce)
+            combined_sequence_number_in, *_ = struct.unpack(
+                '!Q', b'\x00\x00' + combined_sequence_number_in)
         except struct.error as exc:
             raise MessageError('Could not unpack nonce') from exc
+
+        # Get source and destination address type
+        source_type = AddressType.from_address(source)
+        destination_type = AddressType.from_address(destination)
+
+        # Validate destination
+        # (Is the client allowed to send messages to the address type?)
+        is_to_server = destination_type != AddressType.server
+        if not is_to_server and not client.p2p_allowed(destination_type):
+            error = 'Not allowed to relay messages to {}'
+            raise MessageFlowError(error.format(destination_type))
 
         # Validate source
         if source != client.id:
             error_message = 'Identities do not match, expected {}, got {}'
             raise MessageError(error_message.format(client.id, source))
 
-        # Validate sequence number
-        if sequence_number_in != client.sequence_number_in:
-            raise MessageError('Invalid sequence number, expected {}, got {}'.format(
-                client.sequence_number_in, sequence_number_in))
-
-        # Validate cookie and channel fragment
+        # Validate cookie
         if not client.valid_cookie(cookie_in):
             raise MessageError('Invalid cookie: {}'.format(cookie_in))
-        if not client.valid_channel_fragment(channel_fragment_in):
-            error_message = 'Invalid channel fragment: {}'
-            raise MessageError(error_message.format(channel_fragment_in))
 
-        return nonce, source, destination
+        # Validate combined sequence number
+        if client.valid_combined_sequence_number(combined_sequence_number_in):
+            error = 'Invalid combined sequence number, expected {}, got {}'.format(
+                client.combined_sequence_number_in, combined_sequence_number_in)
+            raise MessageError(error)
+
+        return nonce, source, source_type, destination, destination_type
 
     def _pack_payload(self):
         try:
@@ -297,8 +320,14 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
 
 class RawMessage(AbstractMessage):
-    def __init__(self, source, destination, data):
-        super().__init__(source, destination)
+    def __init__(
+            self, source, destination, data,
+            source_type=None, destination_type=None
+    ):
+        super().__init__(
+            source, destination,
+            source_type=source_type, destination_type=destination_type
+        )
         self._data = data
 
     def pack(self, client):

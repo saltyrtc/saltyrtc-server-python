@@ -1,5 +1,6 @@
 import asyncio
 import os
+import struct
 
 import websockets
 import libnacl
@@ -9,7 +10,6 @@ from . import util
 from .exception import *
 from .common import (
     KEY_LENGTH,
-    AddressType,
 )
 from .message import (
     unpack,
@@ -138,11 +138,15 @@ class Path:
         self.log.debug('Removed {}', 'initiator' if id_ == 0x01 else 'responder')
 
 
+class _OverflowSentinel:
+    pass
+
+
 class PathClient:
     __slots__ = (
         '_log', '_connection', '_client_key', '_server_key',
         '_sequence_number_out', '_sequence_number_in', '_cookie_out', '_cookie_in',
-        '_channel_fragment_out', '_channel_fragment_in',
+        '_combined_sequence_number_out', '_combined_sequence_number_in',
         '_box', '_id', 'type', 'authenticated'
     )
 
@@ -151,12 +155,10 @@ class PathClient:
         self._connection = connection
         self._client_key = initiator_key
         self._server_key = server_key
-        self._sequence_number_out = 0
-        self._sequence_number_in = 0
         self._cookie_out = None
         self._cookie_in = None
-        self._channel_fragment_out = None
-        self._channel_fragment_in = None
+        self._combined_sequence_number_out = None
+        self._combined_sequence_number_in = None
         self._box = None
         self._id = 0x00
         self.type = None
@@ -204,20 +206,6 @@ class PathClient:
         return self._box
 
     @property
-    def sequence_number_out(self):
-        """
-        Return the sequence number of the server (outgoing messages).
-        """
-        return self._sequence_number_out
-
-    @property
-    def sequence_number_in(self):
-        """
-        Return the sequence number of the client (incoming messages).
-        """
-        return self._sequence_number_in
-
-    @property
     def cookie_out(self):
         """
         Return the cookie of the server (outgoing messages).
@@ -234,20 +222,57 @@ class PathClient:
         return self._cookie_in
 
     @property
-    def channel_fragment_out(self):
+    def combined_sequence_number_out(self):
         """
-        Return the channel fragment of the server (outgoing messages).
+        Return the pending combined sequence number of the server
+        (outgoing messages).
         """
-        if self._channel_fragment_out is None:
-            self._channel_fragment_out = os.urandom(2)
-        return self._channel_fragment_out
+        if self._combined_sequence_number_out is None:
+            # Initialise the trailing 32 bits of the uint48 number with random bits
+            initial_number, *_ = struct.unpack('!Q', b'\x00' * 4 + os.urandom(4))
+            self._combined_sequence_number_out = initial_number
+        return self._combined_sequence_number_out
+
+    @combined_sequence_number_out.setter
+    def combined_sequence_number_out(self, combined_sequence_number_out):
+        """
+        Update the combined sequence number of the server (outgoing
+        messages). Will set the number to _OverflowSentinel in case
+        the number would overflow a 48-bit unsigned integer.
+        """
+        csn = self._validate_combined_sequence_number(combined_sequence_number_out)
+        self._combined_sequence_number_out = csn
 
     @property
-    def channel_fragment_in(self):
+    def combined_sequence_number_in(self):
         """
-        Return the channel fragment of the client (incoming messages).
+        Return the pending combined sequence number of the client
+        (incoming messages).
         """
-        return self._channel_fragment_in
+        return self._combined_sequence_number_in
+
+    @combined_sequence_number_in.setter
+    def combined_sequence_number_in(self, combined_sequence_number_in):
+        """
+        Update the combined sequence number of the client (incoming
+        messages). Will set the number to _OverflowSentinel in case
+        the number would overflow a 48-bit unsigned integer.
+        """
+        csn = self._validate_combined_sequence_number(combined_sequence_number_in)
+        self._combined_sequence_number_in = csn
+
+    @staticmethod
+    def _validate_combined_sequence_number(combined_sequence_number):
+        """
+        Validate a combined sequence number.
+
+        Return _OverflowSentinel in case the number would overflow a
+        48-bit unsigned integer, otherwise the passed sequence number.
+        """
+        if combined_sequence_number & 0xf000000000000 > 0:
+            return _OverflowSentinel
+        else:
+            return combined_sequence_number
 
     def set_client_key(self, public_key):
         """
@@ -285,17 +310,22 @@ class PathClient:
         else:
             return cookie_in == self.cookie_in
 
-    def valid_channel_fragment(self, channel_fragment_in):
+    def valid_combined_sequence_number(self, combined_sequence_number_in):
         """
-        Return `True` if the 2 byte channel fragment is the valid
-        channel fragment of the client (or the channel fragment has not
-        been set, yet).
+        Return `True` if the 6 byte combined sequence number is the
+        valid pending sequence number of the client (or the combined
+        sequence number has not been set, yet and will be validated).
         """
-        if self.channel_fragment_in is None:
-            self._channel_fragment_in = channel_fragment_in
+        if self.combined_sequence_number_in is None:
+            # Ensure that the leading 16 bits are 0
+            if combined_sequence_number_in & 0xffff00000000 == 0:
+                return False
+
+            # First message: Set combined sequence number
+            self._combined_sequence_number_in = combined_sequence_number_in
             return True
         else:
-            return channel_fragment_in == self.channel_fragment_in
+            return combined_sequence_number_in == self.combined_sequence_number_in
 
     def p2p_allowed(self, destination_type):
         """
@@ -310,10 +340,10 @@ class PathClient:
         Disconnected
         MessageFlowError
         """
-        # Check source and destination type
-        is_from_server = message.source_type == AddressType.server
-        if not is_from_server and not self.p2p_allowed(message.destination_type):
-            raise MessageFlowError('Currently not allowed to dispatch P2P messages')
+        # Ensure that the outgoing combined sequence number counter did not overflow
+        if self.combined_sequence_number_out == _OverflowSentinel:
+            raise MessageFlowError(('Cannot send any more messages, due to a sequence '
+                                    'number counter overflow'))
 
         # Pack if not packed
         if isinstance(message, AbstractMessage):
@@ -325,7 +355,7 @@ class PathClient:
 
         # Send data
         self._log.debug('Sending message')
-        self._sequence_number_out += 1
+        self.combined_sequence_number_out += 1
         try:
             yield from self._connection.send(data)
         except websockets.ConnectionClosed as exc:
@@ -337,6 +367,11 @@ class PathClient:
         """
         Disconnected
         """
+        # Ensure that the incoming combined sequence number counter did not overflow
+        if self.combined_sequence_number_in == _OverflowSentinel:
+            raise MessageFlowError(('Cannot receive any more messages, due to a '
+                                    'sequence number counter overflow'))
+
         # Receive data
         try:
             data = yield from self._connection.recv()
@@ -347,7 +382,7 @@ class PathClient:
 
         # Unpack data and return
         data = unpack(self, data)
-        self._sequence_number_in += 1
+        self.combined_sequence_number_in += 1
         self._log.debug('Unpacked message')
         self._log.trace('server << {}', data)
         return data
