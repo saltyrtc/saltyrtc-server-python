@@ -269,7 +269,7 @@ class PathClient:
         Return _OverflowSentinel in case the number would overflow a
         48-bit unsigned integer, otherwise the passed sequence number.
         """
-        if combined_sequence_number & 0xf000000000000 > 0:
+        if combined_sequence_number & 0xf000000000000 != 0:
             return _OverflowSentinel
         else:
             return combined_sequence_number
@@ -318,7 +318,7 @@ class PathClient:
         """
         if self.combined_sequence_number_in is None:
             # Ensure that the leading 16 bits are 0
-            if combined_sequence_number_in & 0xffff00000000 == 0:
+            if combined_sequence_number_in & 0xffff00000000 != 0:
                 return False
 
             # First message: Set combined sequence number

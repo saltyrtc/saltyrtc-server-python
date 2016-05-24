@@ -276,8 +276,11 @@ def unpack_message(event_loop):
         timeout = _get_timeout(timeout)
         data = yield from asyncio.wait_for(client.recv(), timeout, loop=event_loop)
         nonce = data[:saltyrtc.NONCE_LENGTH]
-        (cookie, source, destination, channel_fragment,
-         sequence_number) = struct.unpack(saltyrtc.NONCE_FORMATTER, nonce)
+        (cookie,
+         source, destination,
+         combined_sequence_number) = struct.unpack(saltyrtc.NONCE_FORMATTER, nonce)
+        combined_sequence_number, *_ = struct.unpack(
+            '!Q', b'\x00\x00' + combined_sequence_number)
         data = data[saltyrtc.NONCE_LENGTH:]
         if box is not None:
             data = box.decrypt(data, nonce=nonce)
@@ -289,21 +292,19 @@ def unpack_message(event_loop):
             nonce,
             cookie,
             source, destination,
-            channel_fragment,
-            sequence_number,
+            combined_sequence_number
         )
     return _unpack_message
 
 
 @pytest.fixture(scope='module')
 def pack_nonce():
-    def _pack_nonce(cookie, source, destination, channel_fragment, sequence_number):
+    def _pack_nonce(cookie, source, destination, combined_sequence_number):
         return struct.pack(
             saltyrtc.NONCE_FORMATTER,
             cookie,
             source, destination,
-            channel_fragment,
-            sequence_number
+            struct.pack('!Q', combined_sequence_number)[2:]
         )
     return _pack_nonce
 

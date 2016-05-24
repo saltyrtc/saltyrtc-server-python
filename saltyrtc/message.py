@@ -268,7 +268,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
         # Validate destination
         # (Is the client allowed to send messages to the address type?)
-        is_to_server = destination_type != AddressType.server
+        is_to_server = destination_type == AddressType.server
         if not is_to_server and not client.p2p_allowed(destination_type):
             error = 'Not allowed to relay messages to {}'
             raise MessageFlowError(error.format(destination_type))
@@ -283,7 +283,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
             raise MessageError('Invalid cookie: {}'.format(cookie_in))
 
         # Validate combined sequence number
-        if client.valid_combined_sequence_number(combined_sequence_number_in):
+        if not client.valid_combined_sequence_number(combined_sequence_number_in):
             error = 'Invalid combined sequence number, expected {}, got {}'.format(
                 client.combined_sequence_number_in, combined_sequence_number_in)
             raise MessageError(error)

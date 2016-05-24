@@ -48,48 +48,55 @@ class TestProtocol:
         The server must send a valid `server-hello` on connection.
         """
         client = yield from client_factory()
-        message, _, sck, s, d, scf, ssn = yield from client.recv()
+        message, _, sck, s, d, scsn = yield from client.recv()
         assert s == d == 0x00
-        assert ssn == 0
+        assert scsn & 0xffff00000000 == 0
         assert message['type'] == 'server-hello'
         assert len(message['key']) == 32
         yield from client.ws_client.close()
 
     @pytest.mark.asyncio
-    def test_invalid_message_type(self, sleep, client_factory):
+    def test_invalid_message_type(self, sleep, cookie, pack_nonce, client_factory):
         """
         The server must close the connection when an invalid packet has
         been sent during the handshake with a close code of *3001*.
         """
         client = yield from client_factory()
         yield from client.recv()
-        yield from client.send(b'\x00' * 24, {'type': 'meow-hello'})
+        cck, ccsn = cookie, 2 ** 32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+            'type': 'meow-hello'
+        })
         yield from sleep()
         assert not client.ws_client.open
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_field_missing(self, sleep, client_factory):
+    def test_field_missing(self, sleep, cookie, pack_nonce, client_factory):
         """
         The server must close the connection when an invalid packet has
         been sent during the handshake with a close code of *3001*.
         """
         client = yield from client_factory()
         yield from client.recv()
-        yield from client.send(b'\x00' * 24, {'type': 'client-hello'})
+        cck, ccsn = cookie, 2 ** 32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+            'type': 'client-hello'
+        })
         yield from sleep()
         assert not client.ws_client.open
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_invalid_field(self, sleep, client_factory):
+    def test_invalid_field(self, sleep, cookie, pack_nonce, client_factory):
         """
         The server must close the connection when an invalid packet has
         been sent during the handshake with a close code of *3001*.
         """
         client = yield from client_factory()
         yield from client.recv()
-        yield from client.send(b'\x00' * 24, {
+        cck, ccsn = cookie, 2 ** 32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-hello',
             'key': b'meow?'
         })
@@ -102,16 +109,16 @@ class TestProtocol:
         client = yield from client_factory()
 
         # server-hello, already checked in another test
-        message, _, sck, s, d, scf, ssn = yield from client.recv()
+        message, _, sck, s, d, scsn = yield from client.recv()
         client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # client-auth
-        cck, ccf, csn = sck, b'\x11\x11', 0
-        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccf, csn), {
+        cck, ccsn = sck, 2**32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': sck,
         })
-        csn += 1
+        ccsn += 1
 
         # Expect protocol error
         yield from sleep()
@@ -123,24 +130,23 @@ class TestProtocol:
         client = yield from client_factory()
 
         # server-hello, already checked in another test
-        message, _, sck, s, d, scf, ssn = yield from client.recv()
+        message, _, sck, s, d, start_scsn = yield from client.recv()
         client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # client-auth
-        cck, ccf, csn = cookie, b'\x11\x11', 0
-        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccf, csn), {
+        cck, ccsn = cookie, 2**32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': sck,
         })
-        csn += 1
+        ccsn += 1
 
         # server-auth
-        message, _, ck, s, d, cf, ssn = yield from client.recv()
+        message, _, ck, s, d, scsn = yield from client.recv()
         assert s == 0x00
         assert d == 0x01
         assert sck == ck
-        assert scf == cf
-        assert ssn == 1
+        assert scsn == start_scsn + 1
         assert message['type'] == 'server-auth'
         assert message['your_cookie'] == cck
         assert 'initiator_connected' not in message
@@ -153,31 +159,30 @@ class TestProtocol:
         client = yield from client_factory()
 
         # server-hello, already checked in another test
-        message, _, sck, s, d, scf, ssn = yield from client.recv()
+        message, _, sck, s, d, start_scsn = yield from client.recv()
 
         # client-hello
-        cck, ccf, csn = cookie, b'\x11\x11', 0
-        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccf, csn), {
+        cck, ccsn = cookie, 2**32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-hello',
             'key': responder_key.pk,
         })
-        csn += 1
+        ccsn += 1
 
         # client-auth
         client.box = libnacl.public.Box(sk=responder_key, pk=message['key'])
-        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccf, csn), {
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': sck,
         })
-        csn += 1
+        ccsn += 1
 
         # server-auth
-        message, _, ck, s, d, cf, ssn = yield from client.recv()
+        message, _, ck, s, d, scsn = yield from client.recv()
         assert s == 0x00
         assert 0x01 < d <= 0xff
         assert sck == ck
-        assert scf == cf
-        assert ssn == 1
+        assert scsn == start_scsn + 1
         assert message['type'] == 'server-auth'
         assert message['your_cookie'] == cck
         assert 'responders' not in message
