@@ -32,6 +32,8 @@ def unused_tcp_port():
     """
     Find an unused localhost TCP port from 1024-65535 and return it.
     """
+    if pytest.saltyrtc.debug:
+        return 8765
     with closing(socket.socket()) as sock:
         sock.bind((pytest.saltyrtc.ip, 0))
         return sock.getsockname()[1]
@@ -224,6 +226,8 @@ def ws_client_factory(initiator_key, url, event_loop, server):
     # Create SSL context
     ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
     ssl_context.load_verify_locations(cafile=pytest.saltyrtc.cert)
+    if pytest.saltyrtc.debug:
+        ssl_context.set_ciphers('RSA')
 
     def _ws_client_factory(path=None, **kwargs):
         if path is None:
@@ -253,6 +257,8 @@ def client_factory(
     # Create SSL context
     ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
     ssl_context.load_verify_locations(cafile=pytest.saltyrtc.cert)
+    if pytest.saltyrtc.debug:
+        ssl_context.set_ciphers('RSA')
 
     @asyncio.coroutine
     def _client_factory(

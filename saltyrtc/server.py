@@ -459,8 +459,7 @@ class Paths:
             try:
                 del self.paths[path.initiator_key]
             except KeyError:
-                # Note: This is fine as the path may already be cleaned
-                pass
+                self._log.warning('Path {} has already been removed', path.number)
             else:
                 self._log.debug('Removed empty path: {}', path.number)
 

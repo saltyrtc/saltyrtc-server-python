@@ -137,8 +137,9 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_initiator_invalid_source(self, sleep, cookie, initiator_key, pack_nonce,
-                                      client_factory):
+    def test_initiator_invalid_source(
+            self, sleep, cookie, initiator_key, pack_nonce, client_factory
+    ):
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -158,8 +159,9 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_responder_invalid_source(self, sleep, cookie, responder_key, pack_nonce,
-                                      client_factory):
+    def test_responder_invalid_source(
+            self, sleep, cookie, responder_key, pack_nonce, client_factory
+    ):
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -179,8 +181,9 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_invalid_destination(self, sleep, cookie, initiator_key, pack_nonce,
-                                 client_factory):
+    def test_invalid_destination(
+            self, sleep, cookie, initiator_key, pack_nonce, client_factory
+    ):
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -200,7 +203,9 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_initiator_handshake(self, cookie, initiator_key, pack_nonce, client_factory):
+    def test_initiator_handshake(
+            self, cookie, initiator_key, pack_nonce, client_factory
+    ):
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -229,7 +234,9 @@ class TestProtocol:
         yield from client.close()
 
     @pytest.mark.asyncio
-    def test_responder_handshake(self, cookie, responder_key, pack_nonce, client_factory):
+    def test_responder_handshake(
+            self, cookie, responder_key, pack_nonce, client_factory
+    ):
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -265,7 +272,9 @@ class TestProtocol:
         yield from client.close()
 
     @pytest.mark.asyncio
-    def test_initiator_invalid_source_after_handshake(self, sleep, pack_nonce, client_factory):
+    def test_initiator_invalid_source_after_handshake(
+            self, sleep, pack_nonce, client_factory
+    ):
         initiator, data = yield from client_factory(initiator_handshake=True)
         cck, ccsn = data['cck'], data['ccsn']
 
@@ -280,7 +289,9 @@ class TestProtocol:
         assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_responder_invalid_source_after_handshake(self, sleep, pack_nonce, client_factory):
+    def test_responder_invalid_source_after_handshake(
+            self, sleep, pack_nonce, client_factory
+    ):
         responder, data = yield from client_factory(responder_handshake=True)
         cck, ccsn = data['cck'], data['ccsn']
 
@@ -295,7 +306,9 @@ class TestProtocol:
         assert responder.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_invalid_destination_after_handshake(self, sleep, pack_nonce, client_factory):
+    def test_invalid_destination_after_handshake(
+            self, sleep, pack_nonce, client_factory
+    ):
         responder, data = yield from client_factory(responder_handshake=True)
         id_, cck, ccsn = data['id'], data['cck'], data['ccsn']
 
@@ -370,9 +383,6 @@ class TestProtocol:
         # Initiator connected
         assert r['initiator_connected']
 
-        # new-responder
-        yield from first_initiator.recv()
-
         # Second initiator handshake
         second_initiator, i = yield from client_factory(initiator_handshake=True)
         # Responder is connected
@@ -381,7 +391,8 @@ class TestProtocol:
         # First initiator: Expect drop by initiator
         yield from sleep()
         assert not first_initiator.ws_client.open
-        assert responder.ws_client.close_code == saltyrtc.CloseCode.drop_by_initiator
+        actual_close_code = first_initiator.ws_client.close_code
+        assert actual_close_code == saltyrtc.CloseCode.drop_by_initiator
 
         # new-initiator
         message, _, sck, s, d, scsn = yield from responder.recv()
