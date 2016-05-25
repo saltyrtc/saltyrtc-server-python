@@ -24,6 +24,7 @@ from .protocol import (
 from .message import (
     ServerHelloMessage,
     ServerAuthMessage,
+    NewInitiatorMessage,
     NewResponderMessage,
     SendErrorMessage,
     RawMessage,
@@ -264,6 +265,15 @@ class ServerProtocol(Protocol):
             path.log.debug('Dropping previous initiator: {}', previous_initiator)
             self._loop.create_task(previous_initiator.close())
 
+        # Send new-initiator message if any responder is present
+        responder_ids = path.get_responder_ids()
+        for responder_id in responder_ids:
+            responder = path.get_responder(responder_id)
+            message = NewInitiatorMessage.create(0x00, responder_id)
+            path.log.debug('Sending new-initiator message to 0x{:x}', responder_id)
+            # TODO: Handle exceptions?
+            self._loop.create_task(responder.send(message))
+
         # Send server-auth
         responder_ids = path.get_responder_ids()
         message = ServerAuthMessage.create(
@@ -356,7 +366,7 @@ class ServerProtocol(Protocol):
                 responder = path.get_responder(message.responder_id)
                 if responder is not None:
                     # Drop previous initiator (we don't care about any exceptions)
-                    path.log.debug('Dropping responder: {}', responder)
+                    path.log.debug('Dropping responder: 0x{:x}', responder.id)
                     self._loop.create_task(responder.close())
                 else:
                     path.log.debug('Responder already dropped, nothing to do')
@@ -392,7 +402,7 @@ class ServerProtocol(Protocol):
 
         @asyncio.coroutine
         def send_error_message():
-            path.log.debug('Relaying failed, reporting send-error to {}', sender)
+            path.log.debug('Relaying failed, reporting send-error to 0x{:x}', sender.id)
             error = SendErrorMessage.create(
                 0x00, sender.id, libnacl.crypto_hash_sha256(message_data))
             # TODO: Handle exceptions, what if sender is gone?
@@ -400,12 +410,13 @@ class ServerProtocol(Protocol):
 
         # Destination not set? Send send-error to sender
         if destination is None:
-            error_message = ('Cannot relay message from {}, no connection for given '
-                             'destination id {}')
-            path.log.notice(error_message, sender, destination)
+            error_message = ('Cannot relay message from 0x{:x}, no connection for '
+                             'destination id 0x{:x}')
+            path.log.notice(error_message, sender.id, destination.id)
             return (yield from send_error_message())
 
-        path.log.debug('Sending relay message from {} to {}', sender, destination)
+        path.log.debug('Sending relay message from 0x{:x} to 0x{:x}',
+                       sender, destination)
         try:
             # Relay message to destination
             future = destination.send(message)

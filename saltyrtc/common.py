@@ -70,6 +70,7 @@ class MessageType(enum.Enum):
     client_auth = 'client-auth'
     server_auth = 'server-auth'
     new_responder = 'new-responder'
+    new_initiator = 'new-initiator'
     drop_responder = 'drop-responder'
     send_error = 'send-error'
 

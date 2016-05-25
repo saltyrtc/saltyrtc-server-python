@@ -30,6 +30,7 @@ __all__ = (
     'ClientHelloMessage',
     'ClientAuthMessage',
     'ServerAuthMessage',
+    'NewInitiatorMessage',
     'NewResponderMessage',
     'DropResponderMessage',
     'SendErrorMessage',
@@ -456,6 +457,22 @@ class ServerAuthMessage(AbstractBaseMessage):
         KeyError in case the message is directed at a responder
         """
         return self.payload['responders']
+
+
+class NewInitiatorMessage(AbstractBaseMessage):
+    type = MessageType.new_initiator
+    encrypted = True
+
+    @classmethod
+    def create(cls, source, destination):
+        # noinspection PyCallingNonCallable
+        return cls(source, destination, {
+            'type': cls.type.value,
+        })
+
+    @classmethod
+    def check_payload(cls, client, payload):
+        pass
 
 
 class NewResponderMessage(AbstractBaseMessage):
