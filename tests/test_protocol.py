@@ -489,7 +489,7 @@ class TestProtocol:
         # Drop first responder
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
-            'id': r1['id']
+            'id': r1['id'],
         })
         i['ccsn'] += 1
 
@@ -502,7 +502,7 @@ class TestProtocol:
         # Drop third responder
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
-            'id': r3['id']
+            'id': r3['id'],
         })
         i['ccsn'] += 1
 
@@ -518,6 +518,24 @@ class TestProtocol:
         # Bye
         yield from second_responder.close()
         yield from initiator.close()
+
+    @pytest.mark.asyncio
+    def test_drop_invalid_responder(self, pack_nonce, client_factory):
+        """
+        Check that dropping a non-existing responder does not raise
+        any errors.
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        # No responder connected
+        assert len(i['responders']) == 0
+
+        # Drop some responder
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': 0xff,
+        })
+        i['ccsn'] += 1
 
     @pytest.mark.asyncio
     def test_path_full(self, event_loop, client_factory):
