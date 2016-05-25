@@ -239,19 +239,27 @@ def ws_client_factory(initiator_key, url, event_loop, server):
 
 
 @pytest.fixture(scope='module')
-def client_factory(initiator_key, url, event_loop, server, pack_message, unpack_message):
+def client_factory(
+        initiator_key, url, event_loop, server, cookie, responder_key,
+        pack_nonce, pack_message, unpack_message
+):
     """
     Return a simplified :class:`websockets.client.connect` wrapper
     where no parameters are required.
     """
     # Note: The `server` argument is only required to fire up the server.
+    cookie_ = cookie
 
     # Create SSL context
     ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
     ssl_context.load_verify_locations(cafile=pytest.saltyrtc.cert)
 
     @asyncio.coroutine
-    def _client_factory(path=initiator_key, timeout=None, **kwargs):
+    def _client_factory(
+            path=initiator_key, timeout=None, cookie=cookie_,
+            initiator_handshake=False, responder_handshake=False,
+            **kwargs
+    ):
         _kwargs = {
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
@@ -262,10 +270,48 @@ def client_factory(initiator_key, url, event_loop, server, pack_message, unpack_
             '{}/{}'.format(url, key_path(path)),
             **_kwargs
         )
-        return Client(
+        client = Client(
             ws_client, pack_message, unpack_message,
             timeout=timeout
         )
+
+        if not initiator_handshake and not responder_handshake:
+            return client
+
+        # Do handshake
+        key = initiator_key if initiator_handshake else responder_key
+
+        # server-hello
+        message, _, sck, s, d, start_scsn = yield from client.recv()
+
+        cck, ccsn = cookie, 2 ** 32 - 1
+        if responder_handshake:
+            # client-hello
+            yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+                'type': 'client-hello',
+                'key': responder_key.pk,
+            })
+            ccsn += 1
+
+        # client-auth
+        client.box = libnacl.public.Box(sk=key, pk=message['key'])
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+            'type': 'client-auth',
+            'your_cookie': sck,
+        })
+        ccsn += 1
+
+        # server-auth
+        message, _, ck, s, d, scsn = yield from client.recv()
+
+        # Return client and additional data
+        return client, {
+            'id': d,
+            'sck': sck,
+            'start_scsn': start_scsn,
+            'cck': cck,
+            'ccsn': ccsn,
+        }
     return _client_factory
 
 

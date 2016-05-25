@@ -211,7 +211,11 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
             return message
 
         # Unpack type
-        type_ = payload.get('type')
+        try:
+            type_ = payload.get('type')
+        except AttributeError as exc:
+            error = 'Message does not contain a dictionary: {}'
+            raise MessageError(error.format(type(payload))) from exc
         try:
             type_ = MessageType(type_)
         except ValueError as exc:
@@ -271,12 +275,12 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         # (Is the client allowed to send messages to the address type?)
         is_to_server = destination_type == AddressType.server
         if not is_to_server and not client.p2p_allowed(destination_type):
-            error = 'Not allowed to relay messages to {}'
+            error = 'Not allowed to relay messages to 0x{:02x}'
             raise MessageFlowError(error.format(destination_type))
 
         # Validate source
         if source != client.id:
-            error_message = 'Identities do not match, expected {}, got {}'
+            error_message = 'Identities do not match, expected 0x{:02x}, got 0x{:02x}'
             raise MessageError(error_message.format(client.id, source))
 
         # Validate cookie

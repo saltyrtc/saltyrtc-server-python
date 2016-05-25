@@ -32,12 +32,23 @@ class TestProtocol:
         assert client.close_code == saltyrtc.CloseCode.sub_protocol_error
 
     @pytest.mark.asyncio
-    def test_invalid_path(self, url, sleep, ws_client_factory):
+    def test_invalid_path_length(self, url, sleep, ws_client_factory):
         """
         The server must drop the client after the connection has been
         established with a close code of *3001*.
         """
         client = yield from ws_client_factory(path='{}/{}'.format(url, 'rawr!!!'))
+        yield from sleep()
+        assert not client.open
+        assert client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
+    def test_invalid_path_symbols(self, url, sleep, ws_client_factory):
+        """
+        The server must drop the client after the connection has been
+        established with a close code of *3001*.
+        """
+        client = yield from ws_client_factory(path='{}/{}'.format(url, 'äöüä' * 16))
         yield from sleep()
         assert not client.open
         assert client.close_code == saltyrtc.CloseCode.protocol_error
@@ -126,6 +137,69 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
+    def test_initiator_invalid_source(self, sleep, cookie, initiator_key, pack_nonce,
+                                      client_factory):
+        client = yield from client_factory()
+
+        # server-hello, already checked in another test
+        message, _, sck, s, d, start_scsn = yield from client.recv()
+
+        # client-hello
+        cck, ccsn = cookie, 2 ** 32 - 1
+        yield from client.send(pack_nonce(cck, 0x01, 0x00, ccsn), {
+            'type': 'client-hello',
+            'key': initiator_key.pk,
+        })
+        ccsn += 1
+
+        # Expect protocol error
+        yield from sleep()
+        assert not client.ws_client.open
+        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
+    def test_responder_invalid_source(self, sleep, cookie, responder_key, pack_nonce,
+                                      client_factory):
+        client = yield from client_factory()
+
+        # server-hello, already checked in another test
+        message, _, sck, s, d, start_scsn = yield from client.recv()
+
+        # client-hello
+        cck, ccsn = cookie, 2 ** 32 - 1
+        yield from client.send(pack_nonce(cck, 0xff, 0x00, ccsn), {
+            'type': 'client-hello',
+            'key': responder_key.pk,
+        })
+        ccsn += 1
+
+        # Expect protocol error
+        yield from sleep()
+        assert not client.ws_client.open
+        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
+    def test_invalid_destination(self, sleep, cookie, initiator_key, pack_nonce,
+                                 client_factory):
+        client = yield from client_factory()
+
+        # server-hello, already checked in another test
+        message, _, sck, s, d, start_scsn = yield from client.recv()
+
+        # client-hello
+        cck, ccsn = cookie, 2 ** 32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0xff, ccsn), {
+            'type': 'client-hello',
+            'key': initiator_key.pk,
+        })
+        ccsn += 1
+
+        # Expect protocol error
+        yield from sleep()
+        assert not client.ws_client.open
+        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
     def test_initiator_handshake(self, cookie, initiator_key, pack_nonce, client_factory):
         client = yield from client_factory()
 
@@ -189,3 +263,64 @@ class TestProtocol:
         assert not message['initiator_connected']
 
         yield from client.close()
+
+    @pytest.mark.asyncio
+    def test_initiator_invalid_source_after_handshake(self, sleep, pack_nonce, client_factory):
+        initiator, data = yield from client_factory(initiator_handshake=True)
+        cck, ccsn = data['cck'], data['ccsn']
+
+        # Set invalid source
+        yield from initiator.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+            'type': 'whatever',
+        })
+
+        # Expect protocol error
+        yield from sleep()
+        assert not initiator.ws_client.open
+        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
+    def test_responder_invalid_source_after_handshake(self, sleep, pack_nonce, client_factory):
+        responder, data = yield from client_factory(responder_handshake=True)
+        cck, ccsn = data['cck'], data['ccsn']
+
+        # Set invalid source
+        yield from responder.send(pack_nonce(cck, 0x01, 0x00, ccsn), {
+            'type': 'whatever',
+        })
+
+        # Expect protocol error
+        yield from sleep()
+        assert not responder.ws_client.open
+        assert responder.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
+    def test_invalid_destination_after_handshake(self, sleep, pack_nonce, client_factory):
+        responder, data = yield from client_factory(responder_handshake=True)
+        id_, cck, ccsn = data['id'], data['cck'], data['ccsn']
+
+        # Set invalid source
+        yield from responder.send(pack_nonce(cck, id_, id_, ccsn), {
+            'type': 'whatever',
+        })
+
+        # Expect protocol error
+        yield from sleep()
+        assert not responder.ws_client.open
+        assert responder.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
+    def test_new_initiator(self, pack_nonce, client_factory):
+        raise NotImplementedError
+
+    @pytest.mark.asyncio
+    def test_new_responder(self, pack_nonce, client_factory):
+        raise NotImplementedError
+
+    @pytest.mark.asyncio
+    def test_new_initiator_reverse(self, pack_nonce, client_factory):
+        raise NotImplementedError
+
+    @pytest.mark.asyncio
+    def test_new_responder_reverse(self, pack_nonce, client_factory):
+        raise NotImplementedError
