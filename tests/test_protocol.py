@@ -2,8 +2,11 @@
 The tests provided in this module make sure that the server is
 compliant to the SaltyRTC protocol.
 """
+import asyncio
+
 import pytest
 import libnacl.public
+import websockets
 
 import saltyrtc
 
@@ -117,6 +120,10 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_duplicated_cookie(self, sleep, initiator_key, pack_nonce, client_factory):
+        """
+        Check that the server closes with Protocol Error when a client
+        uses the same cookie as the server does.
+        """
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -140,6 +147,10 @@ class TestProtocol:
     def test_initiator_invalid_source(
             self, sleep, cookie, initiator_key, pack_nonce, client_factory
     ):
+        """
+        Check that the server closes with Protocol Error when an
+        invalid source address is being used by an initiator.
+        """
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -162,6 +173,10 @@ class TestProtocol:
     def test_responder_invalid_source(
             self, sleep, cookie, responder_key, pack_nonce, client_factory
     ):
+        """
+        Check that the server closes with Protocol Error when an
+        invalid source address is being used by a responder.
+        """
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -184,6 +199,10 @@ class TestProtocol:
     def test_invalid_destination(
             self, sleep, cookie, initiator_key, pack_nonce, client_factory
     ):
+        """
+        Check that the server closes with Protocol Error when an
+        invalid destination address is being used by a client.
+        """
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -206,6 +225,9 @@ class TestProtocol:
     def test_initiator_handshake(
             self, cookie, initiator_key, pack_nonce, client_factory
     ):
+        """
+        Check that we can do a complete handshake for an initiator.
+        """
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -237,6 +259,9 @@ class TestProtocol:
     def test_responder_handshake(
             self, cookie, responder_key, pack_nonce, client_factory
     ):
+        """
+        Check that we can do a complete handshake for a responder.
+        """
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -275,6 +300,10 @@ class TestProtocol:
     def test_initiator_invalid_source_after_handshake(
             self, sleep, pack_nonce, client_factory
     ):
+        """
+        Check that the server closes with Protocol Error when an
+        invalid source address is being used by an initiator.
+        """
         initiator, data = yield from client_factory(initiator_handshake=True)
         cck, ccsn = data['cck'], data['ccsn']
 
@@ -292,6 +321,10 @@ class TestProtocol:
     def test_responder_invalid_source_after_handshake(
             self, sleep, pack_nonce, client_factory
     ):
+        """
+        Check that the server closes with Protocol Error when an
+        invalid source address is being used by a responder.
+        """
         responder, data = yield from client_factory(responder_handshake=True)
         cck, ccsn = data['cck'], data['ccsn']
 
@@ -309,6 +342,10 @@ class TestProtocol:
     def test_invalid_destination_after_handshake(
             self, sleep, pack_nonce, client_factory
     ):
+        """
+        Check that the server closes with Protocol Error when an
+        invalid destination address is being used by a client.
+        """
         responder, data = yield from client_factory(responder_handshake=True)
         id_, cck, ccsn = data['id'], data['cck'], data['ccsn']
 
@@ -324,6 +361,10 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_new_initiator(self, client_factory):
+        """
+        Check that the 'new-initiator' message is sent to an already
+        connected responder as soon as the initiator connects.
+        """
         # Responder handshake
         responder, r = yield from client_factory(responder_handshake=True)
         # No initiator connected
@@ -348,6 +389,10 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_new_responder(self, client_factory):
+        """
+        Check that the 'new-responder' message is sent to an already
+        connected initiator as soon as the responder connects.
+        """
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
         # No responder connected
@@ -373,6 +418,12 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_multiple_initiators(self, sleep, client_factory):
+        """
+        Ensure that the first initiator is being dropped properly
+        when another initiator connects. Also check that the responder
+        receives the 'new-initiator' message at the correct point in
+        time.
+        """
         # First initiator handshake
         first_initiator, i = yield from client_factory(initiator_handshake=True)
         # No responder connected
@@ -407,5 +458,87 @@ class TestProtocol:
         yield from responder.close()
 
     @pytest.mark.asyncio
-    def test_multiple_responders(self, client_factory):
-        pass
+    def test_drop_responder(self, sleep, pack_nonce, client_factory):
+        """
+        Check that dropping responders works on multiple responders.
+        """
+        # First responder handshake
+        first_responder, r1 = yield from client_factory(responder_handshake=True)
+        assert not r1['initiator_connected']
+
+        # Second responder (the only one that will not be dropped) handshake
+        second_responder, r2 = yield from client_factory(responder_handshake=True)
+        assert not r2['initiator_connected']
+
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        assert set(i['responders']) == {r1['id'], r2['id']}
+
+        # Third responder handshake
+        third_responder, r3 = yield from client_factory(responder_handshake=True)
+        assert r3['initiator_connected']
+
+        # new-responder
+        message, _, sck, s, d, scsn = yield from initiator.recv()
+        assert s == 0x00
+        assert d == i['id']
+        assert i['sck'] == sck
+        assert scsn == i['start_scsn'] + 2
+        assert message['id'] == r3['id']
+
+        # Drop first responder
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': r1['id']
+        })
+        i['ccsn'] += 1
+
+        # First responder: Expect drop by initiator
+        yield from sleep()
+        assert not first_responder.ws_client.open
+        actual_close_code = first_responder.ws_client.close_code
+        assert actual_close_code == saltyrtc.CloseCode.drop_by_initiator
+
+        # Drop third responder
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': r3['id']
+        })
+        i['ccsn'] += 1
+
+        # Third responder: Expect drop by initiator
+        yield from sleep()
+        assert not third_responder.ws_client.open
+        actual_close_code = third_responder.ws_client.close_code
+        assert actual_close_code == saltyrtc.CloseCode.drop_by_initiator
+
+        # Second responder: Still open
+        assert second_responder.ws_client.open
+
+        # Bye
+        yield from second_responder.close()
+        yield from initiator.close()
+
+    @pytest.mark.asyncio
+    def test_path_full(self, event_loop, client_factory):
+        """
+        Add 253 responder to a path. Then, add a 254th responder and
+        check that the correct error code (Path Full) is being
+        returned.
+
+        Note: This test takes a few seconds.
+        """
+        tasks = [client_factory(responder_handshake=True) for _ in range(0x02, 0x100)]
+        clients = yield from asyncio.gather(*tasks, loop=event_loop)
+
+        # All clients must be open
+        assert all((client.ws_client.open for client, _ in clients))
+
+        # Now the path is full
+        with pytest.raises(websockets.ConnectionClosed) as exc_info:
+            yield from client_factory(responder_handshake=True)
+        assert exc_info.value.code == saltyrtc.CloseCode.path_full_error
+
+        # Close all clients
+        tasks = [client.close() for client, _ in clients]
+        yield from asyncio.wait(tasks, loop=event_loop)
