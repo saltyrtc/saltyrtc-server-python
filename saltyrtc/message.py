@@ -305,7 +305,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
     def _unpack_payload(cls, payload):
         try:
             return umsgpack.unpackb(payload)
-        except umsgpack.UnpackException as exc:
+        except (umsgpack.UnpackException, TypeError) as exc:
             raise MessageError('Could not unpack msgpack payload') from exc
 
     @classmethod

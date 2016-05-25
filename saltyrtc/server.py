@@ -117,7 +117,7 @@ class ServerProtocol(Protocol):
             self._log.warning('Closing due to path error: {}', exc)
             yield from connection.close(code=CloseCode.protocol_error.value)
             return
-        path.log.debug('Worker started')
+        client.log.debug('Worker started')
 
         # Store path and client
         self.path = path
@@ -128,15 +128,15 @@ class ServerProtocol(Protocol):
         try:
             yield from self.handle_client()
         except Disconnected:
-            path.log.notice('Connection closed by remote')
+            client.log.notice('Connection closed by remote')
         except SlotsFullError as exc:
-            path.log.info('Closing because all path slots are full: {}', exc)
+            client.log.info('Closing because all path slots are full: {}', exc)
             yield from client.close(code=CloseCode.path_full_error.value)
         except SignalingError as exc:
-            path.log.warning('Closing due to protocol error: {}', exc)
+            client.log.warning('Closing due to protocol error: {}', exc)
             yield from client.close(code=CloseCode.protocol_error.value)
         except Exception as exc:
-            path.log.exception('Closing due to exception:', exc)
+            client.log.exception('Closing due to exception:', exc)
             yield from client.close(code=CloseCode.internal_error.value)
 
         # Remove client from path
@@ -144,7 +144,7 @@ class ServerProtocol(Protocol):
 
         # Remove protocol from server and stop
         self._server.unregister(self)
-        path.log.debug('Worker stopped')
+        client.log.debug('Worker stopped')
 
     def get_path_client(self, connection, ws_path):
         # Extract public key from path
@@ -180,21 +180,21 @@ class ServerProtocol(Protocol):
         path, client = self.path, self.client
 
         # Do handshake
-        path.log.debug('Starting handshake')
+        client.log.debug('Starting handshake')
         yield from self.handshake()
-        path.log.debug('Handshake completed')
+        client.log.debug('Handshake completed')
 
         # Keep alive and poll for messages
         tasks = []
         if client.type == AddressType.initiator:
-            path.log.debug('Starting runner for initiator {}', client)
+            client.log.debug('Starting runner for initiator')
             tasks.append(self.initiator_loop())
         elif client.type == AddressType.responder:
-            path.log.debug('Starting runner for responder {}', client)
+            client.log.debug('Starting runner for responder')
             tasks.append(self.responder_loop())
         else:
             raise ValueError('Invalid address type: {}'.format(client.type))
-        path.log.debug('Starting keep-alive task for client {}', client)
+        client.log.debug('Starting keep-alive task')
         tasks.append(self.keep_alive())
 
         # Wait until complete
@@ -206,11 +206,11 @@ class ServerProtocol(Protocol):
             if exc is not None:
                 # Cancel pending tasks
                 for pending_task in pending:
-                    path.log.debug('Cancelling task {}', task)
+                    client.log.debug('Cancelling task {}', task)
                     pending_task.cancel()
                 raise exc
             else:
-                path.log.error('Task {} returned unexpectedly', task)
+                client.log.error('Task {} returned unexpectedly', task)
                 raise SignalingError('Task returned too early')
 
     @asyncio.coroutine
@@ -225,19 +225,19 @@ class ServerProtocol(Protocol):
 
         # Send server-hello
         message = ServerHelloMessage.create(0x00, client.id, client.server_key.pk)
-        path.log.debug('Sending server-hello')
+        client.log.debug('Sending server-hello')
         yield from client.send(message)
 
         # Receive client-hello or client-auth
-        path.log.debug('Waiting for client-hello')
+        client.log.debug('Waiting for client-hello')
         message = yield from client.receive()
         if message.type == MessageType.client_auth:
-            path.log.debug('Received client-auth')
+            client.log.debug('Received client-auth')
             # Client is the initiator
             client.type = AddressType.initiator
             yield from self.handshake_initiator(message)
         elif message.type == MessageType.client_hello:
-            path.log.debug('Received client-hello')
+            client.log.debug('Received client-hello')
             # Client is a responder
             client.type = AddressType.responder
             yield from self.handshake_responder(message)
@@ -256,21 +256,23 @@ class ServerProtocol(Protocol):
         path, initiator = self.path, self.client
 
         # Validate cookie
-        self._validate_cookie(path, message.server_cookie, initiator.cookie_out)
+        self._validate_cookie(message.server_cookie, initiator.cookie_out)
 
         # Authenticated
         previous_initiator = path.set_initiator(initiator)
         if previous_initiator is not None:
             # Drop previous initiator (we don't care about any exceptions)
             path.log.debug('Dropping previous initiator: {}', previous_initiator)
-            self._loop.create_task(previous_initiator.close())
+            previous_initiator.log.debug('Dropping (another initiator connected)')
+            coro = previous_initiator.close(code=CloseCode.drop_by_initiator.value)
+            self._loop.create_task(coro)
 
         # Send new-initiator message if any responder is present
         responder_ids = path.get_responder_ids()
         for responder_id in responder_ids:
             responder = path.get_responder(responder_id)
             message = NewInitiatorMessage.create(0x00, responder_id)
-            path.log.debug('Sending new-initiator message to 0x{:02x}', responder_id)
+            responder.log.debug('Sending new-initiator message')
             # TODO: Handle exceptions?
             self._loop.create_task(responder.send(message))
 
@@ -278,7 +280,7 @@ class ServerProtocol(Protocol):
         responder_ids = path.get_responder_ids()
         message = ServerAuthMessage.create(
             0x00, initiator.id, initiator.cookie_in, responder_ids=responder_ids)
-        path.log.debug('Sending server-auth including responder ids')
+        initiator.log.debug('Sending server-auth including responder ids')
         yield from initiator.send(message)
 
     @asyncio.coroutine
@@ -301,7 +303,7 @@ class ServerProtocol(Protocol):
             raise MessageFlowError(error.format(message.type))
 
         # Validate cookie
-        self._validate_cookie(path, message.server_cookie, responder.cookie_out)
+        self._validate_cookie(message.server_cookie, responder.cookie_out)
 
         # Authenticated
         id_ = path.add_responder(responder)
@@ -310,8 +312,8 @@ class ServerProtocol(Protocol):
         initiator = path.get_initiator()
         initiator_connected = initiator is not None
         if initiator_connected:
-            message = NewResponderMessage.create(0x00, responder.id, id_)
-            path.log.debug('Sending new-responder to initiator')
+            message = NewResponderMessage.create(0x00, initiator.id, id_)
+            initiator.log.debug('Sending new-responder')
             # TODO: Handle exceptions?
             self._loop.create_task(initiator.send(message))
 
@@ -319,7 +321,7 @@ class ServerProtocol(Protocol):
         message = ServerAuthMessage.create(
             0x00, responder.id, responder.cookie_in,
             initiator_connected=initiator_connected)
-        path.log.debug('Sending server-auth without responder ids')
+        responder.log.debug('Sending server-auth without responder ids')
         yield from responder.send(message)
 
     @asyncio.coroutine
@@ -335,7 +337,7 @@ class ServerProtocol(Protocol):
             yield from asyncio.sleep(KEEP_ALIVE_INTERVAL, loop=self._loop)
 
             # Send ping and wait for pong
-            path.log.debug('Ping to {}', client)
+            client.log.debug('Ping')
             try:
                 pong_future = yield from asyncio.wait_for(
                     client.ping(), KEEP_ALIVE_TIMEOUT, loop=self._loop)
@@ -344,7 +346,7 @@ class ServerProtocol(Protocol):
             except asyncio.TimeoutError:
                 raise PingTimeoutError(client)
             else:
-                path.log.debug('Pong from {}', client)
+                client.log.debug('Pong')
 
     @asyncio.coroutine
     def initiator_loop(self):
@@ -366,10 +368,13 @@ class ServerProtocol(Protocol):
                 responder = path.get_responder(message.responder_id)
                 if responder is not None:
                     # Drop previous initiator (we don't care about any exceptions)
-                    path.log.debug('Dropping responder: 0x{:02x}', responder.id)
-                    self._loop.create_task(responder.close())
+                    path.log.debug('Dropping responder 0x{:02x}', responder.id)
+                    responder.log.debug('Dropping (requested by initiator)')
+                    coroutine = responder.close(code=CloseCode.drop_by_initiator.value)
+                    self._loop.create_task(coroutine)
                 else:
-                    path.log.debug('Responder already dropped, nothing to do')
+                    log_message = 'Responder 0x{:02x} already dropped, nothing to do'
+                    path.log.debug(log_message, message.responder_id)
             else:
                 error = "Expected relay message or 'drop-responder', got '{}'"
                 raise MessageFlowError(error.format(message.type))
@@ -397,13 +402,12 @@ class ServerProtocol(Protocol):
         path, sender = self.path, self.client
 
         # Prepare message
-        path.log.debug('Packing relay message')
+        sender.log.debug('Packing relay message')
         message_data = message.pack(sender)
 
         @asyncio.coroutine
         def send_error_message():
-            path.log.debug('Relaying failed, reporting send-error to 0x{:02x}',
-                           sender.id)
+            sender.log.debug('Relaying failed, reporting send-error')
             error = SendErrorMessage.create(
                 0x00, sender.id, libnacl.crypto_hash_sha256(message_data))
             # TODO: Handle exceptions, what if sender is gone?
@@ -411,28 +415,26 @@ class ServerProtocol(Protocol):
 
         # Destination not set? Send send-error to sender
         if destination is None:
-            error_message = ('Cannot relay message from 0x{:02x}, no connection for '
+            error_message = ('Cannot relay message, no connection for '
                              'destination id 0x{:02x}')
-            path.log.notice(error_message, sender.id, destination.id)
+            sender.log.notice(error_message, destination.id)
             return (yield from send_error_message())
 
-        path.log.debug('Sending relay message from 0x{:02x} to 0x{:02x}',
-                       sender, destination)
+        sender.log.debug('Sending relay message to 0x{:02x}', destination.id)
         try:
             # Relay message to destination
             future = destination.send(message)
             yield from asyncio.wait_for(future, RELAY_TIMEOUT, loop=self._loop)
         except asyncio.TimeoutError:
             # Timed out or some other error, Send send-error to original sender
-            path.log.debug('Sending relayed message timed out')
+            sender.log.debug('Sending relayed message timed out')
             yield from send_error_message()
         except Disconnected:
-            path.log.debug('Receiver disconnected')
+            sender.log.debug('Receiver disconnected')
             yield from send_error_message()
 
-    @classmethod
-    def _validate_cookie(cls, path, expected_cookie, actual_cookie):
-        path.log.debug('Validating cookie')
+    def _validate_cookie(self, expected_cookie, actual_cookie):
+        self.client.log.debug('Validating cookie')
         if not util.consteq(expected_cookie, actual_cookie):
             raise MessageError('Cookies do not match')
 
@@ -454,8 +456,13 @@ class Paths:
 
     def clean(self, path):
         if path.empty:
-            del self.paths[path.initiator_key]
-            self._log.debug('Removed empty path: {}', path.number)
+            try:
+                del self.paths[path.initiator_key]
+            except KeyError:
+                # Note: This is fine as the path may already be cleaned
+                pass
+            else:
+                self._log.debug('Removed empty path: {}', path.number)
 
 
 class Server(asyncio.AbstractServer):
@@ -520,7 +527,7 @@ class Server(asyncio.AbstractServer):
         """
         self._log.debug('Closing protocols')
         for protocol in self.protocols:
-            self._loop.create_task(protocol.close())
+            self._loop.create_task(protocol.close(code=CloseCode.going_away.value))
         self._log.debug('Closing server')
         self.server.close()
 

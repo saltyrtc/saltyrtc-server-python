@@ -41,11 +41,11 @@ class Path:
         case that the path is not empty, this property does not ensure
         that all disconnected clients will be removed.)
         """
-        for id_, client in self._slots.items():
+        for client in self._slots.values():
             if client is not None:
                 if client.connection_closed.done():
-                    self.remove_client(id_)
-                    self.log.warning('Removed dead client')
+                    self.remove_client(client)
+                    self.log.warning('Removed dead client {}', client)
                 else:
                     return False
         return True
@@ -127,13 +127,29 @@ class Path:
 
         Arguments:
              - `client`: The :class:`PathClient` instance.
+
+        Raises :exc:`ValueError` in case the client provided an
+        invalid slot identifier.
         """
 
         if not client.authenticated:
             # Client has not been authenticated. Nothing to do.
             return
         id_ = client.id
-        assert 0x00 < id_ <= 0xff
+
+        # Get client instance
+        try:
+            slot_client = self._slots[id_]
+        except KeyError:
+            raise ValueError('Invalid slot identifier: {}'.format(id_))
+
+        # Compare client instances
+        if client != slot_client:
+            # Note: This is absolutely fine and happens when another initiator
+            #        takes the place of a previous initiator.
+            return
+
+        # Remove client from slot
         self._slots[id_] = None
         self.log.debug('Removed {}', 'initiator' if id_ == 0x01 else 'responder')
 
@@ -144,14 +160,14 @@ class _OverflowSentinel:
 
 class PathClient:
     __slots__ = (
-        '_log', '_connection', '_client_key', '_server_key',
+        'log', '_connection', '_client_key', '_server_key',
         '_sequence_number_out', '_sequence_number_in', '_cookie_out', '_cookie_in',
         '_combined_sequence_number_out', '_combined_sequence_number_in',
         '_box', '_id', 'type', 'authenticated'
     )
 
     def __init__(self, connection, path_number, initiator_key, server_key=None):
-        self._log = util.get_logger('path.{}.client'.format(path_number))
+        self.log = util.get_logger('path.{}.client.{:x}'.format(path_number, id(self)))
         self._connection = connection
         self._client_key = initiator_key
         self._server_key = server_key
@@ -163,6 +179,13 @@ class PathClient:
         self._id = 0x00
         self.type = None
         self.authenticated = False
+
+    def __repr__(self):
+        type_ = self.type
+        if type_ is None:
+            type_ = 'undetermined'
+        return 'PathClient(role=0x{:02x}, id={}, at={})'.format(
+            type_, self._id, hex(id(self)))
 
     @property
     def connection_closed(self):
@@ -185,7 +208,7 @@ class PathClient:
         Assign the id. Only :class:`Path` may set the id!
         """
         self._id = id_
-        self._log.debug('Assigned id: {}', id_)
+        self.log.debug('Assigned id: {}', id_)
 
     @property
     def server_key(self):
@@ -283,7 +306,7 @@ class PathClient:
         """
         self._client_key = public_key
         self._box = libnacl.public.Box(self.server_key, public_key)
-        self._log.debug('Client key updated')
+        self.log.debug('Client key updated')
 
     def update_log_name(self, slot_id):
         """
@@ -292,7 +315,7 @@ class PathClient:
         Arguments:
             - `slot_id`: The slot identifier of the client.
         """
-        self._log.name += '.{}'.format(slot_id)
+        self.log.name += '.0x{:02x}'.format(slot_id)
 
     def valid_cookie(self, cookie_in):
         """
@@ -347,19 +370,19 @@ class PathClient:
 
         # Pack if not packed
         if isinstance(message, AbstractMessage):
-            self._log.debug('Packing message')
+            self.log.debug('Packing message')
             data = message.pack(self)
-            self._log.trace('server >> {}', message)
+            self.log.trace('server >> {}', message)
         else:
             data = message
 
         # Send data
-        self._log.debug('Sending message')
+        self.log.debug('Sending message')
         self.combined_sequence_number_out += 1
         try:
             yield from self._connection.send(data)
         except websockets.ConnectionClosed as exc:
-            self._log.debug('Connection closed while sending')
+            self.log.debug('Connection closed while sending')
             raise Disconnected() from exc
 
     @asyncio.coroutine
@@ -376,15 +399,15 @@ class PathClient:
         try:
             data = yield from self._connection.recv()
         except websockets.ConnectionClosed as exc:
-            self._log.debug('Connection closed while receiving')
+            self.log.debug('Connection closed while receiving')
             raise Disconnected() from exc
-        self._log.debug('Received message')
+        self.log.debug('Received message')
 
         # Unpack data and return
         data = unpack(self, data)
         self.combined_sequence_number_in += 1
-        self._log.debug('Unpacked message')
-        self._log.trace('server << {}', data)
+        self.log.debug('Unpacked message')
+        self.log.trace('server << {}', data)
         return data
 
     @asyncio.coroutine
@@ -392,11 +415,11 @@ class PathClient:
         """
         Disconnected
         """
-        self._log.debug('Sending ping')
+        self.log.debug('Sending ping')
         try:
             yield from self._connection.ping()
         except websockets.ConnectionClosed as exc:
-            self._log.debug('Connection closed while pinging')
+            self.log.debug('Connection closed while pinging')
             raise Disconnected() from exc
 
     @asyncio.coroutine

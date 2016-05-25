@@ -41,11 +41,13 @@ class SubProtocol(enum.Enum):
 
 @enum.unique
 class CloseCode(enum.IntEnum):
+    going_away = 1001
     sub_protocol_error = 1002
     path_full_error = 3000
     protocol_error = 3001
     internal_error = 3002
     data_channel_handover = 3003
+    drop_by_initiator = 3004
 
 
 @enum.unique

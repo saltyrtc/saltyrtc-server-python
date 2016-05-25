@@ -305,13 +305,18 @@ def client_factory(
         message, _, ck, s, d, scsn = yield from client.recv()
 
         # Return client and additional data
-        return client, {
+        additional_data = {
             'id': d,
             'sck': sck,
             'start_scsn': start_scsn,
             'cck': cck,
             'ccsn': ccsn,
         }
+        if initiator_handshake:
+            additional_data['responders'] = message['responders']
+        else:
+            additional_data['initiator_connected'] = message['initiator_connected']
+        return client, additional_data
     return _client_factory
 
 

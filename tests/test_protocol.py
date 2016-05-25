@@ -310,17 +310,91 @@ class TestProtocol:
         assert responder.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_new_initiator(self, pack_nonce, client_factory):
-        raise NotImplementedError
+    def test_new_initiator(self, client_factory):
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        # No initiator connected
+        assert not r['initiator_connected']
+
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        # Responder is connected
+        assert i['responders'] == [r['id']]
+
+        # new-initiator
+        message, _, sck, s, d, scsn = yield from responder.recv()
+        assert s == 0x00
+        assert d == r['id']
+        assert r['sck'] == sck
+        assert scsn == r['start_scsn'] + 2
+        assert message['type'] == 'new-initiator'
+
+        # Bye
+        yield from initiator.close()
+        yield from responder.close()
 
     @pytest.mark.asyncio
-    def test_new_responder(self, pack_nonce, client_factory):
-        raise NotImplementedError
+    def test_new_responder(self, client_factory):
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        # No responder connected
+        assert len(i['responders']) == 0
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        # Initiator connected
+        assert r['initiator_connected']
+
+        # new-responder
+        message, _, sck, s, d, scsn = yield from initiator.recv()
+        assert s == 0x00
+        assert d == i['id']
+        assert i['sck'] == sck
+        assert scsn == i['start_scsn'] + 2
+        assert message['type'] == 'new-responder'
+        assert message['id'] == r['id']
+
+        # Bye
+        yield from initiator.close()
+        yield from responder.close()
 
     @pytest.mark.asyncio
-    def test_new_initiator_reverse(self, pack_nonce, client_factory):
-        raise NotImplementedError
+    def test_multiple_initiators(self, sleep, client_factory):
+        # First initiator handshake
+        first_initiator, i = yield from client_factory(initiator_handshake=True)
+        # No responder connected
+        assert len(i['responders']) == 0
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        # Initiator connected
+        assert r['initiator_connected']
+
+        # new-responder
+        yield from first_initiator.recv()
+
+        # Second initiator handshake
+        second_initiator, i = yield from client_factory(initiator_handshake=True)
+        # Responder is connected
+        assert i['responders'] == [r['id']]
+
+        # First initiator: Expect drop by initiator
+        yield from sleep()
+        assert not first_initiator.ws_client.open
+        assert responder.ws_client.close_code == saltyrtc.CloseCode.drop_by_initiator
+
+        # new-initiator
+        message, _, sck, s, d, scsn = yield from responder.recv()
+        assert s == 0x00
+        assert d == r['id']
+        assert r['sck'] == sck
+        assert scsn == r['start_scsn'] + 2
+        assert message['type'] == 'new-initiator'
+
+        # Bye
+        yield from first_initiator.close()
+        yield from responder.close()
 
     @pytest.mark.asyncio
-    def test_new_responder_reverse(self, pack_nonce, client_factory):
-        raise NotImplementedError
+    def test_multiple_responders(self, client_factory):
+        pass
