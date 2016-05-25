@@ -288,7 +288,7 @@ def client_factory(
         key = initiator_key if initiator_handshake else responder_key
 
         # server-hello
-        message, _, sck, s, d, start_scsn = yield from client.recv()
+        message, _, sck, s, d, start_scsn = yield from client.recv(timeout=timeout)
 
         cck, ccsn = cookie, 2 ** 32 - 1
         if responder_handshake:
@@ -296,7 +296,7 @@ def client_factory(
             yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
                 'type': 'client-hello',
                 'key': responder_key.pk,
-            })
+            }, timeout=timeout)
             ccsn += 1
 
         # client-auth
@@ -304,11 +304,11 @@ def client_factory(
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': sck,
-        })
+        }, timeout=timeout)
         ccsn += 1
 
         # server-auth
-        message, _, ck, s, d, scsn = yield from client.recv()
+        message, _, ck, s, d, scsn = yield from client.recv(timeout=timeout)
 
         # Return client and additional data
         additional_data = {

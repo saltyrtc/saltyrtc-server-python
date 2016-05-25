@@ -454,7 +454,7 @@ class TestProtocol:
         assert message['type'] == 'new-initiator'
 
         # Bye
-        yield from first_initiator.close()
+        yield from second_initiator.close()
         yield from responder.close()
 
     @pytest.mark.asyncio
@@ -546,7 +546,8 @@ class TestProtocol:
 
         Note: This test takes a few seconds.
         """
-        tasks = [client_factory(responder_handshake=True) for _ in range(0x02, 0x100)]
+        tasks = [client_factory(responder_handshake=True, timeout=20.0)
+                 for _ in range(0x02, 0x100)]
         clients = yield from asyncio.gather(*tasks, loop=event_loop)
 
         # All clients must be open
