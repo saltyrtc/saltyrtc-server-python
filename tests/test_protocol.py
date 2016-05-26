@@ -568,31 +568,6 @@ class TestProtocol:
         yield from initiator.close()
 
     @pytest.mark.asyncio
-    def test_path_full(self, event_loop, client_factory):
-        """
-        Add 253 responder to a path. Then, add a 254th responder and
-        check that the correct error code (Path Full) is being
-        returned.
-
-        Note: This test takes a few seconds.
-        """
-        tasks = [client_factory(responder_handshake=True, timeout=20.0)
-                 for _ in range(0x02, 0x100)]
-        clients = yield from asyncio.gather(*tasks, loop=event_loop)
-
-        # All clients must be open
-        assert all((client.ws_client.open for client, _ in clients))
-
-        # Now the path is full
-        with pytest.raises(websockets.ConnectionClosed) as exc_info:
-            yield from client_factory(responder_handshake=True)
-        assert exc_info.value.code == saltyrtc.CloseCode.path_full_error
-
-        # Close all clients
-        tasks = [client.close() for client, _ in clients]
-        yield from asyncio.wait(tasks, loop=event_loop)
-
-    @pytest.mark.asyncio
     def test_combined_sequence_number_overflow(
             self, sleep, server, client_factory
     ):
@@ -630,3 +605,138 @@ class TestProtocol:
         # Bye
         yield from first_responder.close()
         yield from second_responder.close()
+
+    @pytest.mark.asyncio
+    def test_relay_unencrypted(self, pack_nonce, client_factory):
+        """
+        Check that the initiator and responder can communicate raw
+        messages with each other (not encrypted).
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 2 ** 32 - 1
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 24
+
+        # new-responder
+        yield from initiator.recv()
+
+        # Send relay message: initiator --> responder
+        yield from initiator.send(pack_nonce(i['cck'], i['id'], r['id'], i['rccsn']), {
+            'type': 'meow',
+            'rawr': True,
+        }, box=None)
+        i['rccsn'] += 1
+
+        # Receive relay message: initiator --> responder
+        message, _, ck, s, d, csn = yield from responder.recv(box=None)
+        assert ck == i['cck']
+        assert s == i['id']
+        assert d == r['id']
+        assert csn == i['rccsn'] - 1
+        assert message['type'] == 'meow'
+        assert message['rawr']
+
+        # Send relay message: initiator <-- responder
+        yield from responder.send(pack_nonce(r['cck'], r['id'], i['id'], r['iccsn']), {
+            'type': 'meow',
+            'rawr': False,
+        }, box=None)
+        r['iccsn'] += 1
+
+        # Receive relay message: initiator <-- responder
+        message, _, ck, s, d, csn = yield from initiator.recv(box=None)
+        assert ck == r['cck']
+        assert s == r['id']
+        assert d == i['id']
+        assert csn == r['iccsn'] - 1
+        assert message['type'] == 'meow'
+        assert not message['rawr']
+
+        # Bye
+        yield from initiator.close()
+        yield from responder.close()
+
+    @pytest.mark.asyncio
+    def test_relay_encrypted(
+            self, initiator_key, responder_key, pack_nonce, client_factory
+    ):
+        """
+        Check that the initiator and responder can communicate raw
+        messages with each other (encrypted).
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 2 ** 32 - 1
+        i['rbox'] = libnacl.public.Box(sk=initiator_key, pk=responder_key.pk)
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 24
+        r['ibox'] = libnacl.public.Box(sk=responder_key, pk=initiator_key.pk)
+
+        # new-responder
+        yield from initiator.recv()
+
+        # Send relay message: initiator --> responder
+        yield from initiator.send(pack_nonce(i['cck'], i['id'], r['id'], i['rccsn']), {
+            'type': 'meow',
+            'rawr': True,
+        }, box=i['rbox'])
+        i['rccsn'] += 1
+
+        # Receive relay message: initiator --> responder
+        message, _, ck, s, d, csn = yield from responder.recv(box=r['ibox'])
+        assert ck == i['cck']
+        assert s == i['id']
+        assert d == r['id']
+        assert csn == i['rccsn'] - 1
+        assert message['type'] == 'meow'
+        assert message['rawr']
+
+        # Send relay message: initiator <-- responder
+        yield from responder.send(pack_nonce(r['cck'], r['id'], i['id'], r['iccsn']), {
+            'type': 'meow',
+            'rawr': False,
+        }, box=r['ibox'])
+        r['iccsn'] += 1
+
+        # Receive relay message: initiator <-- responder
+        message, _, ck, s, d, csn = yield from initiator.recv(box=i['rbox'])
+        assert ck == r['cck']
+        assert s == r['id']
+        assert d == i['id']
+        assert csn == r['iccsn'] - 1
+        assert message['type'] == 'meow'
+        assert not message['rawr']
+
+        # Bye
+        yield from initiator.close()
+        yield from responder.close()
+
+    @pytest.mark.asyncio
+    def test_path_full(self, event_loop, client_factory):
+        """
+        Add 253 responder to a path. Then, add a 254th responder and
+        check that the correct error code (Path Full) is being
+        returned.
+
+        Note: This test takes a few seconds.
+        """
+        tasks = [client_factory(responder_handshake=True, timeout=20.0)
+                 for _ in range(0x02, 0x100)]
+        clients = yield from asyncio.gather(*tasks, loop=event_loop)
+
+        # All clients must be open
+        assert all((client.ws_client.open for client, _ in clients))
+
+        # Now the path is full
+        with pytest.raises(websockets.ConnectionClosed) as exc_info:
+            yield from client_factory(responder_handshake=True)
+        assert exc_info.value.code == saltyrtc.CloseCode.path_full_error
+
+        # Close all clients
+        tasks = [client.close() for client, _ in clients]
+        yield from asyncio.wait(tasks, loop=event_loop)

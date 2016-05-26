@@ -187,6 +187,10 @@ def server(request, event_loop, port):
     return server_
 
 
+class _DefaultBox:
+    pass
+
+
 class Client:
     def __init__(self, ws_client, pack_message, unpack_message, timeout=None):
         self.ws_client = ws_client
@@ -196,20 +200,20 @@ class Client:
         self.session_key = None
         self.box = None
 
-    def send(self, nonce, message, timeout=None):
+    def send(self, nonce, message, box=_DefaultBox, timeout=None):
         if timeout is None:
             timeout = self.timeout
         yield from self.pack_and_send(
             self.ws_client, nonce, message,
-            box=self.box, timeout=timeout
+            box=self.box if box == _DefaultBox else box, timeout=timeout
         )
 
-    def recv(self, timeout=None):
+    def recv(self, box=_DefaultBox, timeout=None):
         if timeout is None:
             timeout = self.timeout
         return (yield from self.recv_and_unpack(
             self.ws_client,
-            box=self.box, timeout=timeout
+            box=self.box if box == _DefaultBox else box, timeout=timeout
         ))
 
     def close(self):

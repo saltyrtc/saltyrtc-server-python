@@ -186,8 +186,8 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
         # Decrypt if directed at us and keys have been exchanged
         # or just return a raw message to be sent to another client
-        data = data[NONCE_LENGTH:]
         if destination_type == AddressType.server:
+            data = data[NONCE_LENGTH:]
             if not client.authenticated and client.type is None:
                 payload = None
 

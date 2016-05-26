@@ -416,7 +416,7 @@ class ServerProtocol(Protocol):
 
         # Add send task to task queue of the source
         task = self._loop.create_task(destination.send(message))
-        destination.log.debug('Enqueueing relayed message from 0x{:x}', source.id)
+        destination.log.debug('Enqueueing relayed message from 0x{:02x}', source.id)
         yield from destination.enqueue_task(task)
 
         # noinspection PyBroadException
@@ -425,7 +425,7 @@ class ServerProtocol(Protocol):
             yield from asyncio.wait_for(task, RELAY_TIMEOUT, loop=self._loop)
         except asyncio.TimeoutError:
             # Timed out, send 'send-error' to source
-            log_message = 'Sending relayed message to 0x{:x} timed out'
+            log_message = 'Sending relayed message to 0x{:02x} timed out'
             source.log.debug(log_message, destination.id)
             yield from send_error_message()
         except Exception:
@@ -433,7 +433,7 @@ class ServerProtocol(Protocol):
             # Note: We don't care about the actual exception as the task
             #       will also trigger that exception on the destination
             #       client's handler who will log what happened.
-            log_message = 'Sending relayed message failed, receiver 0x{:x} is gone'
+            log_message = 'Sending relayed message failed, receiver 0x{:02x} is gone'
             source.log.debug(log_message, destination.id)
             yield from send_error_message()
 
