@@ -45,6 +45,24 @@ def unpack(client, data):
     return AbstractBaseMessage.unpack(client, data)
 
 
+def _message_representation(class_name, nonce, payload, encrypted=None):
+    hex_cookie_length = COOKIE_LENGTH * 2
+    nonce_as_hex = binascii.hexlify(nonce).decode('ascii')
+    nonce_as_hex = '|'.join((
+        nonce_as_hex[:hex_cookie_length],
+        nonce_as_hex[hex_cookie_length:hex_cookie_length + 2],
+        nonce_as_hex[hex_cookie_length + 2:hex_cookie_length + 4],
+        nonce_as_hex[hex_cookie_length + 4:hex_cookie_length + 8],
+        nonce_as_hex[hex_cookie_length + 8:]
+    ))
+    if isinstance(encrypted, bool):
+        encrypted_str = 'encrypted={}, '.format(encrypted)
+    else:
+        encrypted_str = ''
+    return '{}({}nonce={}, data={})'.format(
+        class_name, encrypted_str, nonce_as_hex, payload)
+
+
 class AbstractMessage(metaclass=abc.ABCMeta):
     type = None
 
@@ -113,17 +131,8 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         self.payload = {} if payload is None else payload
 
     def __str__(self):
-        hex_cookie_length = COOKIE_LENGTH * 2
-        nonce_as_hex = binascii.hexlify(self._nonce).decode('ascii')
-        nonce_as_hex = '|'.join((
-            nonce_as_hex[:hex_cookie_length],
-            nonce_as_hex[hex_cookie_length:hex_cookie_length + 2],
-            nonce_as_hex[hex_cookie_length + 2:hex_cookie_length + 4],
-            nonce_as_hex[hex_cookie_length + 4:hex_cookie_length + 8],
-            nonce_as_hex[hex_cookie_length + 8:]
-        ))
-        return '{}(encrypted={}, nonce={}, data={})'.format(
-            self.__class__.__name__, self.encrypted, nonce_as_hex, self.payload)
+        return _message_representation(
+            self.__class__.__name__, self._nonce, self.payload, encrypted=self.encrypted)
 
     @classmethod
     def _get_message_classes(cls):
@@ -338,6 +347,10 @@ class RawMessage(AbstractMessage):
             source_type=source_type, destination_type=destination_type
         )
         self._data = data
+
+    def __str__(self):
+        return _message_representation(
+            self.__class__.__name__, self._nonce, self._data)
 
     def pack(self, client):
         return self._data

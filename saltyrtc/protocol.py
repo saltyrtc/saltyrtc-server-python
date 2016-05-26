@@ -186,7 +186,7 @@ class PathClient:
         # Queue for tasks to be run on the client (relay messages, closing, ...)
         self._task_queue = asyncio.Queue(loop=self._loop)
 
-    def __repr__(self):
+    def __str__(self):
         type_ = self.type
         if type_ is None:
             type_ = 'undetermined'
