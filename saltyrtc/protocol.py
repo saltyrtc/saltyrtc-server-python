@@ -163,7 +163,7 @@ class PathClient:
         '_loop', '_connection', '_client_key', '_server_key',
         '_sequence_number_out', '_sequence_number_in', '_cookie_out', '_cookie_in',
         '_combined_sequence_number_out', '_combined_sequence_number_in',
-        '_box', '_id', 'log', 'type', 'authenticated', 'message_queue'
+        '_box', '_id', 'log', 'type', 'authenticated', '_task_queue'
     )
 
     def __init__(
@@ -183,8 +183,8 @@ class PathClient:
         self.type = None
         self.authenticated = False
 
-        # Queue for outgoing messages
-        self.message_queue = asyncio.Queue(loop=self._loop)
+        # Queue for tasks to be run on the client (relay messages, closing, ...)
+        self._task_queue = asyncio.Queue(loop=self._loop)
 
     def __repr__(self):
         type_ = self.type
@@ -362,6 +362,29 @@ class PathClient:
         can be sent to the requested :class:`AddressType`.
         """
         return self.authenticated and self.type != destination_type
+
+    @asyncio.coroutine
+    def enqueue_task(self, coroutine_or_task):
+        """
+        Enqueue a coroutine or task into the task queue of the
+        client.
+
+        Arguments:
+            - `coroutine_or_task`: A coroutine or a
+              :class:`asyncio.Task`.
+        """
+        yield from self._task_queue.put(coroutine_or_task)
+
+    @asyncio.coroutine
+    def dequeue_task(self):
+        """
+        Dequeue and return a coroutine or task from the task queue of
+        the client.
+
+        Shall only be called from the client's :class:`Protocol`
+        instance.
+        """
+        return (yield from self._task_queue.get())
 
     @asyncio.coroutine
     def send(self, message):

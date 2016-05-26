@@ -537,6 +537,9 @@ class TestProtocol:
         })
         i['ccsn'] += 1
 
+        # Bye
+        yield from initiator.close()
+
     @pytest.mark.asyncio
     def test_path_full(self, event_loop, client_factory):
         """
@@ -574,6 +577,7 @@ class TestProtocol:
         initiator, i = yield from client_factory(initiator_handshake=True)
 
         # Patch server's combined sequence number of the initiator instance
+        assert len(server.protocols) == 1
         protocol = next(iter(server.protocols))
         protocol.client.combined_sequence_number_out = 2 ** 48 - 1
 
