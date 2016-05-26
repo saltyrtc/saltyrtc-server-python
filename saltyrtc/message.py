@@ -290,7 +290,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
         # Validate combined sequence number
         if (is_to_server and
-                client.valid_combined_sequence_number(combined_sequence_number_in)):
+                not client.valid_combined_sequence_number(combined_sequence_number_in)):
             error = 'Invalid combined sequence number, expected {}, got {}'.format(
                 client.combined_sequence_number_in, combined_sequence_number_in)
             raise MessageError(error)
