@@ -144,6 +144,33 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
+    def test_invalid_repeated_cookie(
+            self, sleep, cookie, initiator_key, pack_nonce, client_factory
+    ):
+        """
+        Check that the server closes with Protocol Error when a client
+        sends an invalid cookie in 'client-auth'.
+        """
+        client = yield from client_factory()
+
+        # server-hello, already checked in another test
+        message, _, sck, s, d, scsn = yield from client.recv()
+        client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
+
+        # client-auth
+        cck, ccsn = cookie, 2**32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+            'type': 'client-auth',
+            'your_cookie': b'\x11' * 16,
+        })
+        ccsn += 1
+
+        # Expect protocol error
+        yield from sleep()
+        assert not client.ws_client.open
+        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
     def test_initiator_invalid_source(
             self, sleep, cookie, initiator_key, pack_nonce, client_factory
     ):
