@@ -46,6 +46,8 @@ def unpack(client, data):
 
 
 class AbstractMessage(metaclass=abc.ABCMeta):
+    type = None
+
     def __init__(self, source, destination, source_type=None, destination_type=None):
         if source_type is None:
             AddressType.from_address(source)
@@ -85,7 +87,6 @@ class AbstractMessage(metaclass=abc.ABCMeta):
 
 # noinspection PyAbstractClass
 class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
-    type = None
     encrypted = None
 
     def __new__(cls, payload, *args, **kwargs):
@@ -325,6 +326,8 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
 
 class RawMessage(AbstractMessage):
+    type = 'raw'  # Note: This field is used for logging purposes only
+
     def __init__(
             self, source, destination, data,
             source_type=None, destination_type=None

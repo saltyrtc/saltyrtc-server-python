@@ -184,6 +184,7 @@ def server(request, event_loop, port):
         logging_handler.pop_application()
 
     request.addfinalizer(fin)
+    return server_
 
 
 class Client:

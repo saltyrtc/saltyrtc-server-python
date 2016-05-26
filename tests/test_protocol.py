@@ -561,3 +561,41 @@ class TestProtocol:
         # Close all clients
         tasks = [client.close() for client, _ in clients]
         yield from asyncio.wait(tasks, loop=event_loop)
+
+    @pytest.mark.asyncio
+    def test_combined_sequence_number_overflow(
+            self, sleep, server, client_factory
+    ):
+        """
+        Monkey-patch the combined sequence number of the server and
+        check that an overflow of the number is handled correctly.
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+
+        # Patch server's combined sequence number of the initiator instance
+        protocol = next(iter(server.protocols))
+        protocol.client.combined_sequence_number_out = 2 ** 48 - 1
+
+        # Connect a new responder
+        first_responder, r = yield from client_factory(responder_handshake=True)
+
+        # new-responder
+        message, _, sck, s, d, scsn = yield from initiator.recv()
+        assert s == 0x00
+        assert d == i['id']
+        assert i['sck'] == sck
+        assert scsn == 2 ** 48 - 1
+        assert message['id'] == r['id']
+
+        # Connect a new responder
+        second_responder, r = yield from client_factory(responder_handshake=True)
+
+        # Expect protocol error
+        yield from sleep()
+        assert not initiator.ws_client.open
+        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+        # Bye
+        yield from first_responder.close()
+        yield from second_responder.close()

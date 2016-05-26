@@ -184,16 +184,20 @@ class ServerProtocol(Protocol):
         yield from self.handshake()
         client.log.debug('Handshake completed')
 
-        # Keep alive and poll for messages
-        tasks = []
+        # Task: Send queued messages
+        tasks = [self.send_loop()]
+
+        # Task: Poll for messages
         if client.type == AddressType.initiator:
             client.log.debug('Starting runner for initiator')
-            tasks.append(self.initiator_loop())
+            tasks.append(self.initiator_receive_loop())
         elif client.type == AddressType.responder:
             client.log.debug('Starting runner for responder')
-            tasks.append(self.responder_loop())
+            tasks.append(self.responder_receive_loop())
         else:
             raise ValueError('Invalid address type: {}'.format(client.type))
+
+        # Task: Keep alive (if requested)
         client.log.debug('Starting keep-alive task')
         tasks.append(self.keep_alive())
 
@@ -261,7 +265,7 @@ class ServerProtocol(Protocol):
         # Authenticated
         previous_initiator = path.set_initiator(initiator)
         if previous_initiator is not None:
-            # Drop previous initiator (we don't care about any exceptions)
+            # Drop previous initiator
             path.log.debug('Dropping previous initiator: {}', previous_initiator)
             previous_initiator.log.debug('Dropping (another initiator connected)')
             coro = previous_initiator.close(code=CloseCode.drop_by_initiator.value)
@@ -271,10 +275,11 @@ class ServerProtocol(Protocol):
         responder_ids = path.get_responder_ids()
         for responder_id in responder_ids:
             responder = path.get_responder(responder_id)
+
+            # Create and add to message queue of the responder
             message = NewInitiatorMessage.create(0x00, responder_id)
-            responder.log.debug('Sending new-initiator message')
-            # TODO: Handle exceptions?
-            self._loop.create_task(responder.send(message))
+            responder.log.debug('Enqueued new-initiator message')
+            yield from responder.message_queue.put(message)
 
         # Send server-auth
         responder_ids = path.get_responder_ids()
@@ -312,10 +317,10 @@ class ServerProtocol(Protocol):
         initiator = path.get_initiator()
         initiator_connected = initiator is not None
         if initiator_connected:
+            # Create and add to message queue of the initiator
             message = NewResponderMessage.create(0x00, initiator.id, id_)
-            initiator.log.debug('Sending new-responder')
-            # TODO: Handle exceptions?
-            self._loop.create_task(initiator.send(message))
+            initiator.log.debug('Enqueued new-responder message')
+            yield from initiator.message_queue.put(message)
 
         # Send server-auth
         message = ServerAuthMessage.create(
@@ -323,6 +328,99 @@ class ServerProtocol(Protocol):
             initiator_connected=initiator_connected)
         responder.log.debug('Sending server-auth without responder ids')
         yield from responder.send(message)
+
+    @asyncio.coroutine
+    def send_loop(self):
+        path, client = self.path, self.client
+        while not client.connection_closed.done():
+            # Get a message from the queue
+            message = yield from client.message_queue.get()
+
+            # Send the message
+            yield from client.send(message)
+
+    @asyncio.coroutine
+    def initiator_receive_loop(self):
+        path, initiator = self.path, self.client
+        while not initiator.connection_closed.done():
+            # Receive relay message or drop-responder
+            message = yield from initiator.receive()
+
+            # Relay
+            if isinstance(message, RawMessage):
+                # Lookup responder
+                responder = path.get_responder(message.destination)
+                # Send to responder
+                yield from self.relay_message(responder, message)
+            # Drop-responder
+            elif message.type == MessageType.drop_responder:
+                # Lookup responder
+                responder = path.get_responder(message.responder_id)
+                if responder is not None:
+                    # Drop previous initiator
+                    path.log.debug('Dropping responder 0x{:02x}', responder.id)
+                    responder.log.debug('Dropping (requested by initiator)')
+                    coroutine = responder.close(code=CloseCode.drop_by_initiator.value)
+                    self._loop.create_task(coroutine)
+                else:
+                    log_message = 'Responder 0x{:02x} already dropped, nothing to do'
+                    path.log.debug(log_message, message.responder_id)
+            else:
+                error = "Expected relay message or 'drop-responder', got '{}'"
+                raise MessageFlowError(error.format(message.type))
+
+    @asyncio.coroutine
+    def responder_receive_loop(self):
+        path, responder = self.path, self.client
+        while not responder.connection_closed.done():
+            # Receive relay message
+            message = yield from responder.receive()
+
+            # Relay
+            if isinstance(message, RawMessage):
+                # Lookup initiator
+                initiator = path.get_initiator()
+                # Send to initiator
+                yield from self.relay_message(initiator, message)
+            else:
+                error = "Expected relay message, got '{}'"
+                raise MessageFlowError(error.format(message.type))
+
+    @asyncio.coroutine
+    def relay_message(self, destination, message):
+        path, sender = self.path, self.client
+
+        # Prepare message
+        sender.log.debug('Packing relay message')
+        message_data = message.pack(sender)
+
+        @asyncio.coroutine
+        def send_error_message():
+            # Create and add to message queue of the sender
+            error = SendErrorMessage.create(
+                0x00, sender.id, libnacl.crypto_hash_sha256(message_data))
+            sender.log.debug('Relaying failed, enqueuing send-error')
+            yield from sender.message_queue.put(error)
+
+        # Destination not connected? Send 'send-error' to sender
+        if destination is None:
+            error_message = ('Cannot relay message, no connection for '
+                             'destination id 0x{:02x}')
+            sender.log.notice(error_message, destination.id)
+            return (yield from send_error_message())
+
+        sender.log.debug('Sending relay message to 0x{:02x}', destination.id)
+        try:
+            # Relay message to destination
+            future = destination.send(message)
+            yield from asyncio.wait_for(future, RELAY_TIMEOUT, loop=self._loop)
+        except asyncio.TimeoutError:
+            # Timed out or some other error, Send send-error to original sender
+            sender.log.debug('Sending relayed message timed out')
+            yield from send_error_message()
+        except Disconnected:
+            sender.log.debug('Receiver disconnected')
+            yield from send_error_message()
 
     @asyncio.coroutine
     def keep_alive(self):
@@ -347,91 +445,6 @@ class ServerProtocol(Protocol):
                 raise PingTimeoutError(client)
             else:
                 client.log.debug('Pong')
-
-    @asyncio.coroutine
-    def initiator_loop(self):
-        path, initiator = self.path, self.client
-        while not initiator.connection_closed.done():
-            # Receive relay message or drop-responder
-            message = yield from initiator.receive()
-
-            # Relay
-            if isinstance(message, RawMessage):
-                # Lookup responder
-                responder = path.get_responder(message.destination)
-                # Send to responder
-                coroutine = self.relay_message(responder, message)
-                self._loop.create_task(coroutine)
-            # Drop-responder
-            elif message.type == MessageType.drop_responder:
-                # Lookup responder
-                responder = path.get_responder(message.responder_id)
-                if responder is not None:
-                    # Drop previous initiator (we don't care about any exceptions)
-                    path.log.debug('Dropping responder 0x{:02x}', responder.id)
-                    responder.log.debug('Dropping (requested by initiator)')
-                    coroutine = responder.close(code=CloseCode.drop_by_initiator.value)
-                    self._loop.create_task(coroutine)
-                else:
-                    log_message = 'Responder 0x{:02x} already dropped, nothing to do'
-                    path.log.debug(log_message, message.responder_id)
-            else:
-                error = "Expected relay message or 'drop-responder', got '{}'"
-                raise MessageFlowError(error.format(message.type))
-
-    @asyncio.coroutine
-    def responder_loop(self):
-        path, responder = self.path, self.client
-        while not responder.connection_closed.done():
-            # Receive relay message
-            message = yield from responder.receive()
-
-            # Relay
-            if isinstance(message, RawMessage):
-                # Lookup initiator
-                initiator = path.get_initiator()
-                # Send to initiator
-                coroutine = self.relay_message(initiator, message)
-                self._loop.create_task(coroutine)
-            else:
-                error = "Expected relay message, got '{}'"
-                raise MessageFlowError(error.format(message.type))
-
-    @asyncio.coroutine
-    def relay_message(self, destination, message):
-        path, sender = self.path, self.client
-
-        # Prepare message
-        sender.log.debug('Packing relay message')
-        message_data = message.pack(sender)
-
-        @asyncio.coroutine
-        def send_error_message():
-            sender.log.debug('Relaying failed, reporting send-error')
-            error = SendErrorMessage.create(
-                0x00, sender.id, libnacl.crypto_hash_sha256(message_data))
-            # TODO: Handle exceptions, what if sender is gone?
-            yield from sender.send(error)
-
-        # Destination not set? Send send-error to sender
-        if destination is None:
-            error_message = ('Cannot relay message, no connection for '
-                             'destination id 0x{:02x}')
-            sender.log.notice(error_message, destination.id)
-            return (yield from send_error_message())
-
-        sender.log.debug('Sending relay message to 0x{:02x}', destination.id)
-        try:
-            # Relay message to destination
-            future = destination.send(message)
-            yield from asyncio.wait_for(future, RELAY_TIMEOUT, loop=self._loop)
-        except asyncio.TimeoutError:
-            # Timed out or some other error, Send send-error to original sender
-            sender.log.debug('Sending relayed message timed out')
-            yield from send_error_message()
-        except Disconnected:
-            sender.log.debug('Receiver disconnected')
-            yield from send_error_message()
 
     def _validate_cookie(self, expected_cookie, actual_cookie):
         self.client.log.debug('Validating cookie')

@@ -160,14 +160,16 @@ class _OverflowSentinel:
 
 class PathClient:
     __slots__ = (
-        'log', '_connection', '_client_key', '_server_key',
+        '_loop', '_connection', '_client_key', '_server_key',
         '_sequence_number_out', '_sequence_number_in', '_cookie_out', '_cookie_in',
         '_combined_sequence_number_out', '_combined_sequence_number_in',
-        '_box', '_id', 'type', 'authenticated'
+        '_box', '_id', 'log', 'type', 'authenticated', 'message_queue'
     )
 
-    def __init__(self, connection, path_number, initiator_key, server_key=None):
-        self.log = util.get_logger('path.{}.client.{:x}'.format(path_number, id(self)))
+    def __init__(
+            self, connection, path_number, initiator_key, server_key=None, loop=None
+    ):
+        self._loop = asyncio.get_event_loop() if loop is None else loop
         self._connection = connection
         self._client_key = initiator_key
         self._server_key = server_key
@@ -177,8 +179,12 @@ class PathClient:
         self._combined_sequence_number_in = None
         self._box = None
         self._id = 0x00
+        self.log = util.get_logger('path.{}.client.{:x}'.format(path_number, id(self)))
         self.type = None
         self.authenticated = False
+
+        # Queue for outgoing messages
+        self.message_queue = asyncio.Queue(loop=self._loop)
 
     def __repr__(self):
         type_ = self.type
@@ -370,7 +376,7 @@ class PathClient:
 
         # Pack if not packed
         if isinstance(message, AbstractMessage):
-            self.log.debug('Packing message')
+            self.log.debug('Packing message: {}', message.type)
             data = message.pack(self)
             self.log.trace('server >> {}', message)
         else:
@@ -404,11 +410,11 @@ class PathClient:
         self.log.debug('Received message')
 
         # Unpack data and return
-        data = unpack(self, data)
+        message = unpack(self, data)
         self.combined_sequence_number_in += 1
-        self.log.debug('Unpacked message')
-        self.log.trace('server << {}', data)
-        return data
+        self.log.debug('Unpacked message: {}', message.type)
+        self.log.trace('server << {}', message)
+        return message
 
     @asyncio.coroutine
     def ping(self):
