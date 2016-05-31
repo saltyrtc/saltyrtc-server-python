@@ -331,13 +331,17 @@ class PathClient:
         if self.cookie_in is None:
             # Ensure that the client uses another cookie than we do
             if cookie_in == self.cookie_out:
+                self.log.debug('Server and client cookies are the same')
                 return False
 
             # First message: Set cookie
             self._cookie_in = cookie_in
             return True
         else:
-            return cookie_in == self.cookie_in
+            if cookie_in != self.cookie_in:
+                self.log.debug('Client sent wrong cookie')
+                return False
+            return True
 
     def valid_combined_sequence_number(self, combined_sequence_number_in):
         """
