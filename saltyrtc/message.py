@@ -2,6 +2,7 @@ import abc
 import struct
 import io
 import binascii
+import collections
 
 # noinspection PyPackageRequirements
 import umsgpack
@@ -43,6 +44,28 @@ def unpack(client, data):
     MessageFlowError
     """
     return AbstractBaseMessage.unpack(client, data)
+
+
+def _ensure_bytes(data):
+    """
+    Convert iterable of integers to bytes if necessary.
+
+    Arguments:
+        - `data`: An iterable containing integers where 0 <= x <= 255
+          or a bytes instance.
+
+    Raises :exc:`MessageError` in case `data` could not be converted
+    to bytes.
+    """
+    if isinstance(data, bytes):
+        return data
+    elif isinstance(data, collections.Iterable):
+        try:
+            return bytes(data)
+        except ValueError as exc:
+            raise MessageError('Could not convert to bytes') from exc
+    else:
+        raise MessageError('Expected iterable containing integers or bytes')
 
 
 def _message_representation(class_name, nonce, payload, encrypted=None):
@@ -237,7 +260,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         except KeyError as exc:
             error_message = 'Can not handle valid message type: {}'
             raise MessageError(error_message.format(type_)) from exc
-        message_class.check_payload(client, payload)
+        payload = message_class.check_payload(client, payload)
 
         # Return instance
         message = message_class(
@@ -381,7 +404,9 @@ class ServerHelloMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_public_key(payload.get('key'))
+        payload['key'] = _ensure_bytes(payload.get('key'))
+        validate_public_key(payload['key'])
+        return payload
 
     @property
     def server_public_key(self):
@@ -405,7 +430,9 @@ class ClientHelloMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_public_key(payload.get('key'))
+        payload['key'] = _ensure_bytes(payload.get('key'))
+        validate_public_key(payload['key'])
+        return payload
 
     @property
     def client_public_key(self):
@@ -429,7 +456,9 @@ class ClientAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_cookie(payload.get('your_cookie'))
+        payload['your_cookie'] = _ensure_bytes(payload.get('your_cookie'))
+        validate_cookie(payload['your_cookie'])
+        return payload
 
     @property
     def server_cookie(self):
@@ -461,12 +490,15 @@ class ServerAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
+        payload['your_cookie'] = _ensure_bytes(payload.get('your_cookie'))
+        validate_cookie(payload['your_cookie'])
         responders = payload.get('responders')
         if responders is not None:
             validate_responder_ids(responders)
         initiator_connected = payload.get('initiator_connected')
         if initiator_connected is not None:
             validate_initiator_connected(responders)
+        return payload
 
     @property
     def client_cookie(self):
@@ -493,7 +525,7 @@ class NewInitiatorMessage(AbstractBaseMessage):
 
     @classmethod
     def check_payload(cls, client, payload):
-        pass
+        return payload
 
 
 class NewResponderMessage(AbstractBaseMessage):
@@ -514,6 +546,7 @@ class NewResponderMessage(AbstractBaseMessage):
         MessageError
         """
         validate_responder_id(payload.get('id'))
+        return payload
 
     @property
     def responder_id(self):
@@ -538,6 +571,7 @@ class DropResponderMessage(AbstractBaseMessage):
         MessageError
         """
         validate_responder_id(payload.get('id'))
+        return payload
 
     @property
     def responder_id(self):
@@ -562,6 +596,7 @@ class SendErrorMessage(AbstractBaseMessage):
         MessageError
         """
         validate_hash(payload.get('hash'))
+        return payload
 
     @property
     def message_hash(self):
