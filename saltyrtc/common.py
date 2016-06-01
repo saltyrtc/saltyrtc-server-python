@@ -86,8 +86,8 @@ def validate_cookie(cookie):
     if not isinstance(cookie, bytes):
         raise MessageError('Invalid cookie: Must be `bytes` instance')
     if len(cookie) != COOKIE_LENGTH:
-        raise MessageError('Invalid cookie: Invalid length (%d != %d)'
-                % (len(cookie), COOKIE_LENGTH))
+        raise MessageError('Invalid cookie: Invalid length ({} != {})'.format(
+            len(cookie), COOKIE_LENGTH))
 
 
 def validate_initiator_connected(initiator_connected):

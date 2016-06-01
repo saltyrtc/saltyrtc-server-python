@@ -46,19 +46,26 @@ def unpack(client, data):
     return AbstractBaseMessage.unpack(client, data)
 
 
-def ensurebytes(data):
+def _ensure_bytes(data):
     """
-    Convert byte array to byte string. Leave byte strings unmodified.
+    Convert iterable of integers to bytes if necessary.
 
-    TypeError
-    ValueError
+    Arguments:
+        - `data`: An iterable containing integers where 0 <= x <= 255
+          or a bytes instance.
+
+    Raises :exc:`MessageError` in case `data` could not be converted
+    to bytes.
     """
     if isinstance(data, bytes):
         return data
     elif isinstance(data, collections.Iterable):
-        return bytes(data)
+        try:
+            return bytes(data)
+        except ValueError as exc:
+            raise MessageError('Could not convert to bytes') from exc
     else:
-        raise TypeError('ensurebytes function expects iterable or bytes')
+        raise MessageError('Expected iterable containing integers or bytes')
 
 
 def _message_representation(class_name, nonce, payload, encrypted=None):
@@ -397,11 +404,11 @@ class ServerHelloMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_public_key(ensurebytes(payload.get('key')))
+        validate_public_key(_ensure_bytes(payload.get('key')))
 
     @property
     def server_public_key(self):
-        return ensurebytes(self.payload['key'])
+        return self.payload['key']
 
 
 class ClientHelloMessage(AbstractBaseMessage):
@@ -421,11 +428,11 @@ class ClientHelloMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_public_key(ensurebytes(payload.get('key')))
+        validate_public_key(_ensure_bytes(payload.get('key')))
 
     @property
     def client_public_key(self):
-        return ensurebytes(self.payload['key'])
+        return self.payload['key']
 
 
 class ClientAuthMessage(AbstractBaseMessage):
@@ -445,11 +452,11 @@ class ClientAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_cookie(ensurebytes(payload.get('your_cookie')))
+        validate_cookie(_ensure_bytes(payload.get('your_cookie')))
 
     @property
     def server_cookie(self):
-        return ensurebytes(self.payload['your_cookie'])
+        return self.payload['your_cookie']
 
 
 class ServerAuthMessage(AbstractBaseMessage):
@@ -477,6 +484,7 @@ class ServerAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
+        validate_cookie(_ensure_bytes(payload.get('your_cookie')))
         responders = payload.get('responders')
         if responders is not None:
             validate_responder_ids(responders)
@@ -486,7 +494,7 @@ class ServerAuthMessage(AbstractBaseMessage):
 
     @property
     def client_cookie(self):
-        return ensurebytes(self.payload['your_cookie'])
+        return self.payload['your_cookie']
 
     @property
     def responder_ids(self):
