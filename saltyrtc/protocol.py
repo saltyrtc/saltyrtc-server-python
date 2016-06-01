@@ -10,6 +10,8 @@ from . import util
 from .exception import *
 from .common import (
     KEY_LENGTH,
+    KEEP_ALIVE_INTERVAL,
+    KEEP_ALIVE_TIMEOUT,
 )
 from .message import (
     unpack,
@@ -163,7 +165,8 @@ class PathClient:
         '_loop', '_connection', '_client_key', '_server_key',
         '_sequence_number_out', '_sequence_number_in', '_cookie_out', '_cookie_in',
         '_combined_sequence_number_out', '_combined_sequence_number_in',
-        '_box', '_id', 'log', 'type', 'authenticated', '_task_queue'
+        '_box', '_id', 'log', 'type', 'authenticated',
+        'keep_alive_interval', 'keep_alive_timeout', '_task_queue'
     )
 
     def __init__(
@@ -182,6 +185,8 @@ class PathClient:
         self.log = util.get_logger('path.{}.client.{:x}'.format(path_number, id(self)))
         self.type = None
         self.authenticated = False
+        self.keep_alive_interval = KEEP_ALIVE_INTERVAL
+        self.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
 
         # Queue for tasks to be run on the client (relay messages, closing, ...)
         self._task_queue = asyncio.Queue(loop=self._loop)
@@ -450,7 +455,7 @@ class PathClient:
         """
         self.log.debug('Sending ping')
         try:
-            yield from self._connection.ping()
+            return (yield from self._connection.ping())
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while pinging')
             raise Disconnected() from exc

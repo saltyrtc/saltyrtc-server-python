@@ -9,8 +9,6 @@ from . import util
 from .exception import *
 from .common import (
     RELAY_TIMEOUT,
-    KEEP_ALIVE_INTERVAL,
-    KEEP_ALIVE_TIMEOUT,
     SubProtocol,
     CloseCode,
     AddressType,
@@ -447,15 +445,14 @@ class ServerProtocol(Protocol):
 
         while True:
             # Wait
-            yield from asyncio.sleep(KEEP_ALIVE_INTERVAL, loop=self._loop)
+            yield from asyncio.sleep(client.keep_alive_interval, loop=self._loop)
 
             # Send ping and wait for pong
             client.log.debug('Ping')
             try:
-                pong_future = yield from asyncio.wait_for(
-                    client.ping(), KEEP_ALIVE_TIMEOUT, loop=self._loop)
+                pong_future = yield from client.ping()
                 yield from asyncio.wait_for(
-                    pong_future, KEEP_ALIVE_TIMEOUT, loop=self._loop)
+                    pong_future, client.keep_alive_timeout, loop=self._loop)
             except asyncio.TimeoutError:
                 raise PingTimeoutError(client)
             else:

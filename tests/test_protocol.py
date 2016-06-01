@@ -324,6 +324,37 @@ class TestProtocol:
         yield from client.close()
 
     @pytest.mark.asyncio
+    def test_keep_alive_timeout(
+            self, sleep, server, ws_client_factory, client_factory
+    ):
+        """
+        Monkey-patch the the server's keep alive interval and timeout
+        and check that the server sends us a ping and waits for a
+        pong.
+        """
+        if pytest.saltyrtc.external_server:
+            return
+
+        # Create client and patch it to not answer pings
+        ws_client = yield from ws_client_factory()
+        ws_client.pong = asyncio.coroutine(lambda *args, **kwargs: None)
+
+        # Patch server's keep alive interval and timeout
+        assert len(server.protocols) == 1
+        protocol = next(iter(server.protocols))
+        protocol.client.keep_alive_interval = 0
+        protocol.client.keep_alive_timeout = 0.001
+
+        # Initiator handshake
+        client, i = yield from client_factory(
+            ws_client=ws_client, initiator_handshake=True)
+
+        # Expect protocol error
+        yield from sleep()
+        assert not client.ws_client.open
+        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
     def test_initiator_invalid_source_after_handshake(
             self, sleep, pack_nonce, client_factory
     ):
@@ -575,8 +606,8 @@ class TestProtocol:
         Monkey-patch the combined sequence number of the server and
         check that an overflow of the number is handled correctly.
         """
-        # Make sure the server is not external
-        assert not pytest.saltyrtc.external_server
+        if pytest.saltyrtc.external_server:
+            return
 
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)

@@ -269,6 +269,7 @@ def client_factory(
 
     @asyncio.coroutine
     def _client_factory(
+            ws_client=None,
             path=initiator_key, timeout=None, cookie=cookie_,
             initiator_handshake=False, responder_handshake=False,
             **kwargs
@@ -279,10 +280,11 @@ def client_factory(
             'loop': event_loop,
         }
         _kwargs.update(kwargs)
-        ws_client = yield from websockets.connect(
-            '{}/{}'.format(url, key_path(path)),
-            **_kwargs
-        )
+        if ws_client is None:
+            ws_client = yield from websockets.connect(
+                '{}/{}'.format(url, key_path(path)),
+                **_kwargs
+            )
         client = Client(
             ws_client, pack_message, unpack_message,
             timeout=timeout
