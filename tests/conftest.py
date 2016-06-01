@@ -18,6 +18,7 @@ from contextlib import closing
 def pytest_namespace():
     return {'saltyrtc': {
         'ip': '127.0.0.1',
+        'external_server': False,
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
         'subprotocols': [
@@ -32,7 +33,7 @@ def unused_tcp_port():
     """
     Find an unused localhost TCP port from 1024-65535 and return it.
     """
-    if pytest.saltyrtc.debug:
+    if pytest.saltyrtc.debug or pytest.saltyrtc.external_server:
         return 8765
     with closing(socket.socket()) as sock:
         sock.bind((pytest.saltyrtc.ip, 0))
@@ -170,21 +171,22 @@ def server(request, event_loop, port):
         logging_handler.push_application()
 
     # Setup server
-    coroutine = saltyrtc.serve(
-        saltyrtc.util.create_ssl_context(pytest.saltyrtc.cert),
-        host=pytest.saltyrtc.ip,
-        port=port,
-        loop=event_loop
-    )
-    server_ = event_loop.run_until_complete(coroutine)
+    if not pytest.saltyrtc.external_server:
+        coroutine = saltyrtc.serve(
+            saltyrtc.util.create_ssl_context(pytest.saltyrtc.cert),
+            host=pytest.saltyrtc.ip,
+            port=port,
+            loop=event_loop
+        )
+        server_ = event_loop.run_until_complete(coroutine)
 
-    def fin():
-        server_.close()
-        event_loop.run_until_complete(server_.wait_closed())
-        logging_handler.pop_application()
+        def fin():
+            server_.close()
+            event_loop.run_until_complete(server_.wait_closed())
+            logging_handler.pop_application()
 
-    request.addfinalizer(fin)
-    return server_
+        request.addfinalizer(fin)
+        return server_
 
 
 class _DefaultBox:

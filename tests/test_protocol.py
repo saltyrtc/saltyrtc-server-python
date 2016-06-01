@@ -575,6 +575,9 @@ class TestProtocol:
         Monkey-patch the combined sequence number of the server and
         check that an overflow of the number is handled correctly.
         """
+        # Make sure the server is not external
+        assert not pytest.saltyrtc.external_server
+
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
 
