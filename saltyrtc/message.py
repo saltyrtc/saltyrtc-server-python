@@ -2,6 +2,7 @@ import abc
 import struct
 import io
 import binascii
+import collections
 
 # noinspection PyPackageRequirements
 import umsgpack
@@ -43,6 +44,21 @@ def unpack(client, data):
     MessageFlowError
     """
     return AbstractBaseMessage.unpack(client, data)
+
+
+def ensurebytes(data):
+    """
+    Convert byte array to byte string. Leave byte strings unmodified.
+
+    TypeError
+    ValueError
+    """
+    if isinstance(data, bytes):
+        return data
+    elif isinstance(data, collections.Iterable):
+        return bytes(data)
+    else:
+        raise TypeError('ensurebytes function expects iterable or bytes')
 
 
 def _message_representation(class_name, nonce, payload, encrypted=None):
@@ -381,11 +397,11 @@ class ServerHelloMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_public_key(payload.get('key'))
+        validate_public_key(ensurebytes(payload.get('key')))
 
     @property
     def server_public_key(self):
-        return self.payload['key']
+        return ensurebytes(self.payload['key'])
 
 
 class ClientHelloMessage(AbstractBaseMessage):
@@ -405,11 +421,11 @@ class ClientHelloMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_public_key(payload.get('key'))
+        validate_public_key(ensurebytes(payload.get('key')))
 
     @property
     def client_public_key(self):
-        return self.payload['key']
+        return ensurebytes(self.payload['key'])
 
 
 class ClientAuthMessage(AbstractBaseMessage):
@@ -429,11 +445,11 @@ class ClientAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        validate_cookie(payload.get('your_cookie'))
+        validate_cookie(ensurebytes(payload.get('your_cookie')))
 
     @property
     def server_cookie(self):
-        return self.payload['your_cookie']
+        return ensurebytes(self.payload['your_cookie'])
 
 
 class ServerAuthMessage(AbstractBaseMessage):
@@ -470,7 +486,7 @@ class ServerAuthMessage(AbstractBaseMessage):
 
     @property
     def client_cookie(self):
-        return self.payload['your_cookie']
+        return ensurebytes(self.payload['your_cookie'])
 
     @property
     def responder_ids(self):
