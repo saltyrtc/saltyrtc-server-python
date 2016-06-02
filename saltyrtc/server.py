@@ -205,15 +205,17 @@ class ServerProtocol(Protocol):
             tasks, loop=self._loop, return_when=asyncio.FIRST_EXCEPTION)
         for task in done:
             exc = task.exception()
-            if exc is not None:
-                # Cancel pending tasks
-                for pending_task in pending:
-                    client.log.debug('Cancelling task {}', pending_task)
-                    pending_task.cancel()
-                raise exc
-            else:
+
+            # Cancel pending tasks
+            for pending_task in pending:
+                client.log.debug('Cancelling task {}', pending_task)
+                pending_task.cancel()
+
+            # Raise (or re-raise)
+            if exc is None:
                 client.log.error('Task {} returned unexpectedly', task)
                 raise SignalingError('Task returned too early')
+            raise exc
 
     @asyncio.coroutine
     def handshake(self):
