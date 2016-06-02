@@ -115,6 +115,7 @@ class ServerProtocol(Protocol):
             self._log.warning('Closing due to path error: {}', exc)
             yield from connection.close(code=CloseCode.protocol_error.value)
             return
+        client.log.info('Connection established')
         client.log.debug('Worker started')
 
         # Store path and client
@@ -126,12 +127,12 @@ class ServerProtocol(Protocol):
         try:
             yield from self.handle_client()
         except Disconnected:
-            client.log.notice('Connection closed by remote')
+            client.log.info('Connection closed by remote')
         except SlotsFullError as exc:
-            client.log.info('Closing because all path slots are full: {}', exc)
+            client.log.notice('Closing because all path slots are full: {}', exc)
             yield from client.close(code=CloseCode.path_full_error.value)
         except SignalingError as exc:
-            client.log.warning('Closing due to protocol error: {}', exc)
+            client.log.notice('Closing due to protocol error: {}', exc)
             yield from client.close(code=CloseCode.protocol_error.value)
         except Exception as exc:
             client.log.exception('Closing due to exception:', exc)
@@ -180,7 +181,7 @@ class ServerProtocol(Protocol):
         # Do handshake
         client.log.debug('Starting handshake')
         yield from self.handshake()
-        client.log.debug('Handshake completed')
+        client.log.info('Handshake completed')
 
         # Task: Execute enqueued tasks
         tasks = [self.task_loop()]
@@ -208,7 +209,7 @@ class ServerProtocol(Protocol):
 
             # Cancel pending tasks
             for pending_task in pending:
-                client.log.debug('Cancelling task {}', pending_task)
+                client.log.info('Cancelling task {}', pending_task)
                 pending_task.cancel()
 
             # Raise (or re-raise)
@@ -403,14 +404,14 @@ class ServerProtocol(Protocol):
             # Create message and add send coroutine to task queue of the source
             error = SendErrorMessage.create(
                 0x00, source.id, libnacl.crypto_hash_sha256(message_data))
-            source.log.debug('Relaying failed, enqueuing send-error')
+            source.log.info('Relaying failed, enqueuing send-error')
             yield from source.enqueue_task(source.send(error))
 
         # Destination not connected? Send 'send-error' to source
         if destination is None:
             error_message = ('Cannot relay message, no connection for '
                              'destination id 0x{:02x}')
-            source.log.notice(error_message, destination.id)
+            source.log.info(error_message, destination.id)
             yield from send_error_message()
             return
 
@@ -426,7 +427,7 @@ class ServerProtocol(Protocol):
         except asyncio.TimeoutError:
             # Timed out, send 'send-error' to source
             log_message = 'Sending relayed message to 0x{:02x} timed out'
-            source.log.debug(log_message, destination.id)
+            source.log.info(log_message, destination.id)
             yield from send_error_message()
         except Exception:
             # An exception has been triggered while sending the message.
@@ -434,7 +435,7 @@ class ServerProtocol(Protocol):
             #       will also trigger that exception on the destination
             #       client's handler who will log what happened.
             log_message = 'Sending relayed message failed, receiver 0x{:02x} is gone'
-            source.log.debug(log_message, destination.id)
+            source.log.info(log_message, destination.id)
             yield from send_error_message()
 
     @asyncio.coroutine

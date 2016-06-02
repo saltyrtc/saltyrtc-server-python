@@ -336,7 +336,7 @@ class PathClient:
         if self.cookie_in is None:
             # Ensure that the client uses another cookie than we do
             if cookie_in == self.cookie_out:
-                self.log.debug('Server and client cookies are the same')
+                self.log.notice('Server and client cookies are the same')
                 return False
 
             # First message: Set cookie
@@ -344,7 +344,7 @@ class PathClient:
             return True
         else:
             if cookie_in != self.cookie_in:
-                self.log.debug('Client sent wrong cookie')
+                self.log.notice('Client sent wrong cookie')
                 return False
             return True
 
