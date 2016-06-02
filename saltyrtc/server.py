@@ -102,7 +102,12 @@ class ServerProtocol(Protocol):
 
     @asyncio.coroutine
     def close(self, code=1000):
-        yield from self.client.close(code=code)
+        # Note: The client will be set as early as possible without any yielding.
+        #       Thus, self.client is either set and can be closed or the connection
+        #       is already closing (see the corresponding lines in 'handler' and
+        #       'get_path_client')
+        if self.client is not None:
+            yield from self.client.close(code=code)
 
     @asyncio.coroutine
     def handler(self, connection, ws_path):
@@ -112,7 +117,7 @@ class ServerProtocol(Protocol):
         try:
             path, client = self.get_path_client(connection, ws_path)
         except PathError as exc:
-            self._log.warning('Closing due to path error: {}', exc)
+            self._log.notice('Closing due to path error: {}', exc)
             yield from connection.close(code=CloseCode.protocol_error.value)
             return
         client.log.info('Connection established')
@@ -184,6 +189,7 @@ class ServerProtocol(Protocol):
         client.log.info('Handshake completed')
 
         # Task: Execute enqueued tasks
+        client.log.debug('Starting poll for enqueued tasks task')
         tasks = [self.task_loop()]
 
         # Task: Poll for messages
@@ -198,7 +204,7 @@ class ServerProtocol(Protocol):
 
         # Task: Keep alive (if requested)
         client.log.debug('Starting keep-alive task')
-        tasks.append(self.keep_alive())
+        tasks.append(self.keep_alive_loop())
 
         # Wait until complete
         tasks = [self._loop.create_task(coroutine) for coroutine in tasks]
@@ -209,14 +215,16 @@ class ServerProtocol(Protocol):
 
             # Cancel pending tasks
             for pending_task in pending:
-                client.log.info('Cancelling task {}', pending_task)
+                client.log.debug('Cancelling task {}', pending_task)
                 pending_task.cancel()
 
-            # Raise (or re-raise)
-            if exc is None:
-                client.log.error('Task {} returned unexpectedly', task)
-                raise SignalingError('Task returned too early')
-            raise exc
+            # Connection closed?
+            if not client.connection_closed.done():
+                # Raise (or re-raise)
+                if exc is None:
+                    client.log.error('Task {} returned unexpectedly', task)
+                    raise SignalingError('A task returned unexpectedly')
+                raise exc
 
     @asyncio.coroutine
     def handshake(self):
@@ -439,14 +447,13 @@ class ServerProtocol(Protocol):
             yield from send_error_message()
 
     @asyncio.coroutine
-    def keep_alive(self):
+    def keep_alive_loop(self):
         """
         Disconnected
         PingTimeoutError
         """
         path, client = self.path, self.client
-
-        while True:
+        while not client.connection_closed.done():
             # Wait
             yield from asyncio.sleep(client.keep_alive_interval, loop=self._loop)
 

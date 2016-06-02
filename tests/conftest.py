@@ -18,6 +18,7 @@ from contextlib import closing
 def pytest_namespace():
     return {'saltyrtc': {
         'ip': '127.0.0.1',
+        'port': 8766,
         'external_server': False,
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
@@ -25,7 +26,7 @@ def pytest_namespace():
             saltyrtc.SubProtocol.saltyrtc_v1_0.value
         ],
         'debug': True,
-        'timeout': 0.01,
+        'timeout': 0.05,
     }}
 
 
@@ -34,7 +35,7 @@ def unused_tcp_port():
     Find an unused localhost TCP port from 1024-65535 and return it.
     """
     if pytest.saltyrtc.debug or pytest.saltyrtc.external_server:
-        return 8765
+        return pytest.saltyrtc.port
     with closing(socket.socket()) as sock:
         sock.bind((pytest.saltyrtc.ip, 0))
         return sock.getsockname()[1]
@@ -183,7 +184,8 @@ def server(request, event_loop, port):
         def fin():
             server_.close()
             event_loop.run_until_complete(server_.wait_closed())
-            logging_handler.pop_application()
+            if pytest.saltyrtc.debug:
+                logging_handler.pop_application()
 
         request.addfinalizer(fin)
         return server_
