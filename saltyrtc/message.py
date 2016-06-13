@@ -2,7 +2,6 @@ import abc
 import struct
 import io
 import binascii
-import collections
 
 # noinspection PyPackageRequirements
 import umsgpack
@@ -44,28 +43,6 @@ def unpack(client, data):
     MessageFlowError
     """
     return AbstractBaseMessage.unpack(client, data)
-
-
-def _ensure_bytes(data):
-    """
-    Convert iterable of integers to bytes if necessary.
-
-    Arguments:
-        - `data`: An iterable containing integers where 0 <= x <= 255
-          or a bytes instance.
-
-    Raises :exc:`MessageError` in case `data` could not be converted
-    to bytes.
-    """
-    if isinstance(data, bytes):
-        return data
-    elif isinstance(data, collections.Iterable):
-        try:
-            return bytes(data)
-        except ValueError as exc:
-            raise MessageError('Could not convert to bytes') from exc
-    else:
-        raise MessageError('Expected iterable containing integers or bytes')
 
 
 def _message_representation(class_name, nonce, payload, encrypted=None):
@@ -404,7 +381,7 @@ class ServerHelloMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        payload['key'] = _ensure_bytes(payload.get('key'))
+        payload['key'] = payload.get('key')
         validate_public_key(payload['key'])
         return payload
 
@@ -430,7 +407,7 @@ class ClientHelloMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        payload['key'] = _ensure_bytes(payload.get('key'))
+        payload['key'] = payload.get('key')
         validate_public_key(payload['key'])
         return payload
 
@@ -456,7 +433,7 @@ class ClientAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        payload['your_cookie'] = _ensure_bytes(payload.get('your_cookie'))
+        payload['your_cookie'] = payload.get('your_cookie')
         validate_cookie(payload['your_cookie'])
         return payload
 
