@@ -12,7 +12,10 @@ from .common import (
     KEY_LENGTH,
     KEEP_ALIVE_INTERVAL,
     KEEP_ALIVE_TIMEOUT,
+    AddressType,
     available_slot_range,
+    is_initiator_id,
+    is_responder_id,
 )
 from .message import (
     unpack,
@@ -57,7 +60,7 @@ class Path:
         """
         Return the initiator's :class:`PathClient` instance or `None`.
         """
-        return self._slots.get(0x01)
+        return self._slots.get(AddressType.initiator)
 
     def set_initiator(self, initiator):
         """
@@ -68,14 +71,14 @@ class Path:
 
         Return the previously set initiator or `None`.
         """
-        previous_initiator = self._slots.get(0x01)
-        self._slots[0x01] = initiator
+        previous_initiator = self._slots.get(AddressType.initiator)
+        self._slots[AddressType.initiator] = initiator
         self.log.debug('Set initiator {}', initiator)
         # Update initiator's log name
-        initiator.update_log_name(0x01)
+        initiator.update_log_name(AddressType.initiator)
         # Authenticated, assign id
         initiator.authenticated = True
-        initiator.id = 0x01
+        initiator.id = AddressType.initiator
         # Return previous initiator
         return previous_initiator
 
@@ -89,7 +92,7 @@ class Path:
         Raises :exc:`ValueError` if `id_` is not a valid responder
         identifier.
         """
-        if not 0x01 < id_ <= 0xff:
+        if not is_responder_id(id_):
             raise ValueError('Invalid responder identifier')
         return self._slots.get(id_)
 
@@ -98,7 +101,7 @@ class Path:
         Return a list of responder's identifiers (slots).
         """
         return [id_ for id_, responder in self._slots.items()
-                if id_ > 0x01 and responder is not None]
+                if is_responder_id(id_) and responder is not None]
 
     def add_responder(self, responder):
         """
@@ -112,7 +115,7 @@ class Path:
         Return the assigned slot identifier.
         """
         for id_, client in self._slots.items():
-            if id_ > 0x01 and client is None:
+            if is_responder_id(id_) and client is None:
                 self._slots[id_] = responder
                 self.log.debug('Added responder {}', responder)
                 # Update responder's log name
@@ -154,7 +157,7 @@ class Path:
 
         # Remove client from slot
         self._slots[id_] = None
-        self.log.debug('Removed {}', 'initiator' if id_ == 0x01 else 'responder')
+        self.log.debug('Removed {}', 'initiator' if is_initiator_id(id_) else 'responder')
 
 
 class _OverflowSentinel:
@@ -182,7 +185,7 @@ class PathClient:
         self._combined_sequence_number_out = None
         self._combined_sequence_number_in = None
         self._box = None
-        self._id = 0x00
+        self._id = AddressType.server
         self.log = util.get_logger('path.{}.client.{:x}'.format(path_number, id(self)))
         self.type = None
         self.authenticated = False
