@@ -12,6 +12,7 @@ from .common import (
     KEY_LENGTH,
     KEEP_ALIVE_INTERVAL,
     KEEP_ALIVE_TIMEOUT,
+    available_slot_range,
 )
 from .message import (
     unpack,
@@ -29,7 +30,7 @@ class Path:
     __slots__ = ('_slots', 'log', 'initiator_key', 'number')
 
     def __init__(self, initiator_key, number):
-        self._slots = {id_: None for id_ in range(0x01, 0xff + 1)}
+        self._slots = {id_: None for id_ in available_slot_range()}
         self.log = util.get_logger('path.{}'.format(number))
         self.initiator_key = initiator_key
         self.number = number

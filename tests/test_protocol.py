@@ -2,6 +2,7 @@
 The tests provided in this module make sure that the server is
 compliant to the SaltyRTC protocol.
 """
+import hashlib
 import asyncio
 
 import pytest
@@ -749,6 +750,37 @@ class TestProtocol:
         # Bye
         yield from initiator.close()
         yield from responder.close()
+
+    @pytest.mark.asyncio
+    def test_relay_receiver_offline(
+            self, pack_nonce, client_factory
+    ):
+        """
+        Check that the server responds with a `send-error` message in
+        case the recipient is not available.
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 2 ** 32 - 1
+
+        # Send relay message: initiator --> responder (offline)
+        data = yield from initiator.send(pack_nonce(i['cck'], i['id'], 0x02, i['rccsn']), {
+            'type': 'meow',
+            'rawr': True,
+        }, box=None)
+        i['rccsn'] += 1
+
+        # Receive send-error message: initiator <-- initiator
+        message, _, sck, s, d, scsn = yield from initiator.recv()
+        assert s == 0x00
+        assert d == i['id']
+        assert sck == i['sck']
+        assert scsn == i['start_scsn'] + 2
+        assert message['type'] == 'send-error'
+        assert message['hash'] == hashlib.sha256(data).digest()
+
+        # Bye
+        yield from initiator.close()
 
     @pytest.mark.asyncio
     def test_path_full(self, event_loop, client_factory):

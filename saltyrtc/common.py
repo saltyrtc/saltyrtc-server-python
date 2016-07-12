@@ -15,6 +15,7 @@ __all__ = (
     'CloseCode',
     'AddressType',
     'MessageType',
+    'available_slot_range',
     'validate_public_key',
     'validate_cookie',
     'validate_initiator_connected',
@@ -77,6 +78,10 @@ class MessageType(enum.Enum):
     send_error = 'send-error'
 
 
+def available_slot_range():
+    return range(0x01, 0xff + 1)
+
+
 def validate_public_key(key):
     if not isinstance(key, bytes) or len(key) != KEY_LENGTH:
         raise MessageError('Invalid key')
@@ -95,9 +100,12 @@ def validate_initiator_connected(initiator_connected):
         raise MessageError("Invalid value for field 'initiator_connected'")
 
 
-def validate_responder_id(responder):
+def validate_responder_id(responder, raise_exception=True):
     if not isinstance(responder, int) or not 0x01 < responder <= 0xff:
-        raise MessageError('Invalid responder in responder list')
+        if raise_exception:
+            raise MessageError('Invalid responder in responder list')
+        return False
+    return True
 
 
 def validate_responder_ids(responders):

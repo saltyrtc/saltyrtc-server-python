@@ -207,10 +207,10 @@ class Client:
     def send(self, nonce, message, box=_DefaultBox, timeout=None):
         if timeout is None:
             timeout = self.timeout
-        yield from self.pack_and_send(
+        return (yield from self.pack_and_send(
             self.ws_client, nonce, message,
             box=self.box if box == _DefaultBox else box, timeout=timeout
-        )
+        ))
 
     def recv(self, box=_DefaultBox, timeout=None):
         if timeout is None:
@@ -387,4 +387,5 @@ def pack_message(event_loop):
         data = b''.join((nonce, data))
         timeout = _get_timeout(timeout)
         yield from asyncio.wait_for(client.send(data), timeout, loop=event_loop)
+        return data
     return _pack_message

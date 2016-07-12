@@ -237,7 +237,8 @@ class ServerProtocol(Protocol):
         path, client = self.path, self.client
 
         # Send server-hello
-        message = ServerHelloMessage.create(0x00, client.id, client.server_key.pk)
+        message = ServerHelloMessage.create(
+            AddressType.server, client.id, client.server_key.pk)
         client.log.debug('Sending server-hello')
         yield from client.send(message)
 
@@ -286,14 +287,14 @@ class ServerProtocol(Protocol):
             responder = path.get_responder(responder_id)
 
             # Create message and add send coroutine to task queue of the responder
-            message = NewInitiatorMessage.create(0x00, responder_id)
+            message = NewInitiatorMessage.create(AddressType.server, responder_id)
             responder.log.debug('Enqueueing new-initiator message')
             yield from responder.enqueue_task(responder.send(message))
 
         # Send server-auth
         responder_ids = path.get_responder_ids()
         message = ServerAuthMessage.create(
-            0x00, initiator.id, initiator.cookie_in, responder_ids=responder_ids)
+            AddressType.server, initiator.id, initiator.cookie_in, responder_ids=responder_ids)
         initiator.log.debug('Sending server-auth including responder ids')
         yield from initiator.send(message)
 
@@ -327,13 +328,13 @@ class ServerProtocol(Protocol):
         initiator_connected = initiator is not None
         if initiator_connected:
             # Create message and add send coroutine to task queue of the initiator
-            message = NewResponderMessage.create(0x00, initiator.id, id_)
+            message = NewResponderMessage.create(AddressType.server, initiator.id, id_)
             initiator.log.debug('Enqueueing new-responder message')
             yield from initiator.enqueue_task(initiator.send(message))
 
         # Send server-auth
         message = ServerAuthMessage.create(
-            0x00, responder.id, responder.cookie_in,
+            AddressType.server, responder.id, responder.cookie_in,
             initiator_connected=initiator_connected)
         responder.log.debug('Sending server-auth without responder ids')
         yield from responder.send(message)
@@ -364,7 +365,7 @@ class ServerProtocol(Protocol):
                 # Lookup responder
                 responder = path.get_responder(message.destination)
                 # Send to responder
-                yield from self.relay_message(responder, message)
+                yield from self.relay_message(responder, message.destination, message)
             # Drop-responder
             elif message.type == MessageType.drop_responder:
                 # Lookup responder
@@ -394,13 +395,13 @@ class ServerProtocol(Protocol):
                 # Lookup initiator
                 initiator = path.get_initiator()
                 # Send to initiator
-                yield from self.relay_message(initiator, message)
+                yield from self.relay_message(initiator, AddressType.initiator, message)
             else:
                 error = "Expected relay message, got '{}'"
                 raise MessageFlowError(error.format(message.type))
 
     @asyncio.coroutine
-    def relay_message(self, destination, message):
+    def relay_message(self, destination, destination_id, message):
         path, source = self.path, self.client
 
         # Prepare message
@@ -411,7 +412,7 @@ class ServerProtocol(Protocol):
         def send_error_message():
             # Create message and add send coroutine to task queue of the source
             error = SendErrorMessage.create(
-                0x00, source.id, libnacl.crypto_hash_sha256(message_data))
+                AddressType.server, source.id, libnacl.crypto_hash_sha256(message_data))
             source.log.info('Relaying failed, enqueuing send-error')
             yield from source.enqueue_task(source.send(error))
 
@@ -419,7 +420,7 @@ class ServerProtocol(Protocol):
         if destination is None:
             error_message = ('Cannot relay message, no connection for '
                              'destination id 0x{:02x}')
-            source.log.info(error_message, destination.id)
+            source.log.info(error_message, destination_id)
             yield from send_error_message()
             return
 
