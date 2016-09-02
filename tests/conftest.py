@@ -23,7 +23,7 @@ def pytest_namespace():
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
         'subprotocols': [
-            saltyrtc.SubProtocol.saltyrtc_v1_0.value
+            saltyrtc.SubProtocol.saltyrtc_v1.value
         ],
         'debug': True,
         'timeout': 0.05,

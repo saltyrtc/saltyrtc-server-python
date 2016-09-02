@@ -39,7 +39,7 @@ KEEP_ALIVE_INTERVAL = 60.0  # TODO: Sane?
 
 @enum.unique
 class SubProtocol(enum.Enum):
-    saltyrtc_v1_0 = 'saltyrtc-1.0'
+    saltyrtc_v1 = 'v1.saltyrtc.org'
 
 
 @enum.unique
