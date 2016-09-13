@@ -43,7 +43,9 @@ def main():
         restart_signal = asyncio.Future(loop=loop)
 
         def restart_signal_handler(*_):
-            restart_signal.set_result(True)
+            def callback():
+                restart_signal.set_result(True)
+            loop.call_soon_threadsafe(callback)
 
         # Register restart server routine
         signal.signal(signal.SIGHUP, restart_signal_handler)
