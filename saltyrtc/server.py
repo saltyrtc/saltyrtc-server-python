@@ -502,7 +502,7 @@ class Paths:
 
 class Server(asyncio.AbstractServer):
     sub_protocols = [
-        SubProtocol.saltyrtc_v1_0.value
+        SubProtocol.saltyrtc_v1.value
     ]
 
     def __init__(self, paths, loop=None):
@@ -536,7 +536,7 @@ class Server(asyncio.AbstractServer):
             subprotocol = None
 
         # Determine ServerProtocol instance by selected sub-protocol
-        if subprotocol != SubProtocol.saltyrtc_v1_0:
+        if subprotocol != SubProtocol.saltyrtc_v1:
             self._log.notice("Unsupported sub-protocol '{}', dropping client",
                              connection.subprotocol)
             # We need to close the connection manually as the client may choose

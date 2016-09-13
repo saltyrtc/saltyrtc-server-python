@@ -39,7 +39,7 @@ KEEP_ALIVE_INTERVAL = 60.0  # TODO: Sane?
 
 @enum.unique
 class SubProtocol(enum.Enum):
-    saltyrtc_v1_0 = 'saltyrtc-1.0'
+    saltyrtc_v1 = 'v0.saltyrtc.org'
 
 
 @enum.unique
@@ -49,7 +49,7 @@ class CloseCode(enum.IntEnum):
     path_full_error = 3000
     protocol_error = 3001
     internal_error = 3002
-    data_channel_handover = 3003
+    handover = 3003
     drop_by_initiator = 3004
 
 
