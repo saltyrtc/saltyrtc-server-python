@@ -32,7 +32,7 @@ def main():
     )
 
     # Start server
-    coroutine = saltyrtc.serve(ssl_context, port=8765)
+    coroutine = saltyrtc.serve(ssl_context, port=int(env('SALTYRTC_PORT', '8765')))
     server = loop.run_until_complete(coroutine)
 
     # Wait until Ctrl+C has been pressed
