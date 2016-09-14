@@ -26,10 +26,13 @@ def main():
     loop = asyncio.get_event_loop()
 
     # Create SSL context
-    ssl_context = saltyrtc.util.create_ssl_context(
-        certfile=require_env('SALTYRTC_TLS_CERT'),
-        keyfile=require_env('SALTYRTC_TLS_KEY'),
-    )
+    if env('SALTYRTC_DISABLE_TLS') != 'yes-and-i-know-what-im-doing':
+        ssl_context = saltyrtc.util.create_ssl_context(
+            certfile=require_env('SALTYRTC_TLS_CERT'),
+            keyfile=require_env('SALTYRTC_TLS_KEY'),
+        )
+    else:
+        ssl_context = None
 
     # Start server
     coroutine = saltyrtc.serve(ssl_context, port=int(env('SALTYRTC_PORT', '8765')))
