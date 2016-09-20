@@ -51,6 +51,7 @@ class CloseCode(enum.IntEnum):
     internal_error = 3002
     handover = 3003
     drop_by_initiator = 3004
+    initiator_could_not_decrypt = 3005
 
 
 @enum.unique
