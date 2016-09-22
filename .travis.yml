@@ -19,6 +19,7 @@ install:
   - pip install .
   - pip install logbook
   - pip install pytest-asyncio pytest-cov
+  - pip install codecov
 
 # Run tests
 script:
