@@ -1,6 +1,7 @@
 # SaltyRTC Signalling Server
 
 [![Travis](https://travis-ci.org/saltyrtc/saltyrtc-server-python.svg?branch=master)](https://travis-ci.org/saltyrtc/saltyrtc-server-python)
+[![codecov](https://codecov.io/gh/saltyrtc/saltyrtc-server-python/branch/master/graph/badge.svg)](https://codecov.io/gh/saltyrtc/saltyrtc-server-python)
 
 This is an implementation of the SaltyRTC Signalling Server which allows end-to-end
 encrypted signalling for WebRTC and ORTC.
