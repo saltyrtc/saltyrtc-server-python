@@ -315,6 +315,7 @@ def client_factory(
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': sck,
+            'subprotocols': pytest.saltyrtc.subprotocols,
         }, timeout=timeout)
         ccsn += 1
 

@@ -16,6 +16,7 @@ from .common import (
     MessageType,
     validate_public_key,
     validate_cookie,
+    validate_subprotocols,
     validate_initiator_connected,
     validate_responder_id,
     validate_responder_ids,
@@ -423,11 +424,12 @@ class ClientAuthMessage(AbstractBaseMessage):
     encrypted = True
 
     @classmethod
-    def create(cls, source, destination, server_cookie):
+    def create(cls, source, destination, server_cookie, subprotocols):
         # noinspection PyCallingNonCallable
         return cls(source, destination, {
             'type': cls.type.value,
             'your_cookie': server_cookie,
+            'subprotocols': subprotocols,
         })
 
     @classmethod
@@ -436,11 +438,16 @@ class ClientAuthMessage(AbstractBaseMessage):
         MessageError
         """
         validate_cookie(payload.get('your_cookie'))
+        validate_subprotocols(payload.get('subprotocols'))
         return payload
 
     @property
     def server_cookie(self):
         return self.payload['your_cookie']
+
+    @property
+    def subprotocols(self):
+        return self.payload['subprotocols']
 
 
 class ServerAuthMessage(AbstractBaseMessage):

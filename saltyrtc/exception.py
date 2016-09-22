@@ -9,6 +9,7 @@ __all__ = (
     'PingTimeoutError',
     'Disconnected',
     'MessageError',
+    'DowngradeError',
 )
 
 
@@ -57,4 +58,10 @@ class Disconnected(Exception):
 class MessageError(SignalingError):
     """
     Raised when a message is invalid.
+    """
+
+
+class DowngradeError(SignalingError):
+    """
+    A protocol downgrade has been detected.
     """
