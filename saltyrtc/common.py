@@ -24,6 +24,7 @@ __all__ = (
     'validate_responder_id',
     'validate_responder_ids',
     'validate_hash',
+    'validate_drop_reason',
 )
 
 
@@ -53,6 +54,10 @@ class CloseCode(enum.IntEnum):
     drop_by_initiator = 3004
     initiator_could_not_decrypt = 3005
     no_shared_tasks = 3006
+
+    @property
+    def is_valid_drop_reason(self):
+        return self.value in range(3001, 3006 + 1)
 
 
 @enum.unique
@@ -129,3 +134,19 @@ def validate_responder_ids(ids):
 def validate_hash(hash_):
     if not isinstance(hash_, bytes) or len(hash_) != HASH_LENGTH:
         raise MessageError('Invalid hash')
+
+
+def validate_drop_reason(reason):
+    # Default drop reason
+    if reason is None:
+        return CloseCode.drop_by_initiator
+
+    # Validate reason
+    try:
+        reason = CloseCode(reason)
+    except ValueError:
+        raise MessageError('Invalid close code')
+    if not reason.is_valid_drop_reason:
+        raise MessageError('Reason not from acceptable range of close codes')
+
+    return reason

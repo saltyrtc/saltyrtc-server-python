@@ -600,6 +600,50 @@ class TestProtocol:
         yield from initiator.close()
 
     @pytest.mark.asyncio
+    def test_drop_responder_with_reason(self, sleep, pack_nonce, client_factory):
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        assert len(i['responders']) == 0
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        assert r['initiator_connected']
+
+        # Drop responder with a different reason
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type':'drop-responder',
+            'id': r['id'],
+            'reason': saltyrtc.CloseCode.handover.value,
+        })
+
+        # Responder: Expect reason 'handover'
+        yield from sleep()
+        assert not responder.ws_client.open
+        actual_close_code = responder.ws_client.close_code
+        assert actual_close_code == saltyrtc.CloseCode.handover
+
+        # Bye
+        yield from initiator.close()
+
+    @pytest.mark.asyncio
+    def test_drop_responder_invalid_reason(self, sleep, pack_nonce, client_factory):
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        assert len(i['responders']) == 0
+
+        # Drop responder with a different reason
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': 0xff,
+            'reason': saltyrtc.CloseCode.path_full_error.value,
+        })
+
+        # Expect protocol error
+        yield from sleep()
+        assert not initiator.ws_client.open
+        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
     def test_combined_sequence_number_overflow(
             self, sleep, server, client_factory
     ):

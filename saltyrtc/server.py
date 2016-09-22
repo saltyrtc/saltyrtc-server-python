@@ -372,9 +372,11 @@ class ServerProtocol(Protocol):
                 responder = path.get_responder(message.responder_id)
                 if responder is not None:
                     # Drop responder using its task queue
-                    path.log.debug('Dropping responder {}', responder)
-                    responder.log.debug('Dropping (requested by initiator)')
-                    coroutine = responder.close(code=CloseCode.drop_by_initiator.value)
+                    path.log.debug(
+                        'Dropping responder {}, reason: {}', responder, message.reason)
+                    responder.log.debug(
+                        'Dropping (requested by initiator), reason: {}', message.reason)
+                    coroutine = responder.close(code=message.reason.value)
                     yield from responder.enqueue_task(coroutine)
                 else:
                     log_message = 'Responder {} already dropped, nothing to do'
