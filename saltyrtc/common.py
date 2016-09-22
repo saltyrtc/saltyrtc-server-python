@@ -52,6 +52,7 @@ class CloseCode(enum.IntEnum):
     handover = 3003
     drop_by_initiator = 3004
     initiator_could_not_decrypt = 3005
+    no_shared_tasks = 3006
 
 
 @enum.unique
