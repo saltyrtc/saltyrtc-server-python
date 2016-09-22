@@ -11,6 +11,7 @@ from .common import (
     NONCE_LENGTH,
     NONCE_FORMATTER,
     COOKIE_LENGTH,
+    CloseCode,
     AddressType,
     MessageType,
     validate_public_key,
@@ -19,6 +20,7 @@ from .common import (
     validate_responder_id,
     validate_responder_ids,
     validate_hash,
+    validate_drop_reason,
 )
 
 __all__ = (
@@ -433,8 +435,7 @@ class ClientAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        payload['your_cookie'] = payload.get('your_cookie')
-        validate_cookie(payload['your_cookie'])
+        validate_cookie(payload.get('your_cookie'))
         return payload
 
     @property
@@ -467,8 +468,7 @@ class ServerAuthMessage(AbstractBaseMessage):
         """
         MessageError
         """
-        payload['your_cookie'] = _ensure_bytes(payload.get('your_cookie'))
-        validate_cookie(payload['your_cookie'])
+        validate_cookie(payload.get('your_cookie'))
         responders = payload.get('responders')
         if responders is not None:
             validate_responder_ids(responders)
@@ -535,11 +535,14 @@ class DropResponderMessage(AbstractBaseMessage):
     encrypted = True
 
     @classmethod
-    def create(cls, source, destination, responder_id):
+    def create(cls, source, destination, responder_id, reason=None):
+        if reason is None:
+            reason = CloseCode.drop_by_initiator
         # noinspection PyCallingNonCallable
         return cls(source, destination, {
             'type': cls.type.value,
             'id': responder_id,
+            'reason': reason.value
         })
 
     @classmethod
@@ -548,11 +551,16 @@ class DropResponderMessage(AbstractBaseMessage):
         MessageError
         """
         validate_responder_id(payload.get('id'))
+        payload['reason'] = validate_drop_reason(payload.get('reason'))
         return payload
 
     @property
     def responder_id(self):
         return self.payload['id']
+
+    @property
+    def reason(self):
+        return self.payload['reason']
 
 
 class SendErrorMessage(AbstractBaseMessage):
