@@ -17,9 +17,15 @@ before_install:
   - cd ..
 install:
   - pip install .
-  - pip install logbook pytest-asyncio
+  - pip install logbook
+  - pip install pytest-asyncio pytest-cov
+  - pip install codecov
 
 # Run tests
 script:
-  - pytest
+  - py.test --cov-config .coveragerc --cov=saltyrtc
+
+# After success
+after_success:
+  - codecov
 
