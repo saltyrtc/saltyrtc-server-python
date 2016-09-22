@@ -1,0 +1,19 @@
+[Unit]
+Description=SaltyRTC signaling server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/srv/saltyrtc-server-python/venv/bin/python examples/debug.py
+WorkingDirectory=/srv/saltyrtc-server-python
+Environment=SALTYRTC_TLS_CERT=/path/to/cert.pem
+Environment=SALTYRTC_TLS_KEY=/path/to/key.pem
+User=saltyrtc
+Group=saltyrtc
+Restart=always
+RestartSec=5
+TimeoutStartSec=2
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
