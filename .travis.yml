@@ -22,6 +22,8 @@ install:
 
 # Run tests
 script:
+  - ls -l
+  - echo $PWD
   - py.test --cov
 
 # After success
