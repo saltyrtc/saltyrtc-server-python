@@ -560,11 +560,11 @@ class SendErrorMessage(AbstractBaseMessage):
     encrypted = True
 
     @classmethod
-    def create(cls, source, destination, message_hash):
+    def create(cls, source, destination, message_id):
         # noinspection PyCallingNonCallable
         return cls(source, destination, {
             'type': cls.type.value,
-            'hash': message_hash,
+            'id': message_id,
         })
 
     @classmethod

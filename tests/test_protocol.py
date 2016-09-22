@@ -777,7 +777,7 @@ class TestProtocol:
         assert sck == i['sck']
         assert scsn == i['start_scsn'] + 2
         assert message['type'] == 'send-error'
-        assert message['hash'] == hashlib.sha256(data).digest()
+        assert message['id'] == data[16:]
 
         # Bye
         yield from initiator.close()
