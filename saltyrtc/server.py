@@ -70,7 +70,7 @@ def serve(ssl_context, paths=None, host=None, port=8765, loop=None):
         ssl=ssl_context,
         host=host,
         port=port,
-        subprotocols=server.sub_protocols
+        subprotocols=server.subprotocols
     )
 
     # Set server instance
@@ -81,14 +81,23 @@ def serve(ssl_context, paths=None, host=None, port=8765, loop=None):
 
 
 class ServerProtocol(Protocol):
-    __slots__ = ('_log', '_loop', '_server', 'path', 'client', 'handler_task')
+    __slots__ = (
+        '_log',
+        '_loop',
+        '_server',
+        'subprotocol',
+        'path',
+        'client',
+        'handler_task'
+    )
 
-    def __init__(self, server, loop=None):
+    def __init__(self, server, subprotocol, loop=None):
         self._log = util.get_logger('server.protocol')
         self._loop = asyncio.get_event_loop() if loop is None else loop
 
-        # Server instance
+        # Server instance and subprotocol
         self._server = server
+        self.subprotocol = subprotocol
 
         # Path and client instance
         self.path = None
@@ -180,6 +189,7 @@ class ServerProtocol(Protocol):
         MessageError
         MessageFlowError
         SlotsFullError
+        DowngradeError
         """
         path, client = self.path, self.client
 
@@ -233,6 +243,7 @@ class ServerProtocol(Protocol):
         MessageError
         MessageFlowError
         SlotsFullError
+        DowngradeError
         """
         path, client = self.path, self.client
 
@@ -266,11 +277,13 @@ class ServerProtocol(Protocol):
         Disconnected
         MessageError
         MessageFlowError
+        DowngradeError
         """
         path, initiator = self.path, self.client
 
-        # Validate cookie
+        # Validate cookie and ensure no sub-protocol downgrade took place
         self._validate_cookie(message.server_cookie, initiator.cookie_out)
+        self._validate_subprotocol(message.subprotocols)
 
         # Authenticated
         previous_initiator = path.set_initiator(initiator)
@@ -305,6 +318,7 @@ class ServerProtocol(Protocol):
         MessageError
         MessageFlowError
         SlotsFullError
+        DowngradeError
         """
         path, responder = self.path, self.client
 
@@ -317,8 +331,9 @@ class ServerProtocol(Protocol):
             error = "Expected 'client-auth', got '{}'"
             raise MessageFlowError(error.format(message.type))
 
-        # Validate cookie
+        # Validate cookie and ensure no sub-protocol downgrade took place
         self._validate_cookie(message.server_cookie, responder.cookie_out)
+        self._validate_subprotocol(message.subprotocols)
 
         # Authenticated
         id_ = path.add_responder(responder)
@@ -472,9 +487,29 @@ class ServerProtocol(Protocol):
                 client.log.debug('Pong')
 
     def _validate_cookie(self, expected_cookie, actual_cookie):
+        """
+        MessageError
+        """
         self.client.log.debug('Validating cookie')
         if not util.consteq(expected_cookie, actual_cookie):
             raise MessageError('Cookies do not match')
+
+    def _validate_subprotocol(self, client_subprotocols):
+        """
+        MessageError
+        DowngradeError
+        """
+        self.client.log.debug(
+            'Checking for subprotocol downgrade, client: {}, server: {}',
+            client_subprotocols, self._server.subprotocols)
+        server_subprotocols = set(self._server.subprotocols)
+        chosen = (proto for proto in client_subprotocols if proto in server_subprotocols)
+        try:
+            chosen = next(chosen)
+        except StopIteration:
+            raise MessageError('No common subprotocol found')
+        if chosen != self.subprotocol.value:
+            raise DowngradeError('Subprotocol downgrade detected')
 
 
 class Paths:
@@ -503,7 +538,7 @@ class Paths:
 
 
 class Server(asyncio.AbstractServer):
-    sub_protocols = [
+    subprotocols = [
         SubProtocol.saltyrtc_v1.value
     ]
 
@@ -543,9 +578,9 @@ class Server(asyncio.AbstractServer):
                              connection.subprotocol)
             # We need to close the connection manually as the client may choose
             # to ignore
-            yield from connection.close(code=CloseCode.sub_protocol_error.value)
+            yield from connection.close(code=CloseCode.subprotocol_error.value)
         else:
-            protocol = ServerProtocol(self, loop=self._loop)
+            protocol = ServerProtocol(self, subprotocol, loop=self._loop)
             protocol.connection_made(connection, ws_path)
             yield from protocol.handler_task
 

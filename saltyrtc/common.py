@@ -19,6 +19,7 @@ __all__ = (
     'is_initiator_id',
     'is_responder_id',
     'validate_public_key',
+    'validate_subprotocols',
     'validate_cookie',
     'validate_initiator_connected',
     'validate_responder_id',
@@ -46,7 +47,7 @@ class SubProtocol(enum.Enum):
 @enum.unique
 class CloseCode(enum.IntEnum):
     going_away = 1001
-    sub_protocol_error = 1002
+    subprotocol_error = 1002
     path_full_error = 3000
     protocol_error = 3001
     internal_error = 3002
@@ -110,6 +111,13 @@ def validate_cookie(cookie):
     if len(cookie) != COOKIE_LENGTH:
         raise MessageError('Invalid cookie: Invalid length ({} != {})'.format(
             len(cookie), COOKIE_LENGTH))
+
+
+def validate_subprotocols(subprotocols):
+    try:
+        iter(subprotocols)
+    except TypeError as exc:
+        raise MessageError('Sub-protocol list is not iterable') from exc
 
 
 def validate_initiator_connected(initiator_connected):

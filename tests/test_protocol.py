@@ -22,7 +22,7 @@ class TestProtocol:
         client = yield from ws_client_factory(subprotocols=None)
         yield from sleep()
         assert not client.open
-        assert client.close_code == saltyrtc.CloseCode.sub_protocol_error
+        assert client.close_code == saltyrtc.CloseCode.subprotocol_error
 
     @pytest.mark.asyncio
     def test_invalid_subprotocols(self, sleep, ws_client_factory):
@@ -33,7 +33,7 @@ class TestProtocol:
         client = yield from ws_client_factory(subprotocols=['kittie-protocol-3000'])
         yield from sleep()
         assert not client.open
-        assert client.close_code == saltyrtc.CloseCode.sub_protocol_error
+        assert client.close_code == saltyrtc.CloseCode.subprotocol_error
 
     @pytest.mark.asyncio
     def test_invalid_path_length(self, url, sleep, ws_client_factory):
@@ -250,6 +250,67 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
+    def test_subprotocol_downgrade_1(
+            self, sleep, cookie, initiator_key, pack_nonce, client_factory
+    ):
+        """
+        Check that the server drops the client in case it doesn't find
+        a common subprotocol.
+        """
+        client = yield from client_factory()
+
+        # server-hello, already checked in another test
+        message, _, sck, s, d, start_scsn = yield from client.recv()
+        client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
+
+        # client-auth
+        cck, ccsn = cookie, 2 ** 32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+            'type': 'client-auth',
+            'your_cookie': sck,
+            'subprotocols': ['v1.meow.lolcats.org', 'v2.meow'],
+        })
+        ccsn += 1
+
+        # Expect protocol error
+        yield from sleep()
+        assert not client.ws_client.open
+        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
+    def test_subprotocol_downgrade_2(
+            self, monkeypatch,
+            sleep, server, cookie, initiator_key, pack_nonce, client_factory
+    ):
+        """
+        Check that the server drops the client in case it detects a
+        subprotocol downgrade.
+        """
+        client = yield from client_factory()
+
+        # server-hello, already checked in another test
+        message, _, sck, s, d, start_scsn = yield from client.recv()
+        client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
+
+        # Patch server's list of subprotocols
+        subprotocols = pytest.saltyrtc.subprotocols + ['v1.meow.lolcats.org']
+        monkeypatch.setattr(server, 'subprotocols', subprotocols)
+
+        # client-auth
+        cck, ccsn = cookie, 2 ** 32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+            'type': 'client-auth',
+            'your_cookie': sck,
+            'subprotocols': ['v1.meow.lolcats.org'] + pytest.saltyrtc.subprotocols,
+        })
+        ccsn += 1
+
+        # Expect protocol error
+        yield from sleep()
+        assert not client.ws_client.open
+        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
     def test_initiator_handshake(
             self, cookie, initiator_key, pack_nonce, client_factory
     ):
@@ -267,6 +328,7 @@ class TestProtocol:
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': sck,
+            'subprotocols': pytest.saltyrtc.subprotocols,
         })
         ccsn += 1
 
@@ -308,6 +370,7 @@ class TestProtocol:
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': sck,
+            'subprotocols': pytest.saltyrtc.subprotocols,
         })
         ccsn += 1
 
@@ -601,6 +664,9 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_drop_responder_with_reason(self, sleep, pack_nonce, client_factory):
+        """
+        Check that a responder can be dropped with a custom reason.
+        """
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
         assert len(i['responders']) == 0
@@ -627,6 +693,10 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_drop_responder_invalid_reason(self, sleep, pack_nonce, client_factory):
+        """
+        Check that the server drops an initiator that uses a close code
+        that is not accepted as drop reason.
+        """
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
         assert len(i['responders']) == 0
