@@ -406,13 +406,13 @@ class ServerProtocol(Protocol):
 
         # Prepare message
         source.log.debug('Packing relay message')
-        message_data = message.pack(source)
+        message_id = message.pack(source)[16:]
 
         @asyncio.coroutine
         def send_error_message():
             # Create message and add send coroutine to task queue of the source
             error = SendErrorMessage.create(
-                AddressType.server, source.id, libnacl.crypto_hash_sha256(message_data))
+                AddressType.server, source.id, message_id)
             source.log.info('Relaying failed, enqueuing send-error')
             yield from source.enqueue_task(source.send(error))
 
