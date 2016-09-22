@@ -22,7 +22,7 @@ install:
 
 # Run tests
 script:
-  - py.test --cov=./
+  - py.test --cov
 
 # After success
 after_success:
