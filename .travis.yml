@@ -22,7 +22,7 @@ install:
 
 # Run tests
 script:
-  - py.test --cov=saltyrtc
+  - py.test --cov-config .coveragerc --cov=saltyrtc
 
 # After success
 after_success:
