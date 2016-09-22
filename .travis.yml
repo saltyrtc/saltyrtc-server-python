@@ -1,0 +1,25 @@
+language: python
+python:
+  - "3.4"
+  - "3.5"
+  - "nightly"
+
+# Install dependencies
+before_install:
+  - sudo apt-get -qq update
+  - sudo apt-get install make build-essential pkg-config libtool automake -y
+  - git clone --depth 1 -b stable https://github.com/jedisct1/libsodium.git
+  - cd libsodium
+  - ./autogen.sh
+  - ./configure && make
+  - sudo make install
+  - sudo ldconfig
+  - cd ..
+install:
+  - pip install .
+  - pip install logbook pytest-asyncio
+
+# Run tests
+script:
+  - pytest
+
