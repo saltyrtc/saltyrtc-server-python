@@ -22,9 +22,7 @@ install:
 
 # Run tests
 script:
-  - ls -l
-  - echo $PWD
-  - py.test --cov
+  - py.test --cov=saltyrtc
 
 # After success
 after_success:
