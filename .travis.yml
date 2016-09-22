@@ -1,0 +1,18 @@
+language: python
+python:
+  - "3.4"
+  - "3.5"
+  - "nightly"
+
+# Install dependencies
+before_install:
+  - sudo apt-get -qq update
+  - sudo apt-get install -y libsodium
+install:
+  - pip install .
+  - pip install logbook pytest-asyncio
+
+# Run tests
+script:
+  - pytest
+
