@@ -8,10 +8,6 @@ python:
 before_install:
   - sudo apt-get -qq update
   - sudo apt-get install make build-essential pkg-config libtool automake -y
-  - 
-install:
-  - pip install .
-  - pip install logbook pytest-asyncio
   - git clone --depth 1 -b stable https://github.com/jedisct1/libsodium.git
   - cd libsodium
   - ./autogen.sh
@@ -19,6 +15,9 @@ install:
   - sudo make install
   - sudo ldconfig
   - cd ..
+install:
+  - pip install .
+  - pip install logbook pytest-asyncio
 
 # Run tests
 script:
