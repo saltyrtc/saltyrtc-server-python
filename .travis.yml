@@ -1,6 +1,16 @@
 # Use container system
 sudo: false
 
+# Cache pip & libsodium
+cache:
+  directories:
+  - $HOME/libsodium
+  - $HOME/.cache/pip
+
+# Clean up pip log
+before_cache:
+  - rm -f $HOME/.cache/pip/log/debug.log
+
 # Build matrix
 language: python
 matrix:
@@ -29,9 +39,6 @@ install:
 
 # Run tests
 script:
-  - echo $LD_LIBRARY_PATH
-  - ls -la $HOME/libsodium
-  - ls -la $HOME/libsodium/lib
   - py.test --cov-config .coveragerc --cov=saltyrtc --loop=$EVENT_LOOP
 
 # After success
