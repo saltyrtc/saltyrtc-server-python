@@ -8,6 +8,7 @@ __all__ = (
     'NONCE_FORMATTER',
     'COOKIE_LENGTH',
     'HASH_LENGTH',
+    'SIGNED_KEYS_CIPHERTEXT_LENGTH',
     'RELAY_TIMEOUT',
     'KEEP_ALIVE_TIMEOUT',
     'KEEP_ALIVE_INTERVAL',
@@ -21,11 +22,13 @@ __all__ = (
     'validate_public_key',
     'validate_subprotocols',
     'validate_cookie',
+    'validate_signed_keys',
     'validate_initiator_connected',
     'validate_responder_id',
     'validate_responder_ids',
     'validate_hash',
     'validate_drop_reason',
+    'sign_keys',
 )
 
 
@@ -34,6 +37,7 @@ NONCE_LENGTH = 24
 NONCE_FORMATTER = '!16s2B6s'
 COOKIE_LENGTH = 16
 HASH_LENGTH = 32
+SIGNED_KEYS_CIPHERTEXT_LENGTH = 80
 RELAY_TIMEOUT = 30.0  # TODO: Sane?
 KEEP_ALIVE_TIMEOUT = 30.0  # TODO: Sane?
 KEEP_ALIVE_INTERVAL = 60.0  # TODO: Sane?
@@ -120,6 +124,12 @@ def validate_subprotocols(subprotocols):
         raise MessageError('Sub-protocol list is not iterable') from exc
 
 
+def validate_signed_keys(signed_keys):
+    max_length = SIGNED_KEYS_CIPHERTEXT_LENGTH
+    if not isinstance(signed_keys, bytes) or len(signed_keys) != max_length:
+        raise MessageError("Invalid value for field 'signed_keys'")
+
+
 def validate_initiator_connected(initiator_connected):
     if not isinstance(initiator_connected, bool):
         raise MessageError("Invalid value for field 'initiator_connected'")
@@ -158,3 +168,14 @@ def validate_drop_reason(reason):
         raise MessageError('Reason not from acceptable range of close codes')
 
     return reason
+
+
+def sign_keys(client, nonce):
+    # Sign server's public session key and client's public permanent key (in that
+    # order)
+    payload = b''.join((client.server_key.pk, client.client_key))
+    try:
+        _, signed_keys = client.sign_box.encrypt(payload, nonce=nonce, pack_nonce=False)
+        return signed_keys
+    except ValueError as exc:
+        raise MessageError('Could not sign keys') from exc

@@ -22,6 +22,8 @@ def pytest_namespace():
         'external_server': False,
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
+        'permanent_key': saltyrtc.util.load_permanent_key(os.path.normpath(
+            os.path.join(os.path.abspath(__file__), os.pardir, 'permanent.key'))),
         'subprotocols': [
             saltyrtc.SubProtocol.saltyrtc_v1.value
         ],
@@ -175,6 +177,7 @@ def server(request, event_loop, port):
     if not pytest.saltyrtc.external_server:
         coroutine = saltyrtc.serve(
             saltyrtc.util.create_ssl_context(pytest.saltyrtc.cert),
+            pytest.saltyrtc.permanent_key,
             host=pytest.saltyrtc.ip,
             port=port,
             loop=event_loop
@@ -272,10 +275,12 @@ def client_factory(
     @asyncio.coroutine
     def _client_factory(
             ws_client=None,
-            path=initiator_key, timeout=None, cookie=cookie_,
+            path=initiator_key, timeout=None, cookie=cookie_, permanent_key=None,
             initiator_handshake=False, responder_handshake=False,
             **kwargs
     ):
+        if permanent_key is None:
+            permanent_key = pytest.saltyrtc.permanent_key.pk
         _kwargs = {
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
@@ -291,6 +296,7 @@ def client_factory(
             ws_client, pack_message, unpack_message,
             timeout=timeout
         )
+        nonces = {}
 
         if not initiator_handshake and not responder_handshake:
             return client
@@ -299,20 +305,26 @@ def client_factory(
         key = initiator_key if initiator_handshake else responder_key
 
         # server-hello
-        message, _, sck, s, d, start_scsn = yield from client.recv(timeout=timeout)
+        message, nonce, sck, s, d, start_scsn = yield from client.recv(timeout=timeout)
+        ssk = message['key']
+        nonces['server-hello'] = nonce
 
         cck, ccsn = cookie, 2 ** 32 - 1
         if responder_handshake:
             # client-hello
-            yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+            nonce = pack_nonce(cck, 0x00, 0x00, ccsn)
+            nonces['client-hello'] = nonce
+            yield from client.send(nonce, {
                 'type': 'client-hello',
                 'key': responder_key.pk,
             }, timeout=timeout)
             ccsn += 1
 
         # client-auth
-        client.box = libnacl.public.Box(sk=key, pk=message['key'])
-        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+        client.box = libnacl.public.Box(sk=key, pk=ssk)
+        nonce = pack_nonce(cck, 0x00, 0x00, ccsn)
+        nonces['client-auth'] = nonce
+        yield from client.send(nonce, {
             'type': 'client-auth',
             'your_cookie': sck,
             'subprotocols': pytest.saltyrtc.subprotocols,
@@ -320,7 +332,9 @@ def client_factory(
         ccsn += 1
 
         # server-auth
-        message, _, ck, s, d, scsn = yield from client.recv(timeout=timeout)
+        client.sign_box = libnacl.public.Box(sk=key, pk=permanent_key)
+        message, nonce, ck, s, d, scsn = yield from client.recv(timeout=timeout)
+        nonces['server-auth'] = nonce
 
         # Return client and additional data
         additional_data = {
@@ -329,6 +343,9 @@ def client_factory(
             'start_scsn': start_scsn,
             'cck': cck,
             'ccsn': ccsn,
+            'ssk': ssk,
+            'nonces': nonces,
+            'signed_keys': message['signed_keys']
         }
         if initiator_handshake:
             additional_data['responders'] = message['responders']

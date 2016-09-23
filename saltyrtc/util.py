@@ -4,6 +4,9 @@ Server.
 """
 import logging
 import ssl
+import binascii
+
+import libnacl.public
 
 from streql import equals as _equals
 
@@ -14,6 +17,7 @@ __all__ = (
     'get_logger',
     'consteq',
     'create_ssl_context',
+    'load_permanent_key',
 )
 
 
@@ -191,3 +195,34 @@ def create_ssl_context(certfile, keyfile=None):
     ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     ssl_context.load_cert_chain(certfile=certfile, keyfile=keyfile)
     return ssl_context
+
+
+def load_permanent_key(key):
+    """
+    Decode a hex-encoded NaCl private permanent key or read it from a
+    file.
+
+    Arguments:
+        - `key`: A hex-encoded 32 bytes private permanent key or the
+          name of a file which contains the key.
+
+    Raises :exc:`ValueError` in case the key could not be found or
+    is not a valid hex-encoded NaCl private key.
+
+    Return a:class:`libnacl.public.SecretKey` instance.
+    """
+    # Read key file (if any)
+    try:
+        with open(key) as file:
+            key = file.readline().strip()
+    except IOError:
+        pass
+
+    # Un-hexlify
+    try:
+        key = binascii.unhexlify(key)
+    except binascii.Error as exc:
+        raise ValueError('Could not decode key') from exc
+
+    # Convert to private key (raises ValueError on its own)
+    return libnacl.public.SecretKey(sk=key)

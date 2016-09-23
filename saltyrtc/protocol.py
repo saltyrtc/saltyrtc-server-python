@@ -166,25 +166,43 @@ class _OverflowSentinel:
 
 class PathClient:
     __slots__ = (
-        '_loop', '_connection', '_client_key', '_server_key',
-        '_sequence_number_out', '_sequence_number_in', '_cookie_out', '_cookie_in',
-        '_combined_sequence_number_out', '_combined_sequence_number_in',
-        '_box', '_id', 'log', 'type', 'authenticated',
-        'keep_alive_interval', 'keep_alive_timeout', '_task_queue'
+        '_loop',
+        '_connection',
+        '_client_key',
+        '_server_permanent_key',
+        '_server_session_key',
+        '_sequence_number_out',
+        '_sequence_number_in',
+        '_cookie_out',
+        '_cookie_in',
+        '_combined_sequence_number_out',
+        '_combined_sequence_number_in',
+        '_box',
+        '_sign_box',
+        '_id',
+        'log',
+        'type',
+        'authenticated',
+        'keep_alive_interval',
+        'keep_alive_timeout',
+        '_task_queue'
     )
 
     def __init__(
-            self, connection, path_number, initiator_key, server_key=None, loop=None
+            self, connection, path_number, initiator_key, server_permanent_key,
+            server_session_key=None, loop=None
     ):
         self._loop = asyncio.get_event_loop() if loop is None else loop
         self._connection = connection
         self._client_key = initiator_key
-        self._server_key = server_key
+        self._server_permanent_key = server_permanent_key
+        self._server_session_key = server_session_key
         self._cookie_out = None
         self._cookie_in = None
         self._combined_sequence_number_out = None
         self._combined_sequence_number_in = None
         self._box = None
+        self._sign_box = None
         self._id = AddressType.server
         self.log = util.get_logger('path.{}.client.{:x}'.format(path_number, id(self)))
         self.type = None
@@ -226,22 +244,44 @@ class PathClient:
         self.log.debug('Assigned id: {}', id_)
 
     @property
+    def client_key(self):
+        """
+        Return the client's permanent key as :class:`bytes`.
+
+        .. warning:: This is the initiator's key at default if no other
+                     client key has been set!
+        """
+        return self._client_key
+
+    @property
     def server_key(self):
         """
-        Return the server's :class:`libnacl.public.SecretKey` instance.
+        Return the server's session :class:`libnacl.public.SecretKey`
+        instance.
         """
-        if self._server_key is None:
-            self._server_key = libnacl.public.SecretKey()
-        return self._server_key
+        if self._server_session_key is None:
+            self._server_session_key = libnacl.public.SecretKey()
+        return self._server_session_key
 
     @property
     def box(self):
         """
-        Return the :class:`libnacl.public.Box` instance.
+        Return the session's :class:`libnacl.public.Box` instance.
         """
         if self._box is None:
             self._box = libnacl.public.Box(self.server_key, self._client_key)
         return self._box
+
+    @property
+    def sign_box(self):
+        """
+        Return the :class:`libnacl.public.Box` instance that is used for
+        signing the keys in the 'server-auth' message.
+        """
+        if self._sign_box is None:
+            self._sign_box = libnacl.public.Box(
+                self._server_permanent_key, self._client_key)
+        return self._sign_box
 
     @property
     def cookie_out(self):
