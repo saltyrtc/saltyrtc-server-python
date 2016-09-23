@@ -1,3 +1,4 @@
+# Build matrix
 language: python
 matrix:
   include:
@@ -7,12 +8,10 @@ matrix:
     env: EVENT_LOOP=asyncio
   - python: "3.5"
     env: EVENT_LOOP=uvloop
-    install: pip install uvloop
+    before_script: pip install uvloop
 
 # Install dependencies
 before_install:
-  - sudo apt-get -qq update
-  - sudo apt-get install make build-essential pkg-config libtool automake -y
   - git clone --depth 1 -b stable https://github.com/jedisct1/libsodium.git
   - cd libsodium
   - ./autogen.sh
