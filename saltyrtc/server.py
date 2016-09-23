@@ -600,11 +600,7 @@ class Server(asyncio.AbstractServer):
         """
         Close open connections and the server.
         """
-        self._log.debug('Closing protocols')
-        for protocol in self.protocols:
-            self._loop.create_task(protocol.close(code=CloseCode.going_away.value))
-        self._log.debug('Closing server')
-        self.server.close()
+        self._loop.create_task(self._close_after_all_protocols_closed())
 
     @asyncio.coroutine
     def wait_closed(self):
@@ -615,3 +611,19 @@ class Server(asyncio.AbstractServer):
             tasks = [protocol.handler_task for protocol in self.protocols]
             yield from asyncio.wait(tasks, loop=self._loop)
         yield from self.server.wait_closed()
+
+    @asyncio.coroutine
+    def _close_after_all_protocols_closed(self, timeout=None):
+        # Schedule closing all protocols
+        self._log.debug('Closing protocols')
+        if len(self.protocols) > 0:
+            tasks = [protocol.close(code=CloseCode.going_away.value)
+                     for protocol in self.protocols]
+
+            # Wait until all protocols are closed (we need the server to be active for the
+            # WebSocket close protocol)
+            yield from asyncio.wait(tasks, loop=self._loop, timeout=timeout)
+
+        # Now we can close the server
+        self._log.debug('Closing server')
+        self.server.close()

@@ -15,6 +15,15 @@ import saltyrtc
 from contextlib import closing
 
 
+def pytest_addoption(parser):
+    help_ = 'loop: Use a different event loop, supported: asyncio, uvloop'
+    parser.addoption("--loop", action="store", help=help_)
+
+
+def pytest_report_header(config):
+    return 'Using event loop: {}'.format(default_event_loop(config=config))
+
+
 def pytest_namespace():
     return {'saltyrtc': {
         'ip': '127.0.0.1',
@@ -30,6 +39,18 @@ def pytest_namespace():
         'debug': True,
         'timeout': 0.05,
     }}
+
+
+def default_event_loop(request=None, config=None):
+    if request is not None:
+        config = request.config
+    loop = config.getoption("--loop")
+    if loop == 'uvloop':
+        import uvloop
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    else:
+        loop = 'asyncio'
+    return loop
 
 
 def unused_tcp_port():
@@ -91,13 +112,23 @@ def _sleep(timeout=None):
 @pytest.fixture(scope='module')
 def event_loop(request):
     """
-    Create an instance of the default event loop.
+    Create an instance of the requested event loop.
     """
+    default_event_loop(request=request)
+
+    # Close previous event loop
     policy = asyncio.get_event_loop_policy()
     policy.get_event_loop().close()
+
+    # Create new event loop
     _event_loop = policy.new_event_loop()
     policy.set_event_loop(_event_loop)
-    request.addfinalizer(_event_loop.close)
+
+    def fin():
+        _event_loop.close()
+
+    # Add finaliser and return new event loop
+    request.addfinalizer(fin)
     return _event_loop
 
 
