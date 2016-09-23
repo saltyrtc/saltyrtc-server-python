@@ -1,35 +1,45 @@
-language: python
-python:
-  - "3.4"
-  - "3.5"
-#  - "nightly"
+# Use container system
+sudo: false
 
-# Environments
-env:
-  - EVENT_LOOP=asyncio
-  - EVENT_LOOP=uvloop
+# Cache pip & libsodium
+cache:
+  directories:
+  - $HOME/libsodium
+  - $HOME/.cache/pip
+
+# Clean up pip log
+before_cache:
+  - rm -f $HOME/.cache/pip/log/debug.log
+
+# Build matrix
+language: python
+matrix:
+  include:
+  - python: "3.4"
+    env: EVENT_LOOP=asyncio
+  - python: "3.5"
+    env: EVENT_LOOP=asyncio
+  - python: "3.5"
+    env: EVENT_LOOP=uvloop
+    before_script: pip install uvloop
 
 # Install dependencies
 before_install:
-  - sudo apt-get -qq update
-  - sudo apt-get install make build-essential pkg-config libtool automake -y
   - git clone --depth 1 -b stable https://github.com/jedisct1/libsodium.git
   - cd libsodium
   - ./autogen.sh
-  - ./configure && make
-  - sudo make install
-  - sudo ldconfig
+  - ./configure --prefix=${HOME}/libsodium && make && make install
+  - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
   - cd ..
 install:
   - pip install .
   - pip install logbook
   - pip install pytest-asyncio pytest-cov
   - pip install codecov
-  - ./.travis-install-uvloop.sh
 
 # Run tests
 script:
-  - ./.travis-run-tests.sh
+  - py.test --cov-config .coveragerc --cov=saltyrtc --loop=$EVENT_LOOP
 
 # After success
 after_success:
