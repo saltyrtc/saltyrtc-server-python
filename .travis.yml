@@ -1,13 +1,13 @@
 language: python
-python:
-  - "3.4"
-  - "3.5"
-#  - "nightly"
-
-# Environments
-env:
-  - EVENT_LOOP=asyncio
-  - EVENT_LOOP=uvloop
+matrix:
+  include:
+  - python: "3.4"
+    env: EVENT_LOOP=asyncio
+  - python: "3.5"
+    env: EVENT_LOOP=asyncio
+  - python: "3.5"
+    env: EVENT_LOOP=uvloop
+    install: pip install uvloop
 
 # Install dependencies
 before_install:
@@ -25,11 +25,10 @@ install:
   - pip install logbook
   - pip install pytest-asyncio pytest-cov
   - pip install codecov
-  - ./.travis-install-uvloop.sh
 
 # Run tests
 script:
-  - ./.travis-run-tests.sh
+  - py.test --cov-config .coveragerc --cov=saltyrtc --loop=$EVENT_LOOP
 
 # After success
 after_success:
