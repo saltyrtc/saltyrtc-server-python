@@ -25,12 +25,8 @@ matrix:
 
 # Install dependencies
 before_install:
-  - git clone --depth 1 -b stable https://github.com/jedisct1/libsodium.git
-  - cd libsodium
-  - ./autogen.sh
-  - ./configure --prefix=${HOME}/libsodium && make && make install
+  - ./.travis-install-libsodium.sh
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
-  - cd ..
 install:
   - pip install .
   - pip install logbook
