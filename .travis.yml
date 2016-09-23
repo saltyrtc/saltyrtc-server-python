@@ -1,3 +1,6 @@
+# Use container system
+sudo: false
+
 # Build matrix
 language: python
 matrix:
@@ -15,9 +18,8 @@ before_install:
   - git clone --depth 1 -b stable https://github.com/jedisct1/libsodium.git
   - cd libsodium
   - ./autogen.sh
-  - ./configure && make
-  - sudo make install
-  - sudo ldconfig
+  - ./configure --prefix=${HOME}/libsodium && make && make install
+  - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
   - cd ..
 install:
   - pip install .
@@ -27,6 +29,9 @@ install:
 
 # Run tests
 script:
+  - echo $LD_LIBRARY_PATH
+  - ls -la $HOME/libsodium
+  - ls -la $HOME/libsodium/lib
   - py.test --cov-config .coveragerc --cov=saltyrtc --loop=$EVENT_LOOP
 
 # After success
