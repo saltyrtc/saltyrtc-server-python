@@ -321,7 +321,8 @@ class TestProtocol:
 
         # server-hello, already checked in another test
         message, _, sck, s, d, start_scsn = yield from client.recv()
-        client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
+        ssk = message['key']
+        client.box = libnacl.public.Box(sk=initiator_key, pk=ssk)
 
         # client-auth
         cck, ccsn = cookie, 2**32 - 1
@@ -333,13 +334,18 @@ class TestProtocol:
         ccsn += 1
 
         # server-auth
-        message, _, ck, s, d, scsn = yield from client.recv()
+        client.sign_box = libnacl.public.Box(
+            sk=initiator_key, pk=pytest.saltyrtc.permanent_key.pk)
+        message, nonce, ck, s, d, scsn = yield from client.recv()
         assert s == 0x00
         assert d == 0x01
         assert sck == ck
         assert scsn == start_scsn + 1
         assert message['type'] == 'server-auth'
         assert message['your_cookie'] == cck
+        assert len(message['signed_keys']) == saltyrtc.SIGNED_KEYS_CIPHERTEXT_LENGTH
+        keys = client.sign_box.decrypt(message['signed_keys'], nonce=nonce)
+        assert keys == ssk + initiator_key.pk
         assert 'initiator_connected' not in message
         assert len(message['responders']) == 0
 
@@ -356,6 +362,7 @@ class TestProtocol:
 
         # server-hello, already checked in another test
         message, _, sck, s, d, start_scsn = yield from client.recv()
+        ssk = message['key']
 
         # client-hello
         cck, ccsn = cookie, 2**32 - 1
@@ -366,7 +373,7 @@ class TestProtocol:
         ccsn += 1
 
         # client-auth
-        client.box = libnacl.public.Box(sk=responder_key, pk=message['key'])
+        client.box = libnacl.public.Box(sk=responder_key, pk=ssk)
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': sck,
@@ -375,17 +382,42 @@ class TestProtocol:
         ccsn += 1
 
         # server-auth
-        message, _, ck, s, d, scsn = yield from client.recv()
+        client.sign_box = libnacl.public.Box(
+            sk=responder_key, pk=pytest.saltyrtc.permanent_key.pk)
+        message, nonce, ck, s, d, scsn = yield from client.recv()
         assert s == 0x00
         assert 0x01 < d <= 0xff
         assert sck == ck
         assert scsn == start_scsn + 1
         assert message['type'] == 'server-auth'
         assert message['your_cookie'] == cck
+        assert len(message['signed_keys']) == saltyrtc.SIGNED_KEYS_CIPHERTEXT_LENGTH
+        signed_keys = client.sign_box.decrypt(message['signed_keys'], nonce=nonce)
+        assert signed_keys == ssk + responder_key.pk
         assert 'responders' not in message
         assert not message['initiator_connected']
 
         yield from client.close()
+
+    @pytest.mark.asyncio
+    def test_client_factory_handshake(
+            self, client_factory, initiator_key, responder_key
+    ):
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        assert len(i['signed_keys']) == saltyrtc.SIGNED_KEYS_CIPHERTEXT_LENGTH
+        signed_keys = initiator.sign_box.decrypt(
+            i['signed_keys'], nonce=i['nonces']['server-auth'])
+        assert signed_keys == i['ssk'] + initiator_key.pk
+        yield from initiator.close()
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        assert len(r['signed_keys']) == saltyrtc.SIGNED_KEYS_CIPHERTEXT_LENGTH
+        signed_keys = responder.sign_box.decrypt(
+            r['signed_keys'], nonce=r['nonces']['server-auth'])
+        assert signed_keys == r['ssk'] + responder_key.pk
+        yield from responder.close()
 
     @pytest.mark.asyncio
     def test_keep_alive_timeout(

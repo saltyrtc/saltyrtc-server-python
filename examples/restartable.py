@@ -30,13 +30,24 @@ def main():
         loop = asyncio.get_event_loop()
 
         # Create SSL context
-        ssl_context = saltyrtc.util.create_ssl_context(
-            certfile=require_env('SALTYRTC_TLS_CERT'),
-            keyfile=require_env('SALTYRTC_TLS_KEY'),
-        )
+        if env('SALTYRTC_DISABLE_TLS') != 'yes-and-i-know-what-im-doing':
+            ssl_context = saltyrtc.util.create_ssl_context(
+                certfile=require_env('SALTYRTC_TLS_CERT'),
+                keyfile=require_env('SALTYRTC_TLS_KEY'),
+            )
+        else:
+            ssl_context = None
+
+        # Get permanent key
+        if env('SALTYRTC_DISABLE_SERVER_PERMANENT_KEY') != 'yes-and-i-know-what-im-doing':
+            permanent_key = saltyrtc.util.load_permanent_key(
+                require_env('SALTYRTC_SERVER_PERMANENT_KEY'))
+        else:
+            permanent_key = None
 
         # Start server
-        coroutine = saltyrtc.serve(ssl_context, port=8765)
+        port = int(env('SALTYRTC_PORT', '8765'))
+        coroutine = saltyrtc.serve(ssl_context, permanent_key, port=port)
         server = loop.run_until_complete(coroutine)
 
         # Restart server on HUP signal

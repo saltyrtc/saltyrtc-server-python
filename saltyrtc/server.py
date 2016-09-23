@@ -2,8 +2,6 @@ import asyncio
 import binascii
 
 import websockets
-import libnacl
-import libnacl.public
 
 from . import util
 from .exception import *
@@ -37,12 +35,14 @@ __all__ = (
 
 
 @asyncio.coroutine
-def serve(ssl_context, paths=None, host=None, port=8765, loop=None):
+def serve(ssl_context, key, paths=None, host=None, port=8765, loop=None):
     """
     Start serving SaltyRTC Signalling Clients.
 
     Arguments:
         - `ssl_context`: An `ssl.SSLContext` instance for WSS.
+        - `key`: A :class:`libnacl.public.SecretKey` instance
+          containing the permanent private key of the server.
         - `paths`: A :class:`Paths` instance that maps path names to
           :class:`Path` instances. Can be used to share paths on
           multiple WebSockets. Defaults to an empty paths instance.
@@ -62,7 +62,7 @@ def serve(ssl_context, paths=None, host=None, port=8765, loop=None):
         paths = Paths()
 
     # Create server
-    server = Server(paths=paths, loop=loop)
+    server = Server(key, paths, loop=loop)
 
     # Start server
     ws_server = yield from websockets.serve(
@@ -175,7 +175,7 @@ class ServerProtocol(Protocol):
         path = self._server.paths.get(initiator_key)
 
         # Create client instance
-        client = PathClient(connection, path.number, initiator_key)
+        client = PathClient(connection, path.number, initiator_key, self._server.key)
 
         # Return path and client
         return path, client
@@ -307,7 +307,8 @@ class ServerProtocol(Protocol):
         # Send server-auth
         responder_ids = path.get_responder_ids()
         message = ServerAuthMessage.create(
-            AddressType.server, initiator.id, initiator.cookie_in, responder_ids=responder_ids)
+            AddressType.server, initiator.id, initiator.cookie_in,
+            sign_keys=self._server.key is not None, responder_ids=responder_ids)
         initiator.log.debug('Sending server-auth including responder ids')
         yield from initiator.send(message)
 
@@ -350,6 +351,7 @@ class ServerProtocol(Protocol):
         # Send server-auth
         message = ServerAuthMessage.create(
             AddressType.server, responder.id, responder.cookie_in,
+            sign_keys=self._server.key is not None,
             initiator_connected=initiator_connected)
         responder.log.debug('Sending server-auth without responder ids')
         yield from responder.send(message)
@@ -542,14 +544,15 @@ class Server(asyncio.AbstractServer):
         SubProtocol.saltyrtc_v1.value
     ]
 
-    def __init__(self, paths, loop=None):
+    def __init__(self, key, paths, loop=None):
         self._log = util.get_logger('server')
         self._loop = asyncio.get_event_loop() if loop is None else loop
 
         # WebSocket server instance
         self._server = None
 
-        # Store paths
+        # Store key and paths
+        self.key = key
         self.paths = paths
 
         # Store server protocols

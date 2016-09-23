@@ -17,11 +17,13 @@ from .common import (
     validate_public_key,
     validate_cookie,
     validate_subprotocols,
+    validate_signed_keys,
     validate_initiator_connected,
     validate_responder_id,
     validate_responder_ids,
     validate_hash,
     validate_drop_reason,
+    sign_keys,
 )
 
 __all__ = (
@@ -88,6 +90,16 @@ class AbstractMessage(metaclass=abc.ABCMeta):
         """
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def prepare_payload(self, client, nonce):
+        """
+        This method will be called as soon as the nonce has been packed
+        to make late changes to the payload based on the nonce.
+
+        Only :exc:`MessageError` may be raised.
+        """
+        raise NotImplementedError
+
     @classmethod
     @abc.abstractmethod
     def unpack(cls, client, data):
@@ -125,13 +137,14 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
     def __init__(
             self, source, destination, payload,
-            source_type=None, destination_type=None
+            source_type=None, destination_type=None, extra=None
     ):
         super().__init__(
             source, destination,
             source_type=source_type, destination_type=destination_type
         )
         self.payload = {} if payload is None else payload
+        self.extra = {} if extra is None else extra
 
     def __str__(self):
         return _message_representation(
@@ -163,6 +176,9 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         self._nonce = nonce  # Stored for str representation
         data.write(nonce)
 
+        # Prepare payload
+        self.prepare_payload(client, nonce)
+
         # Pack payload
         payload = self._pack_payload()
 
@@ -175,6 +191,9 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         # Append payload and return as bytes
         data.write(payload)
         return data.getvalue()
+
+    def prepare_payload(self, client, nonce):
+        return
 
     @classmethod
     def unpack(cls, client, data):
@@ -358,6 +377,9 @@ class RawMessage(AbstractMessage):
     def pack(self, client):
         return self._data
 
+    def prepare_payload(self, client, nonce):
+        return
+
     @classmethod
     def unpack(cls, client, data):
         return AbstractBaseMessage.unpack(client, data)
@@ -457,7 +479,7 @@ class ServerAuthMessage(AbstractBaseMessage):
     @classmethod
     def create(
             cls, source, destination, client_cookie,
-            initiator_connected=None, responder_ids=None
+            sign_keys=False, initiator_connected=None, responder_ids=None
     ):
         payload = {
             'type': cls.type.value,
@@ -468,7 +490,17 @@ class ServerAuthMessage(AbstractBaseMessage):
         if responder_ids is not None:
             payload['responders'] = responder_ids
         # noinspection PyCallingNonCallable
-        return cls(source, destination, payload)
+        return cls(source, destination, payload, extra={'sign_keys': sign_keys})
+
+    def prepare_payload(self, client, nonce):
+        """
+        Late-signing of the keys.
+
+        Raises :exc:`MessageError` in case the keys could not be
+        signed.
+        """
+        if self.extra.get('sign_keys', False):
+            self.payload['signed_keys'] = sign_keys(client, nonce)
 
     @classmethod
     def check_payload(cls, client, payload):
@@ -476,12 +508,15 @@ class ServerAuthMessage(AbstractBaseMessage):
         MessageError
         """
         validate_cookie(payload.get('your_cookie'))
+        signed_keys = payload.get('signed_keys')
+        if signed_keys is not None:
+            validate_signed_keys(signed_keys)
         responders = payload.get('responders')
         if responders is not None:
             validate_responder_ids(responders)
         initiator_connected = payload.get('initiator_connected')
         if initiator_connected is not None:
-            validate_initiator_connected(responders)
+            validate_initiator_connected(initiator_connected)
         return payload
 
     @property
@@ -489,9 +524,23 @@ class ServerAuthMessage(AbstractBaseMessage):
         return self.payload['your_cookie']
 
     @property
+    def signed_keys(self):
+        """
+        KeyError in case the message contains no 'signed_keys' field.
+        """
+        return self.payload['signed_keys']
+
+    @property
+    def initiator_connected(self):
+        """
+        KeyError in case the message is directed at an initiator.
+        """
+        return self.payload['initiator_connected']
+
+    @property
     def responder_ids(self):
         """
-        KeyError in case the message is directed at a responder
+        KeyError in case the message is directed at a responder.
         """
         return self.payload['responders']
 
