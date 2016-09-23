@@ -4,6 +4,11 @@ python:
   - "3.5"
 #  - "nightly"
 
+# Environments
+env:
+  - EVENT_LOOP=asyncio
+  - EVENT_LOOP=uvloop
+
 # Install dependencies
 before_install:
   - sudo apt-get -qq update
@@ -20,10 +25,11 @@ install:
   - pip install logbook
   - pip install pytest-asyncio pytest-cov
   - pip install codecov
+  - ./.travis-install-uvloop.sh
 
 # Run tests
 script:
-  - py.test --cov-config .coveragerc --cov=saltyrtc
+  - ./.travis-run-tests.sh
 
 # After success
 after_success:
