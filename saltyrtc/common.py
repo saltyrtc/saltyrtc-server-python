@@ -62,7 +62,7 @@ class CloseCode(enum.IntEnum):
 
     @property
     def is_valid_drop_reason(self):
-        return self.vale != 3003 and self.value in range(3001, 3006 + 1)
+        return self.value != 3003 and self.value in range(3001, 3006 + 1)
 
 
 @enum.unique
