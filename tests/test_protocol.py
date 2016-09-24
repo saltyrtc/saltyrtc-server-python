@@ -708,16 +708,16 @@ class TestProtocol:
 
         # Drop responder with a different reason
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
-            'type':'drop-responder',
+            'type': 'drop-responder',
             'id': r['id'],
-            'reason': saltyrtc.CloseCode.handover.value,
+            'reason': saltyrtc.CloseCode.no_shared_tasks.value,
         })
 
         # Responder: Expect reason 'handover'
         yield from sleep()
         assert not responder.ws_client.open
         actual_close_code = responder.ws_client.close_code
-        assert actual_close_code == saltyrtc.CloseCode.handover
+        assert actual_close_code == saltyrtc.CloseCode.no_shared_tasks
 
         # Bye
         yield from initiator.close()
