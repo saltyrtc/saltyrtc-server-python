@@ -137,7 +137,7 @@ def validate_initiator_connected(initiator_connected):
 
 def validate_responder_id(id_):
     if not is_responder_id(id_):
-        raise MessageError('Invalid responder in responder list')
+        raise MessageError('Invalid responder id in responder list')
 
 
 def validate_responder_ids(ids):

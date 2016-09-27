@@ -82,7 +82,7 @@ def key_path(key_pair):
     return key_pair.hex_pk().decode()
 
 
-def _cookie():
+def random_cookie():
     """
     Return a random cookie for the client.
     """
@@ -178,11 +178,11 @@ def sleep():
 
 
 @pytest.fixture(scope='module')
-def cookie():
+def cookie_factory():
     """
-    Return a random cookie for the client.
+    A cookie factory for random cookies.
     """
-    return _cookie()
+    return random_cookie
 
 
 @pytest.fixture(scope='module')
@@ -287,7 +287,7 @@ def ws_client_factory(initiator_key, url, event_loop, server):
 
 @pytest.fixture(scope='module')
 def client_factory(
-        initiator_key, url, event_loop, server, cookie, responder_key,
+        initiator_key, url, event_loop, server, responder_key,
         pack_nonce, pack_message, unpack_message
 ):
     """
@@ -295,7 +295,6 @@ def client_factory(
     where no parameters are required.
     """
     # Note: The `server` argument is only required to fire up the server.
-    cookie_ = cookie
 
     # Create SSL context
     ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
@@ -306,10 +305,12 @@ def client_factory(
     @asyncio.coroutine
     def _client_factory(
             ws_client=None,
-            path=initiator_key, timeout=None, cookie=cookie_, permanent_key=None,
+            path=initiator_key, timeout=None, csn=None, cookie=None, permanent_key=None,
             initiator_handshake=False, responder_handshake=False,
             **kwargs
     ):
+        if cookie is None:
+            cookie = random_cookie()
         if permanent_key is None:
             permanent_key = pytest.saltyrtc.permanent_key.pk
         _kwargs = {
@@ -340,7 +341,7 @@ def client_factory(
         ssk = message['key']
         nonces['server-hello'] = nonce
 
-        cck, ccsn = cookie, 2 ** 32 - 1
+        cck, ccsn = cookie, 2 ** 32 - 1 if csn is None else csn
         if responder_handshake:
             # client-hello
             nonce = pack_nonce(cck, 0x00, 0x00, ccsn)

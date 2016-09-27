@@ -289,7 +289,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         MessageError
         MessageFlowError
         """
-        nonce = data[:NONCE_LENGTH]  # TODO: Catch slice error?
+        nonce = data[:NONCE_LENGTH]
         try:
             (cookie_in,
              source, destination,
@@ -316,7 +316,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
             raise MessageError(error_message.format(client.id, source))
 
         # Validate cookie
-        if not client.valid_cookie(cookie_in):
+        if is_to_server and not client.valid_cookie(cookie_in):
             raise MessageError('Invalid cookie: {}'.format(cookie_in))
 
         # Validate combined sequence number
