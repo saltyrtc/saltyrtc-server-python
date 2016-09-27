@@ -792,6 +792,45 @@ class TestProtocol:
         yield from second_responder.close()
 
     @pytest.mark.asyncio
+    def test_relay_errors(
+            self, sleep, pack_nonce, cookie_factory, client_factory
+    ):
+        """
+        Try sending relay messages to:
+        1. An unregistered but valid destination
+        2. An invalid destination
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 65424
+        i['rcck'] = cookie_factory()
+
+        # Send relay message to an unregistered destination
+        nonce = pack_nonce(i['rcck'], i['id'], 0x02, i['rccsn'])
+        data = yield from initiator.send(nonce, {
+            'type': 'meow?',
+        }, box=None)
+
+        # Receive send-error message: initiator <-- initiator
+        message, _, sck, s, d, scsn = yield from initiator.recv()
+        assert s == 0x00
+        assert d == i['id']
+        assert sck == i['sck']
+        assert scsn == i['start_scsn'] + 2
+        assert message['type'] == 'send-error'
+        assert message['id'] == data[16:]
+
+        # Send relay message to an invalid destination
+        yield from initiator.send(pack_nonce(i['rcck'], i['id'], 0x01, i['rccsn']), {
+            'type': 'h3h3-pwnz',
+        }, box=None)
+
+        # Expect protocol error
+        yield from sleep()
+        assert not initiator.ws_client.open
+        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
     def test_relay_unencrypted(self, pack_nonce, cookie_factory, client_factory):
         """
         Check that the initiator and responder can communicate raw
