@@ -452,13 +452,10 @@ class PathClient:
             raise MessageFlowError(('Cannot send any more messages, due to a sequence '
                                     'number counter overflow'))
 
-        # Pack if not packed
-        if isinstance(message, AbstractMessage):
-            self.log.debug('Packing message: {}', message.type)
-            data = message.pack(self)
-            self.log.trace('server >> {}', message)
-        else:
-            data = message
+        # Pack
+        self.log.debug('Packing message: {}', message.type)
+        data = message.pack(self)
+        self.log.trace('server >> {}', message)
 
         # Send data
         self.log.debug('Sending message')
