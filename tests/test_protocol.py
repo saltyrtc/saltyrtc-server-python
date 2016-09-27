@@ -961,7 +961,10 @@ class TestProtocol:
         assert len(server.protocols) == 1
         protocol = next(iter(server.protocols))
         protocol.client.combined_sequence_number_in = 2 ** 48 - 1
-        i['ccsn'] = 2 ** 48 - 1
+        assert isinstance(protocol.client.combined_sequence_number_in, int)
+        protocol.client.combined_sequence_number_in += 1
+        assert not isinstance(protocol.client.combined_sequence_number_in, int)
+        i['ccsn'] = 0  # Invalid!
 
         # Responder handshake
         responder, r = yield from client_factory(responder_handshake=True)
@@ -1027,7 +1030,7 @@ class TestProtocol:
         assert csn == i['rccsn']
         assert message['type'] == 'arrrrrrrr'
 
-        # Increase CSN (Overflow sentinel is now set and drops the client immediately)
+        # Increase CSN (Overflow sentinel is set, client should be dropped)
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': 0x02,
