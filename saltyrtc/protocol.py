@@ -406,8 +406,10 @@ class PathClient:
             # First message: Set combined sequence number
             self._combined_sequence_number_in = combined_sequence_number_in
             return True
-        else:
-            return combined_sequence_number_in == self.combined_sequence_number_in
+
+        # Ensure that the incoming CSN counter did not overflow and that the received
+        # CSN matches the expected CSN
+        return combined_sequence_number_in == self.combined_sequence_number_in
 
     def p2p_allowed(self, destination_type):
         """
@@ -472,11 +474,6 @@ class PathClient:
         """
         Disconnected
         """
-        # Ensure that the incoming combined sequence number counter did not overflow
-        if self.combined_sequence_number_in == _OverflowSentinel:
-            raise MessageFlowError(('Cannot receive any more messages, due to a '
-                                    'sequence number counter overflow'))
-
         # Receive data
         try:
             data = yield from self._connection.recv()
@@ -487,7 +484,6 @@ class PathClient:
 
         # Unpack data and return
         message = unpack(self, data)
-        self.combined_sequence_number_in += 1
         self.log.debug('Unpacked message: {}', message.type)
         self.log.trace('server << {}', message)
         return message

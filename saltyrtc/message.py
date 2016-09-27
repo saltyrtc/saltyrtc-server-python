@@ -319,12 +319,13 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         if is_to_server and not client.valid_cookie(cookie_in):
             raise MessageError('Invalid cookie: {}'.format(cookie_in))
 
-        # Validate combined sequence number
-        if (is_to_server and
-                not client.valid_combined_sequence_number(combined_sequence_number_in)):
-            error = 'Invalid combined sequence number, expected {}, got {}'.format(
-                client.combined_sequence_number_in, combined_sequence_number_in)
-            raise MessageError(error)
+        # Validate and increase combined sequence number
+        if is_to_server:
+            if not client.valid_combined_sequence_number(combined_sequence_number_in):
+                error = 'Invalid combined sequence number, expected {}, got {}'.format(
+                    client.combined_sequence_number_in, combined_sequence_number_in)
+                raise MessageError(error)
+            client.combined_sequence_number_in += 1
 
         return nonce, source, source_type, destination, destination_type
 

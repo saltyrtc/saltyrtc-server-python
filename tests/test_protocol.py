@@ -805,7 +805,7 @@ class TestProtocol:
         # Responder handshake
         responder, r = yield from client_factory(responder_handshake=True)
         r['iccsn'] = 2 ** 24
-        i['icck'] = cookie_factory()
+        r['icck'] = cookie_factory()
 
         # new-responder
         yield from initiator.recv()
@@ -863,7 +863,7 @@ class TestProtocol:
         # Responder handshake
         responder, r = yield from client_factory(responder_handshake=True)
         r['iccsn'] = 2 ** 24
-        i['icck'] = cookie_factory()
+        r['icck'] = cookie_factory()
         r['ibox'] = libnacl.public.Box(sk=responder_key, pk=initiator_key.pk)
 
         # new-responder
@@ -939,7 +939,7 @@ class TestProtocol:
         yield from initiator.close()
 
     @pytest.mark.asyncio
-    def test_peer_csn_overflow(
+    def test_peer_csn_in_overflow(
             self, sleep, pack_nonce, cookie_factory, client_factory, server
     ):
         """
@@ -966,7 +966,7 @@ class TestProtocol:
         # Responder handshake
         responder, r = yield from client_factory(responder_handshake=True)
         r['iccsn'] = 2 ** 24
-        i['icck'] = cookie_factory()
+        r['icck'] = cookie_factory()
 
         # new-responder
         yield from initiator.recv()
@@ -1040,6 +1040,77 @@ class TestProtocol:
 
         # Bye
         yield from responder.close()
+
+    @pytest.mark.asyncio
+    def test_peer_csn_out_overflow(
+            self, sleep, pack_nonce, server, client_factory, cookie_factory
+    ):
+        """
+        Check that the server does not take its own CSN for outgoing
+        messages into account when relaying a message.
+        """
+        if pytest.saltyrtc.external_server:
+            return
+
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 50217
+        i['rcck'] = cookie_factory()
+
+        # Patch server's combined sequence number of the initiator instance
+        assert len(server.protocols) == 1
+        i_protocol = next(iter(server.protocols))
+        i_protocol.client.combined_sequence_number_out = 2 ** 48 - 1
+
+        # Connect a new responder
+        first_responder, r1 = yield from client_factory(responder_handshake=True)
+        r1['iccsn'] = 2 ** 24
+        r1['icck'] = cookie_factory()
+
+        # Patch server's combined sequence number of the responder instance
+        assert len(server.protocols) == 2
+        r1_protocol = None
+        for protocol in server.protocols:
+            if protocol != i_protocol:
+                r1_protocol = protocol
+                break
+        r1_protocol.client.combined_sequence_number_out = 2 ** 48 - 1
+        assert isinstance(r1_protocol.client.combined_sequence_number_out, int)
+        r1_protocol.client.combined_sequence_number_out += 1
+        assert not isinstance(r1_protocol.client.combined_sequence_number_out, int)
+
+        # new-responder
+        message, _, sck, s, d, scsn = yield from initiator.recv()
+        assert s == 0x00
+        assert d == i['id']
+        assert i['sck'] == sck
+        assert scsn == 2 ** 48 - 1
+        assert message['id'] == r1['id']
+
+        # Send relay message: initiator --> responder
+        yield from initiator.send(pack_nonce(i['rcck'], i['id'], r1['id'], i['rccsn']), {
+            'type': 'rawr',
+        }, box=None)
+
+        # Receive relay message: initiator --> responder
+        message, _, ck, s, d, csn = yield from first_responder.recv(box=None)
+        assert ck == i['rcck']
+        assert s == i['id']
+        assert d == r1['id']
+        assert csn == i['rccsn']
+        assert message['type'] == 'rawr'
+
+        # Connect a new responder
+        second_responder, r = yield from client_factory(responder_handshake=True)
+
+        # Expect protocol error
+        yield from sleep()
+        assert not initiator.ws_client.open
+        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+        # Bye
+        yield from first_responder.close()
+        yield from second_responder.close()
 
     @pytest.mark.asyncio
     def test_path_full(self, event_loop, client_factory):
