@@ -12,6 +12,7 @@ from .common import (
     KEY_LENGTH,
     KEEP_ALIVE_INTERVAL,
     KEEP_ALIVE_TIMEOUT,
+    OverflowSentinel,
     AddressType,
     available_slot_range,
     is_initiator_id,
@@ -158,10 +159,6 @@ class Path:
         # Remove client from slot
         self._slots[id_] = None
         self.log.debug('Removed {}', 'initiator' if is_initiator_id(id_) else 'responder')
-
-
-class _OverflowSentinel:
-    pass
 
 
 class PathClient:
@@ -315,7 +312,7 @@ class PathClient:
     def combined_sequence_number_out(self, combined_sequence_number_out):
         """
         Update the combined sequence number of the server (outgoing
-        messages). Will set the number to _OverflowSentinel in case
+        messages). Will set the number to OverflowSentinel in case
         the number would overflow a 48-bit unsigned integer.
         """
         csn = self._validate_combined_sequence_number(combined_sequence_number_out)
@@ -333,7 +330,7 @@ class PathClient:
     def combined_sequence_number_in(self, combined_sequence_number_in):
         """
         Update the combined sequence number of the client (incoming
-        messages). Will set the number to _OverflowSentinel in case
+        messages). Will set the number to OverflowSentinel in case
         the number would overflow a 48-bit unsigned integer.
         """
         csn = self._validate_combined_sequence_number(combined_sequence_number_in)
@@ -344,11 +341,11 @@ class PathClient:
         """
         Validate a combined sequence number.
 
-        Return _OverflowSentinel in case the number would overflow a
+        Return OverflowSentinel in case the number would overflow a
         48-bit unsigned integer, otherwise the passed sequence number.
         """
         if combined_sequence_number & 0xf000000000000 != 0:
-            return _OverflowSentinel
+            return OverflowSentinel
         else:
             return combined_sequence_number
 
@@ -392,24 +389,39 @@ class PathClient:
                 return False
             return True
 
-    def valid_combined_sequence_number(self, combined_sequence_number_in):
+    def validate_combined_sequence_number(self, combined_sequence_number_in):
         """
-        Return `True` if the 6 byte combined sequence number is the
-        valid pending sequence number of the client (or the combined
-        sequence number has not been set, yet and will be validated).
+        Set or validate the combined sequence number for incoming
+        messages from the client.
+
+        Raises:
+            - :exc:`MessageError` in case this is the first message
+              from the client and the leading 16 bits of the combined
+              sequence number are not `0`.
+            - :exc:`MessageError` in case the 6 byte combined sequence
+              number is not the expected sequence number of the client.
+            - :exc:`MessageFlowError` in case no messages can be
+              received from the client as the combined sequence number
+              has reset to `0`.
         """
         if self.combined_sequence_number_in is None:
             # Ensure that the leading 16 bits are 0
             if combined_sequence_number_in & 0xffff00000000 != 0:
-                return False
+                raise MessageError('Invalid sequence number, leading 16 bits are not 0')
 
             # First message: Set combined sequence number
             self._combined_sequence_number_in = combined_sequence_number_in
-            return True
 
-        # Ensure that the incoming CSN counter did not overflow and that the received
-        # CSN matches the expected CSN
-        return combined_sequence_number_in == self.combined_sequence_number_in
+        # Ensure that the incoming CSN counter did not overflow
+        if self.combined_sequence_number_in == OverflowSentinel:
+            raise MessageFlowError(('Cannot receive any more messages, due to a '
+                                    'sequence number counter overflow'))
+
+        # Check that the CSN matches the expected CSN
+        if combined_sequence_number_in != self.combined_sequence_number_in:
+            raise MessageError('Invalid sequence number, expected {}, got {}'.format(
+                self.combined_sequence_number_in, combined_sequence_number_in
+            ))
 
     def p2p_allowed(self, destination_type):
         """
@@ -445,13 +457,9 @@ class PathClient:
     def send(self, message):
         """
         Disconnected
+        MessageError
         MessageFlowError
         """
-        # Ensure that the outgoing combined sequence number counter did not overflow
-        if self.combined_sequence_number_out == _OverflowSentinel:
-            raise MessageFlowError(('Cannot send any more messages, due to a sequence '
-                                    'number counter overflow'))
-
         # Pack
         self.log.debug('Packing message: {}', message.type)
         data = message.pack(self)
@@ -459,7 +467,6 @@ class PathClient:
 
         # Send data
         self.log.debug('Sending message')
-        self.combined_sequence_number_out += 1
         try:
             yield from self._connection.send(data)
         except websockets.ConnectionClosed as exc:

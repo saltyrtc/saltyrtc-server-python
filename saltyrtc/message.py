@@ -11,6 +11,7 @@ from .common import (
     NONCE_LENGTH,
     NONCE_FORMATTER,
     COOKIE_LENGTH,
+    OverflowSentinel,
     CloseCode,
     AddressType,
     MessageType,
@@ -23,7 +24,7 @@ from .common import (
     validate_responder_ids,
     validate_hash,
     validate_drop_reason,
-    sign_keys,
+    sign_keys as sign_keys_,
 )
 
 __all__ = (
@@ -271,10 +272,21 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
     def _pack_nonce(self, client):
         """
+        .. note:: The CSN check and incrementation can only reside here
+                  because an error while packing a message will
+                  create a protocol error in any case.
+
         MessageError
+        MessageFlowError
         """
+        # Ensure that the outgoing combined sequence number counter did not overflow
+        if client.combined_sequence_number_out == OverflowSentinel:
+            raise MessageFlowError(('Cannot send any more messages, due to a sequence '
+                                    'number counter overflow'))
+
+        # Pack nonce
         try:
-            return struct.pack(
+            nonce = struct.pack(
                 NONCE_FORMATTER,
                 client.cookie_out,
                 self.source, self.destination,
@@ -283,9 +295,17 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         except struct.error as exc:
             raise MessageError('Could not pack nonce') from exc
 
+        # Increase outgoing combined sequence number counter
+        client.combined_sequence_number_out += 1
+        return nonce
+
     @classmethod
     def _unpack_nonce(cls, data, client):
         """
+        .. note:: The CSN check and incrementation can only reside here
+                  because an error while unpacking a message will
+                  create a protocol error in any case.
+
         MessageError
         MessageFlowError
         """
@@ -321,10 +341,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
         # Validate and increase combined sequence number
         if is_to_server:
-            if not client.valid_combined_sequence_number(combined_sequence_number_in):
-                error = 'Invalid combined sequence number, expected {}, got {}'.format(
-                    client.combined_sequence_number_in, combined_sequence_number_in)
-                raise MessageError(error)
+            client.validate_combined_sequence_number(combined_sequence_number_in)
             client.combined_sequence_number_in += 1
 
         return nonce, source, source_type, destination, destination_type
@@ -501,7 +518,7 @@ class ServerAuthMessage(AbstractBaseMessage):
         signed.
         """
         if self.extra.get('sign_keys', False):
-            self.payload['signed_keys'] = sign_keys(client, nonce)
+            self.payload['signed_keys'] = sign_keys_(client, nonce)
 
     @classmethod
     def check_payload(cls, client, payload):

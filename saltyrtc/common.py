@@ -12,6 +12,7 @@ __all__ = (
     'RELAY_TIMEOUT',
     'KEEP_ALIVE_TIMEOUT',
     'KEEP_ALIVE_INTERVAL',
+    'OverflowSentinel',
     'SubProtocol',
     'CloseCode',
     'AddressType',
@@ -41,6 +42,13 @@ SIGNED_KEYS_CIPHERTEXT_LENGTH = 80
 RELAY_TIMEOUT = 30.0  # TODO: Sane?
 KEEP_ALIVE_TIMEOUT = 30.0  # TODO: Sane?
 KEEP_ALIVE_INTERVAL = 60.0  # TODO: Sane?
+
+
+class OverflowSentinel:
+    """
+    The combined sequence number will be set to this object if the
+    counter did overflow.
+    """
 
 
 @enum.unique
