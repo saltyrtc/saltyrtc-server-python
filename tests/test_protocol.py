@@ -70,14 +70,16 @@ class TestProtocol:
         yield from client.ws_client.close()
 
     @pytest.mark.asyncio
-    def test_invalid_message_type(self, sleep, cookie, pack_nonce, client_factory):
+    def test_invalid_message_type(
+            self, sleep, cookie_factory, pack_nonce, client_factory
+    ):
         """
         The server must close the connection when an invalid packet has
         been sent during the handshake with a close code of *3001*.
         """
         client = yield from client_factory()
         yield from client.recv()
-        cck, ccsn = cookie, 2 ** 32 - 1
+        cck, ccsn = cookie_factory(), 2 ** 32 - 1
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'meow-hello'
         })
@@ -86,14 +88,14 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_field_missing(self, sleep, cookie, pack_nonce, client_factory):
+    def test_field_missing(self, sleep, cookie_factory, pack_nonce, client_factory):
         """
         The server must close the connection when an invalid packet has
         been sent during the handshake with a close code of *3001*.
         """
         client = yield from client_factory()
         yield from client.recv()
-        cck, ccsn = cookie, 2 ** 32 - 1
+        cck, ccsn = cookie_factory(), 2 ** 32 - 1
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-hello'
         })
@@ -102,14 +104,14 @@ class TestProtocol:
         assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_invalid_field(self, sleep, cookie, pack_nonce, client_factory):
+    def test_invalid_field(self, sleep, cookie_factory, pack_nonce, client_factory):
         """
         The server must close the connection when an invalid packet has
         been sent during the handshake with a close code of *3001*.
         """
         client = yield from client_factory()
         yield from client.recv()
-        cck, ccsn = cookie, 2 ** 32 - 1
+        cck, ccsn = cookie_factory(), 2 ** 32 - 1
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-hello',
             'key': b'meow?'
@@ -145,7 +147,7 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_invalid_repeated_cookie(
-            self, sleep, cookie, initiator_key, pack_nonce, client_factory
+            self, sleep, cookie_factory, initiator_key, pack_nonce, client_factory
     ):
         """
         Check that the server closes with Protocol Error when a client
@@ -158,7 +160,7 @@ class TestProtocol:
         client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # client-auth
-        cck, ccsn = cookie, 2**32 - 1
+        cck, ccsn = cookie_factory(), 2**32 - 1
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': b'\x11' * 16,
@@ -172,7 +174,7 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_initiator_invalid_source(
-            self, sleep, cookie, initiator_key, pack_nonce, client_factory
+            self, sleep, cookie_factory, initiator_key, pack_nonce, client_factory
     ):
         """
         Check that the server closes with Protocol Error when an
@@ -184,7 +186,7 @@ class TestProtocol:
         message, _, sck, s, d, start_scsn = yield from client.recv()
 
         # client-hello
-        cck, ccsn = cookie, 2 ** 32 - 1
+        cck, ccsn = cookie_factory(), 2 ** 32 - 1
         yield from client.send(pack_nonce(cck, 0x01, 0x00, ccsn), {
             'type': 'client-hello',
             'key': initiator_key.pk,
@@ -198,7 +200,7 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_responder_invalid_source(
-            self, sleep, cookie, responder_key, pack_nonce, client_factory
+            self, sleep, cookie_factory, responder_key, pack_nonce, client_factory
     ):
         """
         Check that the server closes with Protocol Error when an
@@ -210,7 +212,7 @@ class TestProtocol:
         message, _, sck, s, d, start_scsn = yield from client.recv()
 
         # client-hello
-        cck, ccsn = cookie, 2 ** 32 - 1
+        cck, ccsn = cookie_factory(), 2 ** 32 - 1
         yield from client.send(pack_nonce(cck, 0xff, 0x00, ccsn), {
             'type': 'client-hello',
             'key': responder_key.pk,
@@ -224,7 +226,7 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_invalid_destination(
-            self, sleep, cookie, initiator_key, pack_nonce, client_factory
+            self, sleep, cookie_factory, initiator_key, pack_nonce, client_factory
     ):
         """
         Check that the server closes with Protocol Error when an
@@ -236,7 +238,7 @@ class TestProtocol:
         message, _, sck, s, d, start_scsn = yield from client.recv()
 
         # client-hello
-        cck, ccsn = cookie, 2 ** 32 - 1
+        cck, ccsn = cookie_factory(), 2 ** 32 - 1
         yield from client.send(pack_nonce(cck, 0x00, 0xff, ccsn), {
             'type': 'client-hello',
             'key': initiator_key.pk,
@@ -250,7 +252,7 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_subprotocol_downgrade_1(
-            self, sleep, cookie, initiator_key, pack_nonce, client_factory
+            self, sleep, cookie_factory, initiator_key, pack_nonce, client_factory
     ):
         """
         Check that the server drops the client in case it doesn't find
@@ -263,7 +265,7 @@ class TestProtocol:
         client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # client-auth
-        cck, ccsn = cookie, 2 ** 32 - 1
+        cck, ccsn = cookie_factory(), 2 ** 32 - 1
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': sck,
@@ -279,12 +281,15 @@ class TestProtocol:
     @pytest.mark.asyncio
     def test_subprotocol_downgrade_2(
             self, monkeypatch,
-            sleep, server, cookie, initiator_key, pack_nonce, client_factory
+            sleep, server, cookie_factory, initiator_key, pack_nonce, client_factory
     ):
         """
         Check that the server drops the client in case it detects a
         subprotocol downgrade.
         """
+        if pytest.saltyrtc.external_server:
+            return
+
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -296,7 +301,7 @@ class TestProtocol:
         monkeypatch.setattr(server, 'subprotocols', subprotocols)
 
         # client-auth
-        cck, ccsn = cookie, 2 ** 32 - 1
+        cck, ccsn = cookie_factory(), 2 ** 32 - 1
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': sck,
@@ -311,7 +316,7 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_initiator_handshake(
-            self, cookie, initiator_key, pack_nonce, client_factory
+            self, cookie_factory, initiator_key, pack_nonce, client_factory
     ):
         """
         Check that we can do a complete handshake for an initiator.
@@ -324,7 +329,7 @@ class TestProtocol:
         client.box = libnacl.public.Box(sk=initiator_key, pk=ssk)
 
         # client-auth
-        cck, ccsn = cookie, 2**32 - 1
+        cck, ccsn = cookie_factory(), 2**32 - 1
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-auth',
             'your_cookie': sck,
@@ -352,7 +357,7 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_responder_handshake(
-            self, cookie, responder_key, pack_nonce, client_factory
+            self, cookie_factory, responder_key, pack_nonce, client_factory
     ):
         """
         Check that we can do a complete handshake for a responder.
@@ -364,7 +369,7 @@ class TestProtocol:
         ssk = message['key']
 
         # client-hello
-        cck, ccsn = cookie, 2**32 - 1
+        cck, ccsn = cookie_factory(), 2**32 - 1
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-hello',
             'key': responder_key.pk,
@@ -787,24 +792,65 @@ class TestProtocol:
         yield from second_responder.close()
 
     @pytest.mark.asyncio
-    def test_relay_unencrypted(self, pack_nonce, client_factory):
+    def test_relay_errors(
+            self, sleep, pack_nonce, cookie_factory, client_factory
+    ):
+        """
+        Try sending relay messages to:
+        1. An unregistered but valid destination
+        2. An invalid destination
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 65424
+        i['rcck'] = cookie_factory()
+
+        # Send relay message to an unregistered destination
+        nonce = pack_nonce(i['rcck'], i['id'], 0x02, i['rccsn'])
+        data = yield from initiator.send(nonce, {
+            'type': 'meow?',
+        }, box=None)
+
+        # Receive send-error message: initiator <-- initiator
+        message, _, sck, s, d, scsn = yield from initiator.recv()
+        assert s == 0x00
+        assert d == i['id']
+        assert sck == i['sck']
+        assert scsn == i['start_scsn'] + 2
+        assert message['type'] == 'send-error'
+        assert message['id'] == data[16:]
+
+        # Send relay message to an invalid destination
+        yield from initiator.send(pack_nonce(i['rcck'], i['id'], 0x01, i['rccsn']), {
+            'type': 'h3h3-pwnz',
+        }, box=None)
+
+        # Expect protocol error
+        yield from sleep()
+        assert not initiator.ws_client.open
+        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+    @pytest.mark.asyncio
+    def test_relay_unencrypted(self, pack_nonce, cookie_factory, client_factory):
         """
         Check that the initiator and responder can communicate raw
         messages with each other (not encrypted).
         """
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
-        i['rccsn'] = 2 ** 32 - 1
+        i['rccsn'] = 98798984
+        i['rcck'] = cookie_factory()
 
         # Responder handshake
         responder, r = yield from client_factory(responder_handshake=True)
         r['iccsn'] = 2 ** 24
+        r['icck'] = cookie_factory()
 
         # new-responder
         yield from initiator.recv()
 
         # Send relay message: initiator --> responder
-        yield from initiator.send(pack_nonce(i['cck'], i['id'], r['id'], i['rccsn']), {
+        yield from initiator.send(pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn']), {
             'type': 'meow',
             'rawr': True,
         }, box=None)
@@ -812,7 +858,7 @@ class TestProtocol:
 
         # Receive relay message: initiator --> responder
         message, _, ck, s, d, csn = yield from responder.recv(box=None)
-        assert ck == i['cck']
+        assert ck == i['rcck']
         assert s == i['id']
         assert d == r['id']
         assert csn == i['rccsn'] - 1
@@ -820,7 +866,7 @@ class TestProtocol:
         assert message['rawr']
 
         # Send relay message: initiator <-- responder
-        yield from responder.send(pack_nonce(r['cck'], r['id'], i['id'], r['iccsn']), {
+        yield from responder.send(pack_nonce(r['icck'], r['id'], i['id'], r['iccsn']), {
             'type': 'meow',
             'rawr': False,
         }, box=None)
@@ -828,7 +874,7 @@ class TestProtocol:
 
         # Receive relay message: initiator <-- responder
         message, _, ck, s, d, csn = yield from initiator.recv(box=None)
-        assert ck == r['cck']
+        assert ck == r['icck']
         assert s == r['id']
         assert d == i['id']
         assert csn == r['iccsn'] - 1
@@ -841,7 +887,7 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_relay_encrypted(
-            self, initiator_key, responder_key, pack_nonce, client_factory
+            self, initiator_key, responder_key, pack_nonce, cookie_factory, client_factory
     ):
         """
         Check that the initiator and responder can communicate raw
@@ -849,19 +895,21 @@ class TestProtocol:
         """
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
-        i['rccsn'] = 2 ** 32 - 1
+        i['rccsn'] = 456987
+        i['rcck'] = cookie_factory()
         i['rbox'] = libnacl.public.Box(sk=initiator_key, pk=responder_key.pk)
 
         # Responder handshake
         responder, r = yield from client_factory(responder_handshake=True)
         r['iccsn'] = 2 ** 24
+        r['icck'] = cookie_factory()
         r['ibox'] = libnacl.public.Box(sk=responder_key, pk=initiator_key.pk)
 
         # new-responder
         yield from initiator.recv()
 
         # Send relay message: initiator --> responder
-        yield from initiator.send(pack_nonce(i['cck'], i['id'], r['id'], i['rccsn']), {
+        yield from initiator.send(pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn']), {
             'type': 'meow',
             'rawr': True,
         }, box=i['rbox'])
@@ -869,7 +917,7 @@ class TestProtocol:
 
         # Receive relay message: initiator --> responder
         message, _, ck, s, d, csn = yield from responder.recv(box=r['ibox'])
-        assert ck == i['cck']
+        assert ck == i['rcck']
         assert s == i['id']
         assert d == r['id']
         assert csn == i['rccsn'] - 1
@@ -877,7 +925,7 @@ class TestProtocol:
         assert message['rawr']
 
         # Send relay message: initiator <-- responder
-        yield from responder.send(pack_nonce(r['cck'], r['id'], i['id'], r['iccsn']), {
+        yield from responder.send(pack_nonce(r['icck'], r['id'], i['id'], r['iccsn']), {
             'type': 'meow',
             'rawr': False,
         }, box=r['ibox'])
@@ -885,7 +933,7 @@ class TestProtocol:
 
         # Receive relay message: initiator <-- responder
         message, _, ck, s, d, csn = yield from initiator.recv(box=i['rbox'])
-        assert ck == r['cck']
+        assert ck == r['icck']
         assert s == r['id']
         assert d == i['id']
         assert csn == r['iccsn'] - 1
@@ -898,7 +946,7 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_relay_receiver_offline(
-            self, pack_nonce, client_factory
+            self, pack_nonce, cookie_factory, client_factory
     ):
         """
         Check that the server responds with a `send-error` message in
@@ -906,10 +954,12 @@ class TestProtocol:
         """
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
-        i['rccsn'] = 2 ** 32 - 1
+        i['rccsn'] = 5846
+        i['rcck'] = cookie_factory()
 
         # Send relay message: initiator --> responder (offline)
-        data = yield from initiator.send(pack_nonce(i['cck'], i['id'], 0x02, i['rccsn']), {
+        nonce = pack_nonce(i['rcck'], i['id'], 0x02, i['rccsn'])
+        data = yield from initiator.send(nonce, {
             'type': 'meow',
             'rawr': True,
         }, box=None)
@@ -926,6 +976,183 @@ class TestProtocol:
 
         # Bye
         yield from initiator.close()
+
+    @pytest.mark.asyncio
+    def test_peer_csn_in_overflow(
+            self, sleep, pack_nonce, cookie_factory, client_factory, server
+    ):
+        """
+        Check that the server does not validate the CSN for relay
+        messages. It MUST ignore:
+        1. Going back in time (a decreased peer CSN)
+        2. A CSN that would create an overflow
+        3. A repeated CSN
+        """
+        if pytest.saltyrtc.external_server:
+            return
+
+        # Initiator handshake
+        initiator, i = yield from client_factory(csn=0, initiator_handshake=True)
+        i['rccsn'] = 2578  # Start peer CSN
+        i['rcck'] = cookie_factory()
+
+        # Patch server's combined sequence number of the initiator instance
+        assert len(server.protocols) == 1
+        protocol = next(iter(server.protocols))
+        protocol.client.combined_sequence_number_in = 2 ** 48 - 1
+        assert isinstance(protocol.client.combined_sequence_number_in, int)
+        protocol.client.combined_sequence_number_in += 1
+        assert not isinstance(protocol.client.combined_sequence_number_in, int)
+        i['ccsn'] = 0  # Invalid!
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 24
+        r['icck'] = cookie_factory()
+
+        # new-responder
+        yield from initiator.recv()
+
+        # Send relay message: initiator --> responder
+        yield from initiator.send(pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn']), {
+            'type': 'meow',
+        }, box=None)
+        i['rccsn'] += 1
+
+        # Receive relay message: initiator --> responder
+        message, _, ck, s, d, csn = yield from responder.recv(box=None)
+        assert ck == i['rcck']
+        assert s == i['id']
+        assert d == r['id']
+        assert csn == i['rccsn'] - 1
+        assert message['type'] == 'meow'
+
+        # Send relay message: initiator --> responder
+        i['rccsn'] = 0  # Going back in time
+        yield from initiator.send(pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn']), {
+            'type': 'rawr',
+        }, box=None)
+
+        # Receive relay message: initiator --> responder
+        message, _, ck, s, d, csn = yield from responder.recv(box=None)
+        assert ck == i['rcck']
+        assert s == i['id']
+        assert d == r['id']
+        assert csn == i['rccsn']
+        assert message['type'] == 'rawr'
+
+        # Send relay message: initiator --> responder
+        i['rccsn'] = 2 ** 48 - 1  # This would create an overflow sentinel
+        yield from initiator.send(pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn']), {
+            'type': 'rawr',
+        }, box=None)
+
+        # Receive relay message: initiator --> responder
+        message, _, ck, s, d, csn = yield from responder.recv(box=None)
+        assert ck == i['rcck']
+        assert s == i['id']
+        assert d == r['id']
+        assert csn == i['rccsn']
+        assert message['type'] == 'rawr'
+
+        # Send relay message: initiator --> responder
+        i['rccsn'] = 2 ** 48 - 1  # This would create an overflow sentinel, also repeated
+        yield from initiator.send(pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn']), {
+            'type': 'arrrrrrrr',
+        }, box=None)
+
+        # Receive relay message: initiator --> responder
+        message, _, ck, s, d, csn = yield from responder.recv(box=None)
+        assert ck == i['rcck']
+        assert s == i['id']
+        assert d == r['id']
+        assert csn == i['rccsn']
+        assert message['type'] == 'arrrrrrrr'
+
+        # Increase CSN (Overflow sentinel is set, client should be dropped)
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': 0x02,
+        })
+
+        # Expect protocol error
+        yield from sleep()
+        assert not initiator.ws_client.open
+        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+        # Bye
+        yield from responder.close()
+
+    @pytest.mark.asyncio
+    def test_peer_csn_out_overflow(
+            self, sleep, pack_nonce, server, client_factory, cookie_factory
+    ):
+        """
+        Check that the server does not take its own CSN for outgoing
+        messages into account when relaying a message.
+        """
+        if pytest.saltyrtc.external_server:
+            return
+
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 50217
+        i['rcck'] = cookie_factory()
+
+        # Patch server's combined sequence number of the initiator instance
+        assert len(server.protocols) == 1
+        i_protocol = next(iter(server.protocols))
+        i_protocol.client.combined_sequence_number_out = 2 ** 48 - 1
+
+        # Connect a new responder
+        first_responder, r1 = yield from client_factory(responder_handshake=True)
+        r1['iccsn'] = 2 ** 24
+        r1['icck'] = cookie_factory()
+
+        # Patch server's combined sequence number of the responder instance
+        assert len(server.protocols) == 2
+        r1_protocol = None
+        for protocol in server.protocols:
+            if protocol != i_protocol:
+                r1_protocol = protocol
+                break
+        r1_protocol.client.combined_sequence_number_out = 2 ** 48 - 1
+        assert isinstance(r1_protocol.client.combined_sequence_number_out, int)
+        r1_protocol.client.combined_sequence_number_out += 1
+        assert not isinstance(r1_protocol.client.combined_sequence_number_out, int)
+
+        # new-responder
+        message, _, sck, s, d, scsn = yield from initiator.recv()
+        assert s == 0x00
+        assert d == i['id']
+        assert i['sck'] == sck
+        assert scsn == 2 ** 48 - 1
+        assert message['id'] == r1['id']
+
+        # Send relay message: initiator --> responder
+        yield from initiator.send(pack_nonce(i['rcck'], i['id'], r1['id'], i['rccsn']), {
+            'type': 'rawr',
+        }, box=None)
+
+        # Receive relay message: initiator --> responder
+        message, _, ck, s, d, csn = yield from first_responder.recv(box=None)
+        assert ck == i['rcck']
+        assert s == i['id']
+        assert d == r1['id']
+        assert csn == i['rccsn']
+        assert message['type'] == 'rawr'
+
+        # Connect a new responder
+        second_responder, r = yield from client_factory(responder_handshake=True)
+
+        # Expect protocol error
+        yield from sleep()
+        assert not initiator.ws_client.open
+        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+
+        # Bye
+        yield from first_responder.close()
+        yield from second_responder.close()
 
     @pytest.mark.asyncio
     def test_path_full(self, event_loop, client_factory):
