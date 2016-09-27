@@ -1,7 +1,7 @@
 #!/bin/bash
 set -ev
 
-if [ -d "${HOME}/libsodium" ]; then
+if [ -d "${HOME}/libsodium/lib" ]; then
     exit 0;
 fi
 
