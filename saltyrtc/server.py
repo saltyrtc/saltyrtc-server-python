@@ -1,5 +1,6 @@
 import asyncio
 import binascii
+import inspect
 
 import websockets
 
@@ -105,6 +106,20 @@ class ServerProtocol(Protocol):
 
         # Handler task that is set after 'connection_made' has been called
         self.handler_task = None
+
+        # Determine subprotocol selection function
+        # Might be a static method, might be a normal method, see
+        # https://github.com/aaugustin/websockets/pull/132
+        protocol = websockets.WebSocketServerProtocol
+        select_subprotocol = inspect.getattr_static(protocol, 'select_subprotocol')
+        if isinstance(select_subprotocol, staticmethod):
+            self._select_subprotocol = protocol.select_subprotocol
+        else:
+            def _select_subprotocol(client_subprotocols, server_subprotocols):
+                # noinspection PyTypeChecker
+                return protocol.select_subprotocol(
+                    None, client_subprotocols, server_subprotocols)
+            self._select_subprotocol = _select_subprotocol
 
     def connection_made(self, connection, ws_path):
         self.handler_task = self._loop.create_task(self.handler(connection, ws_path))
@@ -504,12 +519,8 @@ class ServerProtocol(Protocol):
         self.client.log.debug(
             'Checking for subprotocol downgrade, client: {}, server: {}',
             client_subprotocols, self._server.subprotocols)
-        server_subprotocols = set(self._server.subprotocols)
-        chosen = (proto for proto in client_subprotocols if proto in server_subprotocols)
-        try:
-            chosen = next(chosen)
-        except StopIteration:
-            raise MessageError('No common subprotocol found')
+        chosen = self._select_subprotocol(
+            client_subprotocols, self._server.subprotocols)
         if chosen != self.subprotocol.value:
             raise DowngradeError('Subprotocol downgrade detected')
 

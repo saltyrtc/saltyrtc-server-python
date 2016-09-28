@@ -20,7 +20,6 @@ from .common import (
 )
 from .message import (
     unpack,
-    AbstractMessage,
 )
 
 __all__ = (
