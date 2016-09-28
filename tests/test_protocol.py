@@ -297,7 +297,7 @@ class TestProtocol:
         client.box = libnacl.public.Box(sk=initiator_key, pk=message['key'])
 
         # Patch server's list of subprotocols
-        subprotocols = pytest.saltyrtc.subprotocols + ['v1.meow.lolcats.org']
+        subprotocols = ['v1.meow.lolcats.org'] + pytest.saltyrtc.subprotocols
         monkeypatch.setattr(server, 'subprotocols', subprotocols)
 
         # client-auth
