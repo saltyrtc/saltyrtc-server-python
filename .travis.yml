@@ -15,22 +15,22 @@ before_cache:
 language: python
 matrix:
   include:
+  - python: "3.3"
+    env: EVENT_LOOP=asyncio
   - python: "3.4"
     env: EVENT_LOOP=asyncio
   - python: "3.5"
     env: EVENT_LOOP=asyncio
   - python: "3.5"
     env: EVENT_LOOP=uvloop
-    before_script: pip install uvloop
+    before_script: pip install ".[uvloop]"
 
 # Install dependencies
 before_install:
   - ./.travis-install-libsodium.sh
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
 install:
-  - pip install .
-  - pip install logbook
-  - pip install pytest-asyncio pytest-cov
+  - pip install ".[tests]"
   - pip install codecov
 
 # Run tests
