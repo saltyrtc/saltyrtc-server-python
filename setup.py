@@ -26,8 +26,8 @@ if py_version < (3, 3):
 
 # Test requirements
 tests_require = [
-    'pytest>=2.8.7',
-    'pytest-asyncio>=0.3.0',
+    'pytest>=3.0.2',
+    'pytest-asyncio>=0.5.0',
     'logbook>=1.0.0'
 ],
 
@@ -36,11 +36,10 @@ setup(
     version=get_version(),
     packages=find_packages(),
     install_requires=[
-        'streql>=3.0.2',
-        'libnacl>=1.4.4',
-        'click>=6.3',
-        'websockets>=3.0',
-        'u-msgpack-python>=2.1',
+        'libnacl>=1.5.0',
+        'click>=6.6',
+        'websockets>=3.2',
+        'u-msgpack-python>=2.2',
     ],
     tests_require=tests_require,
     extras_require={

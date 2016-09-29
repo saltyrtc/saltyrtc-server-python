@@ -30,7 +30,7 @@ before_install:
   - ./.travis-install-libsodium.sh
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
 install:
-  - pip install -U setuptools
+  - pip install -U setuptools pip
   - "pip install .[tests]"
   - pip install codecov
 
