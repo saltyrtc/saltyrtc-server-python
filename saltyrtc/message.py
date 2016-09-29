@@ -7,11 +7,24 @@ import struct
 import umsgpack
 
 from .common import sign_keys as sign_keys_
-from .common import (COOKIE_LENGTH, NONCE_FORMATTER, NONCE_LENGTH, AddressType, CloseCode,
-                     MessageType, OverflowSentinel, validate_cookie, validate_drop_reason,
-                     validate_hash, validate_initiator_connected, validate_public_key,
-                     validate_responder_id, validate_responder_ids, validate_signed_keys,
-                     validate_subprotocols)
+from .common import (
+    COOKIE_LENGTH,
+    NONCE_FORMATTER,
+    NONCE_LENGTH,
+    AddressType,
+    CloseCode,
+    MessageType,
+    OverflowSentinel,
+    validate_cookie,
+    validate_drop_reason,
+    validate_hash,
+    validate_initiator_connected,
+    validate_public_key,
+    validate_responder_id,
+    validate_responder_ids,
+    validate_signed_keys,
+    validate_subprotocols
+)
 from .exception import MessageError, MessageFlowError
 
 __all__ = (

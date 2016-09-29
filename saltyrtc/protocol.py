@@ -7,9 +7,16 @@ import libnacl.public
 import websockets
 
 from . import util
-from .common import (KEEP_ALIVE_INTERVAL, KEEP_ALIVE_TIMEOUT, KEY_LENGTH, AddressType,
-                     OverflowSentinel, available_slot_range, is_initiator_id,
-                     is_responder_id)
+from .common import (
+    KEEP_ALIVE_INTERVAL,
+    KEEP_ALIVE_TIMEOUT,
+    KEY_LENGTH,
+    AddressType,
+    OverflowSentinel,
+    available_slot_range,
+    is_initiator_id,
+    is_responder_id
+)
 from .exception import Disconnected, MessageError, MessageFlowError, SlotsFullError
 from .message import unpack
 

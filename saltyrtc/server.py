@@ -6,10 +6,24 @@ import websockets
 
 from . import util
 from .common import RELAY_TIMEOUT, AddressType, CloseCode, MessageType, SubProtocol
-from .exception import (Disconnected, DowngradeError, MessageError, MessageFlowError,
-                        PathError, PingTimeoutError, SignalingError, SlotsFullError)
-from .message import (NewInitiatorMessage, NewResponderMessage, RawMessage,
-                      SendErrorMessage, ServerAuthMessage, ServerHelloMessage)
+from .exception import (
+    Disconnected,
+    DowngradeError,
+    MessageError,
+    MessageFlowError,
+    PathError,
+    PingTimeoutError,
+    SignalingError,
+    SlotsFullError
+)
+from .message import (
+    NewInitiatorMessage,
+    NewResponderMessage,
+    RawMessage,
+    SendErrorMessage,
+    ServerAuthMessage,
+    ServerHelloMessage
+)
 from .protocol import Path, PathClient, Protocol
 
 __all__ = (
