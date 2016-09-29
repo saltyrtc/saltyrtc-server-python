@@ -22,7 +22,7 @@ __all__ = (
 
 # noinspection PyUnusedLocal,PyPropertyDefinition
 def _logging_error(*args, **kwargs):
-    raise ImportError('Please install logbook>=0.12.5 for logging support')
+    raise ImportError('Please install saltyrtc[logging] for logging support')
 
 try:
     # noinspection PyPackageRequirements,PyUnresolvedReferences
