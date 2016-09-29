@@ -28,7 +28,8 @@ if py_version < (3, 3):
 tests_require = [
     'pytest>=3.0.2',
     'pytest-asyncio>=0.5.0',
-    'logbook>=1.0.0'
+    'pytest-cov>=2.3.1',
+    'logbook>=1.0.0',
 ],
 
 setup(
