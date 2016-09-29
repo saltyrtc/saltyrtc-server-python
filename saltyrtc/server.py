@@ -5,7 +5,16 @@ import inspect
 import websockets
 
 from . import util
-from .exception import *
+from .exception import (
+    SignalingError,
+    PathError,
+    SlotsFullError,
+    MessageFlowError,
+    PingTimeoutError,
+    Disconnected,
+    MessageError,
+    DowngradeError,
+)
 from .common import (
     RELAY_TIMEOUT,
     SubProtocol,
@@ -206,7 +215,7 @@ class ServerProtocol(Protocol):
         SlotsFullError
         DowngradeError
         """
-        path, client = self.path, self.client
+        client = self.client
 
         # Do handshake
         client.log.debug('Starting handshake')
@@ -260,7 +269,7 @@ class ServerProtocol(Protocol):
         SlotsFullError
         DowngradeError
         """
-        path, client = self.path, self.client
+        client = self.client
 
         # Send server-hello
         message = ServerHelloMessage.create(
@@ -373,7 +382,7 @@ class ServerProtocol(Protocol):
 
     @asyncio.coroutine
     def task_loop(self):
-        path, client = self.path, self.client
+        client = self.client
         while not client.connection_closed.done():
             # Get a task from the queue
             task = yield from client.dequeue_task()
@@ -436,7 +445,7 @@ class ServerProtocol(Protocol):
 
     @asyncio.coroutine
     def relay_message(self, destination, destination_id, message):
-        path, source = self.path, self.client
+        source = self.client
 
         # Prepare message
         source.log.debug('Packing relay message')
@@ -487,7 +496,7 @@ class ServerProtocol(Protocol):
         Disconnected
         PingTimeoutError
         """
-        path, client = self.path, self.client
+        client = self.client
         while not client.connection_closed.done():
             # Wait
             yield from asyncio.sleep(client.keep_alive_interval, loop=self._loop)

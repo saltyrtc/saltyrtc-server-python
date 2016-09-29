@@ -2,7 +2,7 @@ import ast
 import os
 import sys
 
-from setuptools import setup, find_packages
+from setuptools import setup
 
 
 def get_version():
@@ -30,12 +30,14 @@ tests_require = [
     'pytest-asyncio>=0.5.0',
     'pytest-cov>=2.3.1',
     'logbook>=1.0.0',
+    'flake8>=3.0.4',
+    'isort>=4.2.5',
 ],
 
 setup(
     name='saltyrtc',
     version=get_version(),
-    packages=find_packages(),
+    packages='saltyrtc',
     install_requires=[
         'libnacl>=1.5.0',
         'click>=6.6',

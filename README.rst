@@ -1,7 +1,7 @@
 SaltyRTC Signalling Server
 ==========================
 
-|Travis| |codecov|
+|Travis| |codecov| |PyPI|
 
 This is a SaltyRTC server implementation for Python 3.4+ using
 `asyncio`_.
@@ -63,6 +63,11 @@ Command Line Usage
 
 TODO
 
+Documentation
+*************
+
+TODO
+
 .. _asyncio: https://docs.python.org/3/library/asyncio.html
 .. _venv: https://docs.python.org/3/library/venv.html
 .. _virtualenvwrapper: https://virtualenvwrapper.readthedocs.io/
@@ -72,3 +77,5 @@ TODO
    :target: https://travis-ci.org/saltyrtc/saltyrtc-server-python
 .. |codecov| image:: https://codecov.io/gh/saltyrtc/saltyrtc-server-python/branch/master/graph/badge.svg
    :target: https://codecov.io/gh/saltyrtc/saltyrtc-server-python
+.. |PyPI| image:: https://badge.fury.io/py/saltyrtc.svg
+   :target: https://badge.fury.io/py/saltyrtc

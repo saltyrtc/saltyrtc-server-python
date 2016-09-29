@@ -7,7 +7,12 @@ import libnacl
 import libnacl.public
 
 from . import util
-from .exception import *
+from .exception import (
+    SlotsFullError,
+    MessageFlowError,
+    Disconnected,
+    MessageError,
+)
 from .common import (
     KEY_LENGTH,
     KEEP_ALIVE_INTERVAL,

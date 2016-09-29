@@ -6,7 +6,10 @@ import binascii
 # noinspection PyPackageRequirements
 import umsgpack
 
-from .exception import *
+from .exception import (
+    MessageFlowError,
+    MessageError,
+)
 from .common import (
     NONCE_LENGTH,
     NONCE_FORMATTER,
