@@ -71,7 +71,7 @@ TODO
 .. _asyncio: https://docs.python.org/3/library/asyncio.html
 .. _venv: https://docs.python.org/3/library/venv.html
 .. _virtualenvwrapper: https://virtualenvwrapper.readthedocs.io/
-.. _install ``libsodium``: https://download.libsodium.org/doc/installation/index.html
+.. _libsodium: https://download.libsodium.org/doc/installation/index.html
 
 .. |Travis| image:: https://travis-ci.org/saltyrtc/saltyrtc-server-python.svg?branch=master
    :target: https://travis-ci.org/saltyrtc/saltyrtc-server-python
