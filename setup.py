@@ -37,6 +37,7 @@ tests_require = [
     'flake8>=3.0.4',
     'isort>=4.2.5',
     'collective.checkdocs>=0.2',
+    'Pygments>=2.1.3'  # required by checkdocs
 ],
 
 setup(
