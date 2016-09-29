@@ -1,12 +1,16 @@
 """
 The command line interface for the SaltyRTC signalling server.
 """
-import click
 import os
 
+import click
+
 from saltyrtc import __version__ as _version
-from saltyrtc import server, util
-from saltyrtc.util import aio_serve
+from saltyrtc import server  # noqa
+from saltyrtc import (
+    aio_serve,
+    enable_logging,
+)
 
 
 @click.group()
@@ -35,8 +39,8 @@ CERTFILE if not present.
 """)
 @aio_serve
 def serve(**arguments):
-    certfile = arguments.get('cert')
-    keyfile = arguments.get('keyfile', None)
+    certfile = arguments.get('cert')  # noqa
+    keyfile = arguments.get('keyfile', None)  # noqa
     raise NotImplementedError
     # yield from server.start_server(
     #     certfile=certfile, keyfile=keyfile
@@ -52,7 +56,7 @@ def main():
     os.environ['PYTHONASYNCIODEBUG'] = '1'
 
     # Enable logging
-    util.enable_logging(level=logbook.TRACE, redirect_loggers={
+    enable_logging(level=logbook.TRACE, redirect_loggers={
         'asyncio': logbook.DEBUG,
         'websockets': logbook.DEBUG,
     })
