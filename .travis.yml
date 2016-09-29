@@ -29,7 +29,7 @@ before_install:
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
 install:
   - pip install -U setuptools pip
-  - "pip install .[tests]"
+  - "pip install .[test]"
   - pip install codecov
 
 # Run tests

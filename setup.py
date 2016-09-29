@@ -45,7 +45,7 @@ setup(
     tests_require=tests_require,
     extras_require={
         ':python_version<="3.4"': ['asyncio>=3.4.3'],
-        'tests': tests_require,
+        'test': tests_require,
         'logging': ['logbook>=1.0.0'],
         'uvloop': ['uvloop>=0.5.3'],
     },
@@ -56,8 +56,8 @@ setup(
     author_email='lennart.grahl@gmail.com',
     description='A SaltyRTC compliant signalling server.',
     long_description=long_description,
-    license='MIT License',
-    keywords='webrtc ortc signalling signaling websocket websockets nacl',
+    license='MIT',
+    keywords='saltyrtc webrtc ortc signalling signaling websocket websockets nacl',
     url='https://github.com/saltyrtc/saltyrtc-server-python',
     classifiers=[
         'Development Status :: 4 - Beta',
