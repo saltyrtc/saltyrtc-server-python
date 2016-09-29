@@ -53,7 +53,7 @@ Install the module by running:
 
 .. code-block:: bash
 
-    $ pip install git+https://github.com/saltyrtc/saltyrtc-server-python.git
+    $ pip install saltyrtc
 
 The dependency ``libnacl`` will be installed automatically. However, you
 may need to install `libsodium`_ for ``libnacl`` to work.
