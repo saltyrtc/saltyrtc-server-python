@@ -50,6 +50,11 @@ setup(
         'uvloop': ['uvloop>=0.5.3'],
     },
     include_package_data=True,
+    entry_points={
+        'console_scripts': [
+            'saltyrtc-server = saltyrtc.bin.server:main',
+        ],
+    },
 
     # PyPI metadata
     author='Lennart Grahl',

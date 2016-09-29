@@ -1,31 +1,12 @@
-#!/usr/bin/env python3
 """
 The command line interface for the SaltyRTC signalling server.
 """
-import functools
-import asyncio
-
 import click
+import os
 
-from saltyrtc.server import __version__ as _version
-from saltyrtc import server
-
-
-def aio_run(func, run_forever=False):
-    func = asyncio.coroutine(func)
-
-    def _wrapper(*args, **kwargs):
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(func(*args, **kwargs))
-        loop.run_until_complete(task)
-        if run_forever:
-            loop.run_forever()
-        return task.result()
-    return functools.update_wrapper(_wrapper, func)
-
-
-def aio_serve(func):
-    return aio_run(func, run_forever=True)
+from saltyrtc import __version__ as _version
+from saltyrtc import server, util
+from saltyrtc.util import aio_serve
 
 
 @click.group()
@@ -56,15 +37,32 @@ CERTFILE if not present.
 def serve(**arguments):
     certfile = arguments.get('cert')
     keyfile = arguments.get('keyfile', None)
-    yield from server.start_server(
-        certfile=certfile, keyfile=keyfile
-    )
+    raise NotImplementedError
+    # yield from server.start_server(
+    #     certfile=certfile, keyfile=keyfile
+    # )
 
 
-if __name__ == '__main__':
-    with server.logging_handler.applicationbound():
+def main():
+    # TODO: Read keys from export if set (see restartable.py)
+    # TODO: Add *logging* option
+    import logbook.more
+
+    # Enable asyncio debug logging
+    os.environ['PYTHONASYNCIODEBUG'] = '1'
+
+    # Enable logging
+    util.enable_logging(level=logbook.TRACE, redirect_loggers={
+        'asyncio': logbook.DEBUG,
+        'websockets': logbook.DEBUG,
+    })
+
+    # Run 'main'
+    logging_handler = logbook.more.ColorizedStderrHandler()
+    with logging_handler.applicationbound():
         try:
             cli()
         except Exception as exc:
             click.echo('An error occurred:', err=True)
             click.echo(exc, err=True)
+            raise
