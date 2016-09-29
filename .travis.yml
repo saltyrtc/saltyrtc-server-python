@@ -32,8 +32,9 @@ install:
   - "pip install .[test]"
   - pip install codecov
 
-# Run tests
+# Run flake8 & tests
 script:
+  - flake8 saltyrtc/
   - py.test --cov-config .coveragerc --cov=saltyrtc --loop=$EVENT_LOOP
 
 # After success
