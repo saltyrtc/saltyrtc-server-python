@@ -17,7 +17,7 @@ def get_version():
 os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 
 # Import long description
-long_description = open(os.path.join(os.path.dirname(__file__), 'README.md')).read()
+long_description = open(os.path.join(os.path.dirname(__file__), 'README.rst')).read()
 
 # Check python version
 py_version = sys.version_info[:2]
