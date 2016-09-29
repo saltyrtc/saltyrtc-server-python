@@ -2,11 +2,11 @@
 This module provides utility functions for the SaltyRTC Signalling
 Server.
 """
+import asyncio
+import binascii
+import functools
 import logging
 import ssl
-import binascii
-import asyncio
-import functools
 
 import libnacl
 import libnacl.public
