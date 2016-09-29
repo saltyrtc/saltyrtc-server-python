@@ -35,7 +35,7 @@ install:
 # Run flake8, isort & tests
 script:
   - flake8 .
-  - isort -rc -c .
+  - isort -rc -c . || (isort -rc -df . && return 1)
   - py.test --cov-config .coveragerc --cov=saltyrtc --loop=$EVENT_LOOP
 
 # After success

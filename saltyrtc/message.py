@@ -23,9 +23,12 @@ from .common import (
     validate_responder_id,
     validate_responder_ids,
     validate_signed_keys,
-    validate_subprotocols
+    validate_subprotocols,
 )
-from .exception import MessageError, MessageFlowError
+from .exception import (
+    MessageError,
+    MessageFlowError,
+)
 
 __all__ = (
     'unpack',

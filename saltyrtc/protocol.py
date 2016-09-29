@@ -15,9 +15,14 @@ from .common import (
     OverflowSentinel,
     available_slot_range,
     is_initiator_id,
-    is_responder_id
+    is_responder_id,
 )
-from .exception import Disconnected, MessageError, MessageFlowError, SlotsFullError
+from .exception import (
+    Disconnected,
+    MessageError,
+    MessageFlowError,
+    SlotsFullError,
+)
 from .message import unpack
 
 __all__ = (
