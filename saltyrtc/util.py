@@ -2,9 +2,11 @@
 This module provides utility functions for the SaltyRTC Signalling
 Server.
 """
-import binascii
 import logging
 import ssl
+import binascii
+import asyncio
+import functools
 
 import libnacl
 import libnacl.public
@@ -17,6 +19,8 @@ __all__ = (
     'consteq',
     'create_ssl_context',
     'load_permanent_key',
+    'aio_run',
+    'aio_serve',
 )
 
 
@@ -228,3 +232,43 @@ def load_permanent_key(key):
 
     # Convert to private key (raises ValueError on its own)
     return libnacl.public.SecretKey(sk=key)
+
+
+def aio_run(func, loop=None, run_forever=False):
+    """
+    A decorator that can be applied to asyncio coroutines to run the
+    coroutine until it completes.
+
+    Arguments:
+        - `loop`: A :class:`asyncio.BaseEventLoop` instance or `None`
+          if the default event loop should be used.
+        - `run_forever`: If set to `False`, the event loop will run the
+          decorated coroutine and stop afterwards. Set to `True` and the
+          event loop will continue running forever.
+
+    Return the decorated function.
+    """
+    func = asyncio.coroutine(func)
+
+    def _wrapper(*args, **kwargs):
+        loop_ = asyncio.get_event_loop() if loop is None else loop
+        task = loop_.create_task(func(*args, **kwargs))
+        loop_.run_until_complete(task)
+        if run_forever:
+            loop_.run_forever()
+        return task.result()
+    return functools.update_wrapper(_wrapper, func)
+
+
+def aio_serve(func, loop=None):
+    """
+    A decorator that can be applied to asyncio coroutines. Different to
+    :func:`aio_run` it will run *forever*.
+
+    Arguments:
+        - `loop`: A :class:`asyncio.BaseEventLoop` instance or `None`
+          if the default event loop should be used.
+
+    Return the decorated function.
+    """
+    return aio_run(func, loop=loop, run_forever=True)

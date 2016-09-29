@@ -60,7 +60,8 @@ def serve(ssl_context, key, paths=None, host=None, port=8765, loop=None):
           Defaults to all interfaces.
         - `port`: The port the client should connect to. Defaults to
           `8765`.
-        - `loop`: A :class:`asyncio.BaseEventLoop` instance.
+        - `loop`: A :class:`asyncio.BaseEventLoop` instance or `None`
+          if the default event loop should be used.
 
 
     """
