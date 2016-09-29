@@ -44,6 +44,7 @@ setup(
     ],
     tests_require=tests_require,
     extras_require={
+        ':python_version=="3.3"': ['enum34>=1.1.6'],
         ':python_version<="3.4"': ['asyncio>=3.4.3'],
         'tests': tests_require,
         'logging': ['logbook>=1.0.0'],
