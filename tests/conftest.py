@@ -1,18 +1,17 @@
-import socket
 import asyncio
 import os
+import socket
 import ssl
 import struct
+from contextlib import closing
 
-import pytest
-import websockets
-import umsgpack
 import libnacl.public
 import logbook
+import pytest
+import umsgpack
+import websockets
 
 import saltyrtc
-
-from contextlib import closing
 
 
 def pytest_addoption(parser):

@@ -2,25 +2,28 @@ import asyncio
 import os
 import struct
 
-import websockets
 import libnacl
 import libnacl.public
+import websockets
 
 from . import util
-from .exception import *
 from .common import (
-    KEY_LENGTH,
     KEEP_ALIVE_INTERVAL,
     KEEP_ALIVE_TIMEOUT,
-    OverflowSentinel,
+    KEY_LENGTH,
     AddressType,
+    OverflowSentinel,
     available_slot_range,
     is_initiator_id,
     is_responder_id,
 )
-from .message import (
-    unpack,
+from .exception import (
+    Disconnected,
+    MessageError,
+    MessageFlowError,
+    SlotsFullError,
 )
+from .message import unpack
 
 __all__ = (
     'Path',

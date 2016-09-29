@@ -2,7 +2,7 @@ import ast
 import os
 import sys
 
-from setuptools import setup, find_packages
+from setuptools import setup
 
 
 def get_version():
@@ -13,11 +13,15 @@ def get_version():
                 _, value = line.split('=', maxsplit=1)
                 return ast.literal_eval(value.strip())
 
+
+def read(file):
+    return open(os.path.join(os.path.dirname(__file__), file)).read().strip()
+
 # Allow setup.py to be run from any path
 os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 
 # Import long description
-long_description = open(os.path.join(os.path.dirname(__file__), 'README.md')).read()
+long_description = '\n\n'.join((read('README.rst'), read('CHANGELOG.rst')))
 
 # Check python version
 py_version = sys.version_info[:2]
@@ -30,12 +34,16 @@ tests_require = [
     'pytest-asyncio>=0.5.0',
     'pytest-cov>=2.3.1',
     'logbook>=1.0.0',
+    'flake8>=3.0.4',
+    'isort>=4.2.5',
+    'collective.checkdocs>=0.2',
+    'Pygments>=2.1.3'  # required by checkdocs
 ],
 
 setup(
     name='saltyrtc',
     version=get_version(),
-    packages=find_packages(),
+    packages=['saltyrtc'],
     install_requires=[
         'libnacl>=1.5.0',
         'click>=6.6',
