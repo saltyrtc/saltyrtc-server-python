@@ -6,9 +6,8 @@ import logging
 import ssl
 import binascii
 
+import libnacl
 import libnacl.public
-
-from streql import equals as _equals
 
 __all__ = (
     'logger_group',
@@ -170,13 +169,16 @@ def get_logger(name=None, level=logbook.NOTSET):
 
 def consteq(left, right):
     """
-    Check two strings/bytes for equality. This is functionally
-    equivalent to ``left == right``, but attempts to take constant time
-    relative to the size of the right hand input.
+    Compares two byte instances with one another. If `a` and `b` have
+    different lengths, return `False` immediately. Otherwise `a` and `b`
+    will be compared in constant time.
 
-    See :func:`streql.equals` for details.
+    Return `True` in case `a` and `b` are equal. Otherwise `False`.
+
+    Raises :exc:`TypeError` in case `a` and `b` are not both of the type
+    :class:`bytes`.
     """
-    return _equals(left, right)
+    return libnacl.bytes_eq(left, right)
 
 
 def create_ssl_context(certfile, keyfile=None):
