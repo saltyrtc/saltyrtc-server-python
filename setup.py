@@ -13,11 +13,15 @@ def get_version():
                 _, value = line.split('=', maxsplit=1)
                 return ast.literal_eval(value.strip())
 
+
+def read(file):
+    return open(os.path.join(os.path.dirname(__file__), file)).read().strip()
+
 # Allow setup.py to be run from any path
 os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 
 # Import long description
-long_description = open(os.path.join(os.path.dirname(__file__), 'README.rst')).read()
+long_description = '\n\n'.join((read('README.rst'), read('CHANGELOG.rst')))
 
 # Check python version
 py_version = sys.version_info[:2]
