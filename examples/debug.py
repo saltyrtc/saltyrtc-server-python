@@ -1,6 +1,6 @@
+import asyncio
 import os
 import sys
-import asyncio
 
 import logbook.more
 

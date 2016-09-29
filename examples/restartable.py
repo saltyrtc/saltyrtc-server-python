@@ -1,7 +1,7 @@
-import os
-import sys
 import asyncio
+import os
 import signal
+import sys
 
 import logbook.more
 

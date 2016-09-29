@@ -1,8 +1,6 @@
 import enum
 
-from .exception import (
-    MessageError,
-)
+from .exception import MessageError
 
 __all__ = (
     'KEY_LENGTH',

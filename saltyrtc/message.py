@@ -1,34 +1,18 @@
 import abc
-import struct
-import io
 import binascii
+import io
+import struct
 
 # noinspection PyPackageRequirements
 import umsgpack
 
-from .exception import (
-    MessageFlowError,
-    MessageError,
-)
-from .common import (
-    NONCE_LENGTH,
-    NONCE_FORMATTER,
-    COOKIE_LENGTH,
-    OverflowSentinel,
-    CloseCode,
-    AddressType,
-    MessageType,
-    validate_public_key,
-    validate_cookie,
-    validate_subprotocols,
-    validate_signed_keys,
-    validate_initiator_connected,
-    validate_responder_id,
-    validate_responder_ids,
-    validate_hash,
-    validate_drop_reason,
-    sign_keys as sign_keys_,
-)
+from .common import sign_keys as sign_keys_
+from .common import (COOKIE_LENGTH, NONCE_FORMATTER, NONCE_LENGTH, AddressType, CloseCode,
+                     MessageType, OverflowSentinel, validate_cookie, validate_drop_reason,
+                     validate_hash, validate_initiator_connected, validate_public_key,
+                     validate_responder_id, validate_responder_ids, validate_signed_keys,
+                     validate_subprotocols)
+from .exception import MessageError, MessageFlowError
 
 __all__ = (
     'unpack',

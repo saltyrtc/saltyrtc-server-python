@@ -5,36 +5,12 @@ import inspect
 import websockets
 
 from . import util
-from .exception import (
-    SignalingError,
-    PathError,
-    SlotsFullError,
-    MessageFlowError,
-    PingTimeoutError,
-    Disconnected,
-    MessageError,
-    DowngradeError,
-)
-from .common import (
-    RELAY_TIMEOUT,
-    SubProtocol,
-    CloseCode,
-    AddressType,
-    MessageType,
-)
-from .protocol import (
-    Path,
-    PathClient,
-    Protocol,
-)
-from .message import (
-    ServerHelloMessage,
-    ServerAuthMessage,
-    NewInitiatorMessage,
-    NewResponderMessage,
-    SendErrorMessage,
-    RawMessage,
-)
+from .common import RELAY_TIMEOUT, AddressType, CloseCode, MessageType, SubProtocol
+from .exception import (Disconnected, DowngradeError, MessageError, MessageFlowError,
+                        PathError, PingTimeoutError, SignalingError, SlotsFullError)
+from .message import (NewInitiatorMessage, NewResponderMessage, RawMessage,
+                      SendErrorMessage, ServerAuthMessage, ServerHelloMessage)
+from .protocol import Path, PathClient, Protocol
 
 __all__ = (
     'serve',

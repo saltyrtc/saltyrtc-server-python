@@ -2,7 +2,6 @@
 TODO: Describe tests
 """
 import pytest
-
 import websockets
 
 

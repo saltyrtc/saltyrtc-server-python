@@ -37,7 +37,7 @@ tests_require = [
 setup(
     name='saltyrtc',
     version=get_version(),
-    packages='saltyrtc',
+    packages=['saltyrtc'],
     install_requires=[
         'libnacl>=1.5.0',
         'click>=6.6',

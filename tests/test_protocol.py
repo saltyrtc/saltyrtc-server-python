@@ -4,8 +4,8 @@ compliant to the SaltyRTC protocol.
 """
 import asyncio
 
-import pytest
 import libnacl.public
+import pytest
 import websockets
 
 import saltyrtc
