@@ -21,8 +21,8 @@ long_description = open(os.path.join(os.path.dirname(__file__), 'README.md')).re
 
 # Check python version
 py_version = sys.version_info[:2]
-if py_version < (3, 3):
-    raise Exception("SaltyRTC requires Python >= 3.3.")
+if py_version < (3, 4):
+    raise Exception("SaltyRTC requires Python >= 3.4")
 
 # Test requirements
 tests_require = [
@@ -44,7 +44,6 @@ setup(
     ],
     tests_require=tests_require,
     extras_require={
-        ':python_version=="3.3"': ['enum34>=1.1.6'],
         ':python_version<="3.4"': ['asyncio>=3.4.3'],
         'tests': tests_require,
         'logging': ['logbook>=1.0.0'],
@@ -69,7 +68,6 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Natural Language :: English',
         'Operating System :: OS Independent',
-        'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
         'Topic :: Communications',
