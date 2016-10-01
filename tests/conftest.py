@@ -11,7 +11,13 @@ import pytest
 import umsgpack
 import websockets
 
-import saltyrtc
+from saltyrtc.server import (
+    NONCE_FORMATTER,
+    NONCE_LENGTH,
+    SubProtocol,
+    serve,
+    util,
+)
 
 
 def pytest_addoption(parser):
@@ -30,10 +36,10 @@ def pytest_namespace():
         'external_server': False,
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
-        'permanent_key': saltyrtc.util.load_permanent_key(os.path.normpath(
+        'permanent_key': util.load_permanent_key(os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'permanent.key'))),
         'subprotocols': [
-            saltyrtc.SubProtocol.saltyrtc_v1.value
+            SubProtocol.saltyrtc_v1.value
         ],
         'debug': True,
         'timeout': 0.05,
@@ -194,7 +200,7 @@ def server(request, event_loop, port):
         os.environ['PYTHONASYNCIODEBUG'] = '1'
 
         # Enable logging
-        saltyrtc.util.enable_logging(level=logbook.TRACE, redirect_loggers={
+        util.enable_logging(level=logbook.TRACE, redirect_loggers={
             'asyncio': logbook.DEBUG,
             'websockets': logbook.DEBUG,
         })
@@ -205,8 +211,8 @@ def server(request, event_loop, port):
 
     # Setup server
     if not pytest.saltyrtc.external_server:
-        coroutine = saltyrtc.serve(
-            saltyrtc.util.create_ssl_context(pytest.saltyrtc.cert),
+        coroutine = serve(
+            util.create_ssl_context(pytest.saltyrtc.cert),
             pytest.saltyrtc.permanent_key,
             host=pytest.saltyrtc.ip,
             port=port,
@@ -392,13 +398,13 @@ def unpack_message(event_loop):
     def _unpack_message(client, box=None, timeout=None):
         timeout = _get_timeout(timeout)
         data = yield from asyncio.wait_for(client.recv(), timeout, loop=event_loop)
-        nonce = data[:saltyrtc.NONCE_LENGTH]
+        nonce = data[:NONCE_LENGTH]
         (cookie,
          source, destination,
-         combined_sequence_number) = struct.unpack(saltyrtc.NONCE_FORMATTER, nonce)
+         combined_sequence_number) = struct.unpack(NONCE_FORMATTER, nonce)
         combined_sequence_number, *_ = struct.unpack(
             '!Q', b'\x00\x00' + combined_sequence_number)
-        data = data[saltyrtc.NONCE_LENGTH:]
+        data = data[NONCE_LENGTH:]
         if box is not None:
             data = box.decrypt(data, nonce=nonce)
         else:
@@ -418,7 +424,7 @@ def unpack_message(event_loop):
 def pack_nonce():
     def _pack_nonce(cookie, source, destination, combined_sequence_number):
         return struct.pack(
-            saltyrtc.NONCE_FORMATTER,
+            NONCE_FORMATTER,
             cookie,
             source, destination,
             struct.pack('!Q', combined_sequence_number)[2:]

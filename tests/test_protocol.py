@@ -8,7 +8,10 @@ import libnacl.public
 import pytest
 import websockets
 
-import saltyrtc
+from saltyrtc.server.common import (
+    SIGNED_KEYS_CIPHERTEXT_LENGTH,
+    CloseCode,
+)
 
 
 class TestProtocol:
@@ -21,7 +24,7 @@ class TestProtocol:
         client = yield from ws_client_factory(subprotocols=None)
         yield from sleep()
         assert not client.open
-        assert client.close_code == saltyrtc.CloseCode.subprotocol_error
+        assert client.close_code == CloseCode.subprotocol_error
 
     @pytest.mark.asyncio
     def test_invalid_subprotocols(self, sleep, ws_client_factory):
@@ -32,7 +35,7 @@ class TestProtocol:
         client = yield from ws_client_factory(subprotocols=['kittie-protocol-3000'])
         yield from sleep()
         assert not client.open
-        assert client.close_code == saltyrtc.CloseCode.subprotocol_error
+        assert client.close_code == CloseCode.subprotocol_error
 
     @pytest.mark.asyncio
     def test_invalid_path_length(self, url, sleep, ws_client_factory):
@@ -43,7 +46,7 @@ class TestProtocol:
         client = yield from ws_client_factory(path='{}/{}'.format(url, 'rawr!!!'))
         yield from sleep()
         assert not client.open
-        assert client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_invalid_path_symbols(self, url, sleep, ws_client_factory):
@@ -54,7 +57,7 @@ class TestProtocol:
         client = yield from ws_client_factory(path='{}/{}'.format(url, 'äöüä' * 16))
         yield from sleep()
         assert not client.open
-        assert client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_server_hello(self, client_factory):
@@ -85,7 +88,7 @@ class TestProtocol:
         })
         yield from sleep()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_field_missing(self, sleep, cookie_factory, pack_nonce, client_factory):
@@ -101,7 +104,7 @@ class TestProtocol:
         })
         yield from sleep()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_invalid_field(self, sleep, cookie_factory, pack_nonce, client_factory):
@@ -118,7 +121,7 @@ class TestProtocol:
         })
         yield from sleep()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_duplicated_cookie(self, sleep, initiator_key, pack_nonce, client_factory):
@@ -143,7 +146,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_invalid_repeated_cookie(
@@ -170,7 +173,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_initiator_invalid_source(
@@ -196,7 +199,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_responder_invalid_source(
@@ -222,7 +225,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_invalid_destination(
@@ -248,7 +251,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_subprotocol_downgrade_1(
@@ -276,7 +279,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_subprotocol_downgrade_2(
@@ -312,7 +315,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_initiator_handshake(
@@ -347,7 +350,7 @@ class TestProtocol:
         assert scsn == start_scsn + 1
         assert message['type'] == 'server-auth'
         assert message['your_cookie'] == cck
-        assert len(message['signed_keys']) == saltyrtc.SIGNED_KEYS_CIPHERTEXT_LENGTH
+        assert len(message['signed_keys']) == SIGNED_KEYS_CIPHERTEXT_LENGTH
         keys = client.sign_box.decrypt(message['signed_keys'], nonce=nonce)
         assert keys == ssk + initiator_key.pk
         assert 'initiator_connected' not in message
@@ -395,7 +398,7 @@ class TestProtocol:
         assert scsn == start_scsn + 1
         assert message['type'] == 'server-auth'
         assert message['your_cookie'] == cck
-        assert len(message['signed_keys']) == saltyrtc.SIGNED_KEYS_CIPHERTEXT_LENGTH
+        assert len(message['signed_keys']) == SIGNED_KEYS_CIPHERTEXT_LENGTH
         signed_keys = client.sign_box.decrypt(message['signed_keys'], nonce=nonce)
         assert signed_keys == ssk + responder_key.pk
         assert 'responders' not in message
@@ -409,7 +412,7 @@ class TestProtocol:
     ):
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
-        assert len(i['signed_keys']) == saltyrtc.SIGNED_KEYS_CIPHERTEXT_LENGTH
+        assert len(i['signed_keys']) == SIGNED_KEYS_CIPHERTEXT_LENGTH
         signed_keys = initiator.sign_box.decrypt(
             i['signed_keys'], nonce=i['nonces']['server-auth'])
         assert signed_keys == i['ssk'] + initiator_key.pk
@@ -417,7 +420,7 @@ class TestProtocol:
 
         # Responder handshake
         responder, r = yield from client_factory(responder_handshake=True)
-        assert len(r['signed_keys']) == saltyrtc.SIGNED_KEYS_CIPHERTEXT_LENGTH
+        assert len(r['signed_keys']) == SIGNED_KEYS_CIPHERTEXT_LENGTH
         signed_keys = responder.sign_box.decrypt(
             r['signed_keys'], nonce=r['nonces']['server-auth'])
         assert signed_keys == r['ssk'] + responder_key.pk
@@ -452,7 +455,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_initiator_invalid_source_after_handshake(
@@ -473,7 +476,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not initiator.ws_client.open
-        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert initiator.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_responder_invalid_source_after_handshake(
@@ -494,7 +497,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not responder.ws_client.open
-        assert responder.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert responder.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_invalid_destination_after_handshake(
@@ -515,7 +518,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not responder.ws_client.open
-        assert responder.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert responder.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_new_initiator(self, client_factory):
@@ -601,7 +604,7 @@ class TestProtocol:
         yield from sleep()
         assert not first_initiator.ws_client.open
         actual_close_code = first_initiator.ws_client.close_code
-        assert actual_close_code == saltyrtc.CloseCode.drop_by_initiator
+        assert actual_close_code == CloseCode.drop_by_initiator
 
         # new-initiator
         message, _, sck, s, d, scsn = yield from responder.recv()
@@ -655,7 +658,7 @@ class TestProtocol:
         yield from sleep()
         assert not first_responder.ws_client.open
         actual_close_code = first_responder.ws_client.close_code
-        assert actual_close_code == saltyrtc.CloseCode.drop_by_initiator
+        assert actual_close_code == CloseCode.drop_by_initiator
 
         # Drop third responder
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
@@ -668,7 +671,7 @@ class TestProtocol:
         yield from sleep()
         assert not third_responder.ws_client.open
         actual_close_code = third_responder.ws_client.close_code
-        assert actual_close_code == saltyrtc.CloseCode.drop_by_initiator
+        assert actual_close_code == CloseCode.drop_by_initiator
 
         # Second responder: Still open
         assert second_responder.ws_client.open
@@ -715,14 +718,14 @@ class TestProtocol:
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': r['id'],
-            'reason': saltyrtc.CloseCode.no_shared_tasks.value,
+            'reason': CloseCode.no_shared_tasks.value,
         })
 
         # Responder: Expect reason 'handover'
         yield from sleep()
         assert not responder.ws_client.open
         actual_close_code = responder.ws_client.close_code
-        assert actual_close_code == saltyrtc.CloseCode.no_shared_tasks
+        assert actual_close_code == CloseCode.no_shared_tasks
 
         # Bye
         yield from initiator.close()
@@ -741,13 +744,13 @@ class TestProtocol:
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': 0xff,
-            'reason': saltyrtc.CloseCode.path_full_error.value,
+            'reason': CloseCode.path_full_error.value,
         })
 
         # Expect protocol error
         yield from sleep()
         assert not initiator.ws_client.open
-        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert initiator.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_combined_sequence_number_overflow(
@@ -785,7 +788,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not initiator.ws_client.open
-        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert initiator.ws_client.close_code == CloseCode.protocol_error
 
         # Bye
         yield from first_responder.close()
@@ -828,7 +831,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not initiator.ws_client.open
-        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert initiator.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_relay_unencrypted(self, pack_nonce, cookie_factory, client_factory):
@@ -1078,7 +1081,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not initiator.ws_client.open
-        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert initiator.ws_client.close_code == CloseCode.protocol_error
 
         # Bye
         yield from responder.close()
@@ -1148,7 +1151,7 @@ class TestProtocol:
         # Expect protocol error
         yield from sleep()
         assert not initiator.ws_client.open
-        assert initiator.ws_client.close_code == saltyrtc.CloseCode.protocol_error
+        assert initiator.ws_client.close_code == CloseCode.protocol_error
 
         # Bye
         yield from first_responder.close()
@@ -1173,7 +1176,7 @@ class TestProtocol:
         # Now the path is full
         with pytest.raises(websockets.ConnectionClosed) as exc_info:
             yield from client_factory(responder_handshake=True)
-        assert exc_info.value.code == saltyrtc.CloseCode.path_full_error
+        assert exc_info.value.code == CloseCode.path_full_error
 
         # Close all clients
         tasks = [client.close() for client, _ in clients]

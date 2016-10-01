@@ -53,7 +53,7 @@ Install the module by running:
 
 .. code-block:: bash
 
-    $ pip install saltyrtc
+    $ pip install saltyrtc.server
 
 The dependency ``libnacl`` will be installed automatically. However, you
 may need to install `libsodium`_ for ``libnacl`` to work.
@@ -68,6 +68,28 @@ Documentation
 
 TODO
 
+Contributing
+************
+
+If you want to contribute to this project, you should install the
+optional `dev` requirements of the project in an editable environment:
+
+.. code-block:: bash
+
+    $ git clone https://github.com/saltyrtc/saltyrtc-server-python.git
+    $ cd saltyrtc-server-python
+    $ pip install -e .[dev]
+
+Before creating a pull request, it is recommended to run the following
+commands to check for code style violations (`flake8`), optimise imports
+(`isort`) and run the project's tests:
+
+.. code-block:: bash
+
+    $ flake8 .
+    $ isort -rc -ac .
+    $ py.test
+
 .. _asyncio: https://docs.python.org/3/library/asyncio.html
 .. _venv: https://docs.python.org/3/library/venv.html
 .. _virtualenvwrapper: https://virtualenvwrapper.readthedocs.io/
@@ -77,5 +99,5 @@ TODO
    :target: https://travis-ci.org/saltyrtc/saltyrtc-server-python
 .. |codecov| image:: https://codecov.io/gh/saltyrtc/saltyrtc-server-python/branch/master/graph/badge.svg
    :target: https://codecov.io/gh/saltyrtc/saltyrtc-server-python
-.. |PyPI| image:: https://badge.fury.io/py/saltyrtc.svg
-   :target: https://badge.fury.io/py/saltyrtc
+.. |PyPI| image:: https://badge.fury.io/py/saltyrtc.server.svg
+   :target: https://badge.fury.io/py/saltyrtc.server

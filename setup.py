@@ -6,12 +6,14 @@ from setuptools import setup
 
 
 def get_version():
-    path = os.path.join(os.path.dirname(__file__), 'saltyrtc/__init__.py')
+    path = os.path.join(os.path.dirname(__file__), 'saltyrtc', 'server', '__init__.py')
     with open(path) as file:
         for line in file:
             if line.startswith('__version__'):
                 _, value = line.split('=', maxsplit=1)
                 return ast.literal_eval(value.strip())
+        else:
+            raise Exception('Version not found in {}'.format(path))
 
 
 def read(file):
@@ -41,9 +43,9 @@ tests_require = [
 ],
 
 setup(
-    name='saltyrtc',
+    name='saltyrtc.server',
     version=get_version(),
-    packages=['saltyrtc'],
+    packages=['saltyrtc', 'saltyrtc.server'],
     install_requires=[
         'libnacl>=1.5.0',
         'click>=6.6',
@@ -53,14 +55,14 @@ setup(
     tests_require=tests_require,
     extras_require={
         ':python_version<="3.4"': ['asyncio>=3.4.3'],
-        'test': tests_require,
+        'dev': tests_require,
         'logging': ['logbook>=1.0.0'],
         'uvloop': ['uvloop>=0.5.3'],
     },
     include_package_data=True,
     entry_points={
         'console_scripts': [
-            'saltyrtc-server = saltyrtc.bin.server:main',
+            'saltyrtc-server = saltyrtc.bin:main',
         ],
     },
 
@@ -70,7 +72,7 @@ setup(
     description='A SaltyRTC compliant signalling server.',
     long_description=long_description,
     license='MIT',
-    keywords='saltyrtc webrtc ortc signalling signaling websocket websockets nacl',
+    keywords='saltyrtc signalling signaling websocket websockets nacl',
     url='https://github.com/saltyrtc/saltyrtc-server-python',
     classifiers=[
         'Development Status :: 4 - Beta',

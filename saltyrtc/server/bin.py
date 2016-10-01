@@ -5,9 +5,9 @@ import os
 
 import click
 
-from saltyrtc import __version__ as _version
-from saltyrtc import server  # noqa
-from saltyrtc import (
+from . import __version__ as _version
+from . import server  # noqa
+from . import (
     aio_serve,
     enable_logging,
 )
@@ -50,6 +50,7 @@ def serve(**arguments):
 def main():
     # TODO: Read keys from export if set (see restartable.py)
     # TODO: Add *logging* option
+    # noinspection PyPackageRequirements
     import logbook.more
 
     # Enable asyncio debug logging
