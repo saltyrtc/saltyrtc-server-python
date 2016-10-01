@@ -1,13 +1,14 @@
-SaltyRTC Signalling Server Documentation
-========================================
+SaltyRTC Server Documentation
+=============================
 
-`SaltyRTC`_ signalling server using :mod:`asyncio`.
+A `SaltyRTC`_ signalling server implementation for Python 3.4+ using 
+:mod:`asyncio`.
 
-Contents:
+Contents
+********
 
 .. toctree::
    :maxdepth: 2
-   :numbered:
 
    api
    changelog
