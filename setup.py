@@ -30,33 +30,39 @@ py_version = sys.version_info[:2]
 if py_version < (3, 4):
     raise Exception("SaltyRTC requires Python >= 3.4")
 
+# Logging requirements
+logging_require = [
+    'logbook>=1.0.0,<2',
+]
+
 # Test requirements
+# Note: These are just tools that aren't required, so a version range
+#       is not necessary here.
 tests_require = [
-    'pytest>=3.0.2',
+    'pytest>=3.0.2,<4',
     'pytest-asyncio>=0.5.0',
     'pytest-cov>=2.3.1',
-    'logbook>=1.0.0',
     'flake8>=3.0.4',
     'isort>=4.2.5',
     'collective.checkdocs>=0.2',
-    'Pygments>=2.1.3'  # required by checkdocs
-],
+    'Pygments>=2.1.3',  # required by checkdocs
+] + logging_require
 
 setup(
     name='saltyrtc.server',
     version=get_version(),
     packages=['saltyrtc', 'saltyrtc.server'],
     install_requires=[
-        'libnacl>=1.5.0',
-        'click>=6.6',
-        'websockets>=3.2',
-        'u-msgpack-python>=2.2',
+        'libnacl>=1.5.0,<2',
+        'click>=6.6',  # doesn't seem to follow semantic versioning
+        'websockets>=3.2,<4',
+        'u-msgpack-python>=2.2,<3',
     ],
     tests_require=tests_require,
     extras_require={
         ':python_version<="3.4"': ['asyncio>=3.4.3'],
         'dev': tests_require,
-        'logging': ['logbook>=1.0.0'],
+        'logging': logging_require,
         'uvloop': ['uvloop>=0.5.3'],
     },
     include_package_data=True,
