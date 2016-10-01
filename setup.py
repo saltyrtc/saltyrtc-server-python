@@ -39,7 +39,7 @@ logging_require = [
 # Note: These are just tools that aren't required, so a version range
 #       is not necessary here.
 tests_require = [
-    'pytest>=3.0.2,<4',
+    'pytest>=3.0.2',
     'pytest-asyncio>=0.5.0',
     'pytest-cov>=2.3.1',
     'flake8>=3.0.4',
