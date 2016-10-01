@@ -72,7 +72,7 @@ command to see usage information:
 Documentation
 *************
 
-TODO
+`saltyrtc-server.readthedocs.io`_
 
 Contributing
 ************
@@ -100,6 +100,7 @@ imports (``isort``) and run the project's tests:
 .. _venv: https://docs.python.org/3/library/venv.html
 .. _virtualenvwrapper: https://virtualenvwrapper.readthedocs.io/
 .. _libsodium: https://download.libsodium.org/doc/installation/index.html
+.. _saltyrtc-server.readthedocs.io: https://saltyrtc-server.readthedocs.io
 
 .. |Travis| image:: https://travis-ci.org/saltyrtc/saltyrtc-server-python.svg?branch=master
    :target: https://travis-ci.org/saltyrtc/saltyrtc-server-python
