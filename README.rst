@@ -87,7 +87,7 @@ imports (``isort``) and run the project's tests:
 .. code-block:: bash
 
     $ flake8 .
-    $ isort -rc -ac .
+    $ isort -rc .
     $ py.test
 
 .. _asyncio: https://docs.python.org/3/library/asyncio.html
