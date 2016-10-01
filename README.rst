@@ -72,7 +72,7 @@ Contributing
 ************
 
 If you want to contribute to this project, you should install the
-optional `dev` requirements of the project in an editable environment:
+optional ``dev`` requirements of the project in an editable environment:
 
 .. code-block:: bash
 
@@ -81,8 +81,8 @@ optional `dev` requirements of the project in an editable environment:
     $ pip install -e .[dev]
 
 Before creating a pull request, it is recommended to run the following
-commands to check for code style violations (`flake8`), optimise imports
-(`isort`) and run the project's tests:
+commands to check for code style violations (``flake8``), optimise
+imports (``isort``) and run the project's tests:
 
 .. code-block:: bash
 
