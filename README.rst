@@ -61,7 +61,13 @@ may need to install `libsodium`_ for ``libnacl`` to work.
 Command Line Usage
 ******************
 
-TODO
+The script ``saltyrtc-server`` will be automatically installed and
+provides a command line interface for the server. Run the following
+command to see usage information:
+
+.. code-block:: bash
+
+    $ saltyrtc-server --help
 
 Documentation
 *************
