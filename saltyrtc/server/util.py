@@ -234,7 +234,7 @@ def load_permanent_key(key):
     return libnacl.public.SecretKey(sk=key)
 
 
-def aio_run(func, loop=None, run_forever=False):
+def aio_run(loop=None, run_forever=False):
     """
     A decorator that can be applied to asyncio coroutines to run the
     coroutine until it completes.
@@ -246,21 +246,26 @@ def aio_run(func, loop=None, run_forever=False):
           decorated coroutine and stop afterwards. Set to `True` and the
           event loop will continue running forever.
 
-    Return the decorated function.
+    Return the decorator function.
     """
-    func = asyncio.coroutine(func)
+    loop_ = asyncio.get_event_loop() if loop is None else loop
 
-    def _wrapper(*args, **kwargs):
-        loop_ = asyncio.get_event_loop() if loop is None else loop
-        task = loop_.create_task(func(*args, **kwargs))
-        loop_.run_until_complete(task)
-        if run_forever:
-            loop_.run_forever()
-        return task.result()
-    return functools.update_wrapper(_wrapper, func)
+    def _decorator(func):
+        func = asyncio.coroutine(func)
+
+        def _wrapper(*args, **kwargs):
+            # Start
+            result = loop_.run_until_complete(func(*args, **kwargs))
+            if run_forever:
+                loop_.run_forever()
+            return result
+
+        return functools.update_wrapper(_wrapper, func)
+
+    return _decorator
 
 
-def aio_serve(func, loop=None):
+def aio_serve(loop=None):
     """
     A decorator that can be applied to asyncio coroutines. Different to
     :func:`aio_run` it will run *forever*.
@@ -269,6 +274,6 @@ def aio_serve(func, loop=None):
         - `loop`: A :class:`asyncio.BaseEventLoop` instance or `None`
           if the default event loop should be used.
 
-    Return the decorated function.
+    Return the decorator function.
     """
-    return aio_run(func, loop=loop, run_forever=True)
+    return aio_run(loop=loop, run_forever=True)
