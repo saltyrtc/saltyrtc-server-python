@@ -3,6 +3,8 @@ import os
 import socket
 import ssl
 import struct
+import subprocess
+import sys
 from contextlib import closing
 
 import libnacl.public
@@ -34,6 +36,7 @@ def pytest_namespace():
         'ip': '127.0.0.1',
         'port': 8766,
         'external_server': False,
+        'cli_path': os.path.join(sys.exec_prefix, 'bin', 'saltyrtc-server'),
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
         'permanent_key': util.load_permanent_key(os.path.normpath(
@@ -444,3 +447,69 @@ def pack_message(event_loop):
         yield from asyncio.wait_for(client.send(data), timeout, loop=event_loop)
         return data
     return _pack_message
+
+
+@pytest.fixture(scope='module')
+def cli(event_loop):
+    @asyncio.coroutine
+    def _call_cli(*args, input=None, timeout=3.0, env=None):
+        # Prepare environment
+        if env is None:
+            env = os.environ.copy()
+
+        # Call CLI in subprocess and get output
+        parameters = [sys.executable, pytest.saltyrtc.cli_path] + list(args)
+        if isinstance(input, str):
+            input = input.encode('utf-8')
+
+        # Create process
+        create = asyncio.create_subprocess_exec(
+            *parameters, env=env, stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        process = yield from create
+
+        # Wait for process to terminate
+        coroutine = process.communicate(input=input)
+        output, _ = yield from asyncio.wait_for(coroutine, timeout, loop=event_loop)
+
+        # Process output
+        output = output.decode('utf-8')
+
+        # Strip leading empty lines and pydev debugger output
+        rubbish = [
+            'pydev debugger: process',
+            'Traceback (most recent call last):',
+        ]
+        lines = []
+        skip_following_empty_lines = True
+        for line in output.splitlines(keepends=True):
+            if any((line.startswith(s) for s in rubbish)):
+                skip_following_empty_lines = True
+            elif not skip_following_empty_lines or len(line.strip()) > 0:
+                lines.append(line)
+                skip_following_empty_lines = False
+
+        # Strip trailing empty lines
+        empty_lines_count = 0
+        for line in reversed(lines):
+            if len(line.strip()) > 0:
+                break
+            empty_lines_count += 1
+        if empty_lines_count > 0:
+            lines = lines[:-empty_lines_count]
+        output = ''.join(lines)
+
+        # Check return code
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, parameters,
+                                                output=output)
+        return output
+    return _call_cli
+
+
+@pytest.fixture(scope='function')
+def fake_logbook_env(tmpdir):
+    tmpdir.join("logbook.py").write("raise ImportError('h3h3')")
+    env = os.environ.copy()
+    env['PYTHONPATH'] = ':'.join((str(tmpdir), env['PYTHONPATH']))
+    return env

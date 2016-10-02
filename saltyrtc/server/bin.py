@@ -115,12 +115,12 @@ def version():
 Generate a new permanent key pair for the server and write the private key to
 the respective KEY_FILE.
 """)
-@click.argument('KEY_FILE', type=click.Path(writable=True))
+@click.argument('KEY_FILE', type=click.Path(writable=True, dir_okay=False))
 def generate(key_file):
     # Generate key pair
     key_pair = libnacl.public.SecretKey()
 
-    # Write hex-encoded private key to file using proper permissions (0400)
+    # Write hex-encoded private key to file using proper permissions (0o400)
     perm_other = stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH
     perm_group = stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP
     current_umask = os.umask(perm_other | perm_group)
