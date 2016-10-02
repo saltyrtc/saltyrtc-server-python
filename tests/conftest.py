@@ -511,5 +511,5 @@ def cli(event_loop):
 def fake_logbook_env(tmpdir):
     tmpdir.join("logbook.py").write("raise ImportError('h3h3')")
     env = os.environ.copy()
-    env['PYTHONPATH'] = ':'.join((str(tmpdir), env['PYTHONPATH']))
+    env['PYTHONPATH'] = ':'.join((str(tmpdir), env.get('PYTHONPATH', '')))
     return env
