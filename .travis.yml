@@ -37,7 +37,7 @@ script:
   - flake8 .
   - isort -rc -c . || (isort -rc -df . && return 1)
   - python setup.py checkdocs
-  - py.test --cov-config .coveragerc --cov=saltyrtc --loop=$EVENT_LOOP
+  - py.test --cov-config .coveragerc --cov=saltyrtc.server --loop=$EVENT_LOOP
 
 # After success
 after_success:
