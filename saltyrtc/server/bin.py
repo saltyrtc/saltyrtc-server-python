@@ -4,6 +4,7 @@ The command line interface for the SaltyRTC signalling server.
 import asyncio
 import os
 import signal
+import enum
 
 import click
 
@@ -24,13 +25,71 @@ def _h(text):
     return text.replace('\n', '')
 
 
+def _get_logging_level(verbosity):
+    # noinspection PyPackageRequirements
+    import logbook
+    return {
+        1: logbook.CRITICAL,
+        2: logbook.ERROR,
+        3: logbook.WARNING,
+        4: logbook.NOTICE,
+        5: logbook.INFO,
+        6: logbook.DEBUG,
+        7: logbook.TRACE,
+    }[verbosity]
+
+
+class _ErrorCode(enum.IntEnum):
+    safety_error = 2
+    import_error = 3
+
+_logging_levels = 7
+
+
 @click.group()
+@click.option('-v', '--verbosity', type=click.IntRange(0, _logging_levels),
+              default=0, help="Logging verbosity.")
+@click.option('-c', '--colored', is_flag=True, help='Colourise logging output.')
 @click.pass_context
-def cli(ctx):
+def cli(ctx, verbosity, colored):
     """
     Command Line Interface. Use --help for details.
     """
-    ctx.obj = {}
+    if verbosity > 0:
+        try:
+            # noinspection PyPackageRequirements,PyUnresolvedReferences
+            import logbook
+            # noinspection PyUnresolvedReferences,PyPackageRequirements
+            import logbook.more
+        except ImportError:
+            click.echo('Please install saltyrtc.server[logging] for logging support.',
+                       err=True)
+            ctx.exit(code=_ErrorCode.import_error)
+            return
+
+        # Translate logging level
+        level = _get_logging_level(verbosity)
+
+        # Enable asyncio debug logging if verbosity is high enough
+        if level <= logbook.DEBUG:
+            os.environ['PYTHONASYNCIODEBUG'] = '1'
+
+        # Enable logging
+        util.enable_logging(level=level, redirect_loggers={
+            'asyncio': level,
+            'websockets': level,
+        })
+
+        # Get handler class
+        if colored:
+            handler_class = logbook.more.ColorizedStderrHandler
+        else:
+            handler_class = logbook.StderrHandler
+
+        # Set up logging handler
+        handler = handler_class(level=level)
+        handler.push_application()
+        ctx.obj['logging_handler'] = handler
 
 
 @cli.command(short_help='Show version information.', help="""
@@ -73,13 +132,13 @@ def serve(ctx, **arguments):
     if ssl_cert is None or key is None:
         if safety_off:
             click.echo(('It is RECOMMENDED to use SaltyRTC with both a SSL '
-                       'certificate and a server permanent key'), err=True)
+                       'certificate and a server permanent key!'), err=True)
         else:
             click.echo(('It is REQUIRED to provide a SSL certificate and a server '
                         'permanent key unless the environment variable '
                         "'SALTYRTC_SAFETY_OFF' is set to "
                         "'yes-and-i-know-what-im-doing'"), err=True)
-            ctx.exit(code=2)
+            ctx.exit(code=_ErrorCode.safety_error)
             return
 
     # Create SSL context
@@ -94,11 +153,12 @@ def serve(ctx, **arguments):
     # Set event loop policy
     if loop == 'uvloop':
         try:
+            # noinspection PyPackageRequirements,PyUnresolvedReferences
             import uvloop
         except ImportError:
             click.echo("Cannot use event loop 'uvloop', make sure it is installed.",
                        err=True)
-            ctx.exit(3)
+            ctx.exit(code=_ErrorCode.import_error)
             return
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
@@ -149,26 +209,13 @@ def serve(ctx, **arguments):
 
 
 def main():
-    # TODO: Read keys from export if set (see restartable.py)
-    # TODO: Add *logging* option
-    # noinspection PyPackageRequirements
-    import logbook.more
-
-    # Enable asyncio debug logging
-    os.environ['PYTHONASYNCIODEBUG'] = '1'
-
-    # Enable logging
-    util.enable_logging(level=logbook.TRACE, redirect_loggers={
-        'asyncio': logbook.DEBUG,
-        'websockets': logbook.DEBUG,
-    })
-
-    # Run 'main'
-    logging_handler = logbook.more.ColorizedStderrHandler()
-    with logging_handler.applicationbound():
-        try:
-            cli()
-        except Exception as exc:
-            click.echo('An error occurred:', err=True)
-            click.echo(exc, err=True)
-            raise
+    ctx = {'logging_handler': None}
+    try:
+        cli(obj=ctx)
+    except Exception as exc:
+        click.echo('An error occurred:', err=True)
+        click.echo(exc, err=True)
+        raise
+    finally:
+        if ctx['logging_handler'] is not None:
+            ctx['logging_handler'].pop_application()
