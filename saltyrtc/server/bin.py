@@ -56,6 +56,8 @@ Path to a or a hex-encoded private permanent key of the server (e.g.
 a NaCl private key)."""))
 @click.option('-h', '--host', help='Bind to a specific host.')
 @click.option('-p', '--port', default=443, help='Listen on a specific port.')
+@click.option('-l', '--loop', type=click.Choice(['asyncio', 'uvloop']), default='asyncio',
+              help="Use a specific asyncio-compatible event loop. Defaults to 'asyncio'.")
 @click.pass_context
 def serve(ctx, **arguments):
     # Get arguments
@@ -64,6 +66,7 @@ def serve(ctx, **arguments):
     key = arguments.get('key', None)
     host = arguments.get('host')
     port = arguments['port']
+    loop = arguments['loop']
     safety_off = os.environ.get('SALTYRTC_SAFETY_OFF') == 'yes-and-i-know-what-im-doing'
 
     # Make sure the user provides cert & keys or has safety turned off
@@ -77,6 +80,7 @@ def serve(ctx, **arguments):
                         "'SALTYRTC_SAFETY_OFF' is set to "
                         "'yes-and-i-know-what-im-doing'"), err=True)
             ctx.exit(code=2)
+            return
 
     # Create SSL context
     ssl_context = None
@@ -86,6 +90,17 @@ def serve(ctx, **arguments):
     # Get private permanent key of the server
     if key is not None:
         key = util.load_permanent_key(key)
+
+    # Set event loop policy
+    if loop == 'uvloop':
+        try:
+            import uvloop
+        except ImportError:
+            click.echo("Cannot use event loop 'uvloop', make sure it is installed.",
+                       err=True)
+            ctx.exit(3)
+            return
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
     # Get event loop
     loop = asyncio.get_event_loop()
@@ -100,13 +115,13 @@ def serve(ctx, **arguments):
         restart_signal = asyncio.Future(loop=loop)
 
         def _restart_signal_handler(*_):
-            def _callback():
-                restart_signal.set_result(True)
-
-            loop.call_soon_threadsafe(_callback)
+            restart_signal.set_result(True)
 
         # Register restart server routine
-        signal.signal(signal.SIGHUP, _restart_signal_handler)
+        try:
+            loop.add_signal_handler(signal.SIGHUP, _restart_signal_handler)
+        except RuntimeError:
+            click.echo('Cannot restart on SIGHUP, signal handler could not be added.')
 
         # Wait until Ctrl+C has been pressed
         click.echo('Started')
@@ -114,6 +129,9 @@ def serve(ctx, **arguments):
             loop.run_until_complete(restart_signal)
         except KeyboardInterrupt:
             click.echo()
+
+        # Remove the signal handler
+        loop.remove_signal_handler(signal.SIGHUP)
 
         # Close the server
         click.echo('Stopping')
@@ -123,7 +141,11 @@ def serve(ctx, **arguments):
 
         # Stop?
         if not restart_signal.done():
+            restart_signal.cancel()
             break
+
+    # Close loop
+    loop.close()
 
 
 def main():

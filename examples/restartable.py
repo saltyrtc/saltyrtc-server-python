@@ -26,9 +26,10 @@ def main():
 
     The signal *HUP* will restart the server.
     """
-    while True:
-        loop = asyncio.get_event_loop()
+    # Get event loop
+    loop = asyncio.get_event_loop()
 
+    while True:
         # Create SSL context
         if env('SALTYRTC_DISABLE_TLS') != 'yes-and-i-know-what-im-doing':
             ssl_context = saltyrtc.server.create_ssl_context(
@@ -53,19 +54,20 @@ def main():
         # Restart server on HUP signal
         restart_signal = asyncio.Future(loop=loop)
 
-        def restart_signal_handler(*_):
-            def callback():
-                restart_signal.set_result(True)
-            loop.call_soon_threadsafe(callback)
+        def _restart_signal_handler(*_):
+            restart_signal.set_result(True)
 
         # Register restart server routine
-        signal.signal(signal.SIGHUP, restart_signal_handler)
+        loop.add_signal_handler(signal.SIGHUP, _restart_signal_handler)
 
         # Wait until Ctrl+C has been pressed
         try:
             loop.run_until_complete(restart_signal)
         except KeyboardInterrupt:
             pass
+
+        # Remove the signal handler
+        loop.remove_signal_handler(signal.SIGHUP)
 
         # Wait until server is closed and close the event loop
         server.close()
@@ -74,6 +76,9 @@ def main():
         # Stop?
         if not restart_signal.done():
             break
+
+    # Close loop
+    loop.close()
 
 
 if __name__ == '__main__':
