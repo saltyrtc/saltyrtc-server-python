@@ -31,7 +31,7 @@ class TestCLI:
 
     @pytest.mark.asyncio
     def test_get_version(self, cli):
-        output = yield from cli('version')
+        output = yield from cli('-v', '7', '-c', 'version')
         assert 'Version: {}'.format(_version) in output
         assert str(Server.subprotocols) in output
 
