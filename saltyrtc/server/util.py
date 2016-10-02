@@ -104,6 +104,8 @@ def _redirect_logging_loggers(logging_loggers, remove=False):
     """
     if _logger_redirect_handler is None:
         _logging_error()
+
+    # At this point, logbook is either defined or an error has been returned
     for name, level in logging_loggers.items():
         # Lookup logger and translate level
         logger = logging.getLogger(name)
@@ -116,12 +118,13 @@ def _redirect_logging_loggers(logging_loggers, remove=False):
             logger.addHandler(_logger_redirect_handler)
 
 
-def enable_logging(level=logbook.WARNING, redirect_loggers=None):
+def enable_logging(level=None, redirect_loggers=None):
     """
     Enable logging for the *saltyrtc* logger group.
 
     Arguments:
-        - `level`: A :mod:`logbook` logging level.
+        - `level`: A :mod:`logbook` logging level. Defaults to
+          ``WARNING``.
         - `redirect_loggers`: A dictionary containing :mod:`logging`
           logger names as key and their respective :mod:`logging` level
           as value. Each logger will be looked up and redirected to
@@ -130,6 +133,12 @@ def enable_logging(level=logbook.WARNING, redirect_loggers=None):
     Raises :class:`ImportError` in case :mod:`logbook` is not
     installed.
     """
+    if _logger_convert_level_handler is None:
+        _logging_error()
+
+    # At this point, logbook is either defined or an error has been returned
+    if level is None:
+        level = logbook.WARNING
     logger_group.disabled = False
     logger_group.level = level
     if redirect_loggers is not None:
@@ -155,13 +164,20 @@ def disable_logging(redirect_loggers=None):
         _redirect_logging_loggers(redirect_loggers, remove=True)
 
 
-def get_logger(name=None, level=logbook.NOTSET):
+def get_logger(name=None, level=None):
     """
     Return a :class:`logbook.Logger`.
 
     Arguments:
         - `name`: The name of a specific sub-logger.
+        - `level`: A :mod:`logbook` logging level.
     """
+    if _logger_convert_level_handler is None:
+        _logging_error()
+
+    # At this point, logbook is either defined or an error has been returned
+    if level is None:
+        level = logbook.NOTSET
     base_name = 'saltyrtc'
     name = base_name if name is None else '.'.join((base_name, name))
 

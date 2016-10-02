@@ -16,6 +16,14 @@ from . import (
     util,
 )
 
+__all__ = (
+    'cli',
+    'version',
+    'generate',
+    'serve',
+    'main',
+)
+
 
 def _h(text):
     """
