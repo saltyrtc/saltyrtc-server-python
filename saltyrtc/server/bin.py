@@ -2,9 +2,9 @@
 The command line interface for the SaltyRTC signalling server.
 """
 import asyncio
+import enum
 import os
 import signal
-import enum
 import stat
 
 import click
