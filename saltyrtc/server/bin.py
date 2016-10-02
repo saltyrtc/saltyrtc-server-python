@@ -5,8 +5,10 @@ import asyncio
 import os
 import signal
 import enum
+import stat
 
 import click
+import libnacl.public
 
 from . import __version__ as _version
 from . import (
@@ -99,6 +101,24 @@ implemented protocol versions.
 def version():
     click.echo('Version: {}'.format(_version))
     click.echo('Protocols: {}'.format(server.Server.subprotocols))
+
+
+@cli.command(short_help='Generate a new server permanent key pair.', help="""
+Generate a new permanent key pair for the server and write the private key to
+the respective KEY_FILE.
+""")
+@click.argument('KEY_FILE', type=click.Path(writable=True))
+def generate(key_file):
+    # Generate key pair
+    key_pair = libnacl.public.SecretKey()
+
+    # Write hex-encoded private key to file using proper permissions (0400)
+    perm_other = stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH
+    perm_group = stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP
+    current_umask = os.umask(perm_other | perm_group)
+    with open(key_file, 'wb') as file:
+        file.write(key_pair.hex_sk())
+    os.umask(current_umask)
 
 
 @cli.command(short_help='Start the signalling server.', help="""
@@ -209,13 +229,13 @@ def serve(ctx, **arguments):
 
 
 def main():
-    ctx = {'logging_handler': None}
+    obj = {'logging_handler': None}
     try:
-        cli(obj=ctx)
+        cli(obj=obj)
     except Exception as exc:
         click.echo('An error occurred:', err=True)
         click.echo(exc, err=True)
         raise
     finally:
-        if ctx['logging_handler'] is not None:
-            ctx['logging_handler'].pop_application()
+        if obj['logging_handler'] is not None:
+            obj['logging_handler'].pop_application()
