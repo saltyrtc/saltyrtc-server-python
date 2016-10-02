@@ -68,7 +68,7 @@ setup(
     include_package_data=True,
     entry_points={
         'console_scripts': [
-            'saltyrtc-server = saltyrtc.bin:main',
+            'saltyrtc-server = saltyrtc.server.bin:main',
         ],
     },
 

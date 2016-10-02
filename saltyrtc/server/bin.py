@@ -6,10 +6,10 @@ import os
 import click
 
 from . import __version__ as _version
-from . import server  # noqa
 from . import (
     aio_serve,
     enable_logging,
+    server,
 )
 
 
@@ -27,6 +27,7 @@ Show the current version of the SaltyRTC signalling server.
 """)
 def version():
     click.echo('Version: {}'.format(_version))
+    click.echo('Protocols: {}'.format(server.Server.subprotocols))
 
 
 @cli.command(short_help='Start the signalling server.', help="""
@@ -39,8 +40,8 @@ CERTFILE if not present.
 """)
 @aio_serve
 def serve(**arguments):
-    certfile = arguments.get('cert')  # noqa
-    keyfile = arguments.get('keyfile', None)  # noqa
+    certfile = arguments.get('cert')
+    keyfile = arguments.get('keyfile', None)
     raise NotImplementedError
     # yield from server.start_server(
     #     certfile=certfile, keyfile=keyfile
