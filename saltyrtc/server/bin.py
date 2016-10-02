@@ -3,6 +3,7 @@ The command line interface for the SaltyRTC signalling server.
 """
 import asyncio
 import os
+import signal
 
 import click
 
@@ -89,22 +90,40 @@ def serve(ctx, **arguments):
     # Get event loop
     loop = asyncio.get_event_loop()
 
-    # Run the server
-    click.echo('Starting')
-    server_ = loop.run_until_complete(
-        server.serve(ssl_context, key, host=host, port=port, loop=loop))
-    click.echo('Started')
-    try:
-        loop.run_forever()
-    except KeyboardInterrupt:
-        pass
+    while True:
+        # Run the server
+        click.echo('Starting')
+        coroutine = server.serve(ssl_context, key, host=host, port=port, loop=loop)
+        server_ = loop.run_until_complete(coroutine)
 
-    # Close the server
-    click.echo()
-    click.echo('Stopping')
-    server_.close()
-    loop.run_until_complete(server_.wait_closed())
-    click.echo('Stopped')
+        # Restart server on HUP signal
+        restart_signal = asyncio.Future(loop=loop)
+
+        def _restart_signal_handler(*_):
+            def _callback():
+                restart_signal.set_result(True)
+
+            loop.call_soon_threadsafe(_callback)
+
+        # Register restart server routine
+        signal.signal(signal.SIGHUP, _restart_signal_handler)
+
+        # Wait until Ctrl+C has been pressed
+        click.echo('Started')
+        try:
+            loop.run_until_complete(restart_signal)
+        except KeyboardInterrupt:
+            click.echo()
+
+        # Close the server
+        click.echo('Stopping')
+        server_.close()
+        loop.run_until_complete(server_.wait_closed())
+        click.echo('Stopped')
+
+        # Stop?
+        if not restart_signal.done():
+            break
 
 
 def main():
