@@ -5,7 +5,7 @@ import sys
 
 import logbook.more
 
-import saltyrtc
+import saltyrtc.server
 
 
 def env(name, default=None):
@@ -31,7 +31,7 @@ def main():
 
         # Create SSL context
         if env('SALTYRTC_DISABLE_TLS') != 'yes-and-i-know-what-im-doing':
-            ssl_context = saltyrtc.util.create_ssl_context(
+            ssl_context = saltyrtc.server.create_ssl_context(
                 certfile=require_env('SALTYRTC_TLS_CERT'),
                 keyfile=require_env('SALTYRTC_TLS_KEY'),
             )
@@ -40,14 +40,14 @@ def main():
 
         # Get permanent key
         if env('SALTYRTC_DISABLE_SERVER_PERMANENT_KEY') != 'yes-and-i-know-what-im-doing':
-            permanent_key = saltyrtc.util.load_permanent_key(
+            permanent_key = saltyrtc.server.load_permanent_key(
                 require_env('SALTYRTC_SERVER_PERMANENT_KEY'))
         else:
             permanent_key = None
 
         # Start server
         port = int(env('SALTYRTC_PORT', '8765'))
-        coroutine = saltyrtc.serve(ssl_context, permanent_key, port=port)
+        coroutine = saltyrtc.server.serve(ssl_context, permanent_key, port=port)
         server = loop.run_until_complete(coroutine)
 
         # Restart server on HUP signal
@@ -81,7 +81,7 @@ if __name__ == '__main__':
     os.environ['PYTHONASYNCIODEBUG'] = '1'
 
     # Enable logging
-    saltyrtc.util.enable_logging(level=logbook.TRACE, redirect_loggers={
+    saltyrtc.server.enable_logging(level=logbook.TRACE, redirect_loggers={
         'asyncio': logbook.DEBUG,
         'websockets': logbook.DEBUG,
     })
