@@ -39,8 +39,8 @@ def pytest_namespace():
         'cli_path': os.path.join(sys.exec_prefix, 'bin', 'saltyrtc-server'),
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
-        'permanent_key': util.load_permanent_key(os.path.normpath(
-            os.path.join(os.path.abspath(__file__), os.pardir, 'permanent.key'))),
+        'permanent_key': os.path.normpath(
+            os.path.join(os.path.abspath(__file__), os.pardir, 'permanent.key')),
         'subprotocols': [
             SubProtocol.saltyrtc_v1.value
         ],
@@ -97,7 +97,7 @@ def random_cookie():
     return os.urandom(16)
 
 
-def _get_timeout(timeout):
+def _get_timeout(timeout=None):
     """
     Return the defined timeout. In case 'debug' has been activated,
     the timeout will be multiplied by 10.
@@ -143,6 +143,11 @@ def event_loop(request):
 @pytest.fixture(scope='module')
 def port():
     return unused_tcp_port()
+
+
+@pytest.fixture(scope='module')
+def timeout_factory():
+    return _get_timeout
 
 
 @pytest.fixture(scope='module')
@@ -216,7 +221,7 @@ def server(request, event_loop, port):
     if not pytest.saltyrtc.external_server:
         coroutine = serve(
             util.create_ssl_context(pytest.saltyrtc.cert),
-            pytest.saltyrtc.permanent_key,
+            util.load_permanent_key(pytest.saltyrtc.permanent_key),
             host=pytest.saltyrtc.ip,
             port=port,
             loop=event_loop
@@ -320,7 +325,7 @@ def client_factory(
         if cookie is None:
             cookie = random_cookie()
         if permanent_key is None:
-            permanent_key = pytest.saltyrtc.permanent_key.pk
+            permanent_key = util.load_permanent_key(pytest.saltyrtc.permanent_key).pk
         _kwargs = {
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
@@ -452,7 +457,7 @@ def pack_message(event_loop):
 @pytest.fixture(scope='module')
 def cli(event_loop):
     @asyncio.coroutine
-    def _call_cli(*args, input=None, timeout=3.0, env=None):
+    def _call_cli(*args, input=None, timeout=3.0, signal=None, env=None):
         # Prepare environment
         if env is None:
             env = os.environ.copy()
@@ -469,8 +474,37 @@ def cli(event_loop):
         process = yield from create
 
         # Wait for process to terminate
-        coroutine = process.communicate(input=input)
-        output, _ = yield from asyncio.wait_for(coroutine, timeout, loop=event_loop)
+        task = event_loop.create_task(process.communicate(input=input))
+        maybe_shielded_task = task
+        if signal is not None:
+            maybe_shielded_task = asyncio.shield(maybe_shielded_task, loop=event_loop)
+        output = None
+        timeout_exc = False
+        try:
+            output, _ = yield from asyncio.wait_for(
+                maybe_shielded_task, timeout, loop=event_loop)
+        except asyncio.TimeoutError:
+            if signal is None:
+                raise
+            timeout_exc = True
+
+        # Send signal (if requested)
+        if timeout_exc and signal is not None:
+            try:
+                signals = list(signal)
+            except TypeError:
+                signals = [signal]
+            length = len(signals)
+            for i, signal in enumerate(signals):
+                shielded_task = asyncio.shield(task, loop=event_loop)
+                process.send_signal(signal)
+                try:
+                    output, _ = yield from asyncio.wait_for(
+                        shielded_task, timeout, loop=event_loop)
+                except asyncio.TimeoutError:
+                    if i == (length - 1):
+                        task.cancel()
+                        raise
 
         # Process output
         output = output.decode('utf-8')
@@ -501,8 +535,8 @@ def cli(event_loop):
 
         # Check return code
         if process.returncode != 0:
-            raise subprocess.CalledProcessError(process.returncode, parameters,
-                                                output=output)
+            raise subprocess.CalledProcessError(
+                process.returncode, parameters, output=output)
         return output
     return _call_cli
 
