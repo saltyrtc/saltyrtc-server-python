@@ -17,8 +17,6 @@ __all__ = (
     'consteq',
     'create_ssl_context',
     'load_permanent_key',
-    'aio_run',
-    'aio_serve',
 )
 
 
