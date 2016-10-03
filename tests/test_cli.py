@@ -152,6 +152,7 @@ class TestCLI:
         assert 'Server instance' in output
         assert 'Closing protocols' in output
 
+    @pytest.saltyrtc.have_uvloop
     @pytest.mark.asyncio
     def test_serve_uvloop(self, cli, timeout_factory):
         output = yield from cli(
@@ -165,6 +166,7 @@ class TestCLI:
         )
         assert 'Stopped' in output
 
+    @pytest.saltyrtc.have_uvloop
     @pytest.mark.asyncio
     def test_serve_uvloop_plus_logging(self, cli, timeout_factory):
         output = yield from cli(

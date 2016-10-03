@@ -281,6 +281,7 @@ class TestProtocol:
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
+    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_subprotocol_downgrade_2(
             self, monkeypatch,
@@ -290,9 +291,6 @@ class TestProtocol:
         Check that the server drops the client in case it detects a
         subprotocol downgrade.
         """
-        if pytest.saltyrtc.external_server:
-            return
-
         client = yield from client_factory()
 
         # server-hello, already checked in another test
@@ -428,6 +426,7 @@ class TestProtocol:
         assert signed_keys == r['ssk'] + responder_key.pk
         yield from responder.close()
 
+    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_keep_alive_timeout(
             self, sleep, server, ws_client_factory, client_factory
@@ -437,9 +436,6 @@ class TestProtocol:
         and check that the server sends us a ping and waits for a
         pong.
         """
-        if pytest.saltyrtc.external_server:
-            return
-
         # Create client and patch it to not answer pings
         ws_client = yield from ws_client_factory()
         ws_client.pong = asyncio.coroutine(lambda *args, **kwargs: None)
@@ -754,6 +750,7 @@ class TestProtocol:
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.protocol_error
 
+    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_combined_sequence_number_overflow(
             self, sleep, server, client_factory
@@ -762,9 +759,6 @@ class TestProtocol:
         Monkey-patch the combined sequence number of the server and
         check that an overflow of the number is handled correctly.
         """
-        if pytest.saltyrtc.external_server:
-            return
-
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
 
@@ -982,6 +976,7 @@ class TestProtocol:
         # Bye
         yield from initiator.close()
 
+    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_peer_csn_in_overflow(
             self, sleep, pack_nonce, cookie_factory, client_factory, server
@@ -993,9 +988,6 @@ class TestProtocol:
         2. A CSN that would create an overflow
         3. A repeated CSN
         """
-        if pytest.saltyrtc.external_server:
-            return
-
         # Initiator handshake
         initiator, i = yield from client_factory(csn=0, initiator_handshake=True)
         i['rccsn'] = 2578  # Start peer CSN
@@ -1088,6 +1080,7 @@ class TestProtocol:
         # Bye
         yield from responder.close()
 
+    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_peer_csn_out_overflow(
             self, sleep, pack_nonce, server, client_factory, cookie_factory
@@ -1096,9 +1089,6 @@ class TestProtocol:
         Check that the server does not take its own CSN for outgoing
         messages into account when relaying a message.
         """
-        if pytest.saltyrtc.external_server:
-            return
-
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
         i['rccsn'] = 50217

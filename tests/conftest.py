@@ -32,7 +32,14 @@ def pytest_report_header(config):
 
 
 def pytest_namespace():
-    return {'saltyrtc': {
+    try:
+        # noinspection PyPackageRequirements,PyUnresolvedReferences
+        import uvloop
+        have_uvloop = True
+    except ImportError:
+        have_uvloop = False
+    saltyrtc = {
+        'have_uvloop': pytest.mark.skipif(not have_uvloop, reason='requires uvloop'),
         'ip': '127.0.0.1',
         'port': 8766,
         'external_server': False,
@@ -46,7 +53,11 @@ def pytest_namespace():
         ],
         'debug': True,
         'timeout': 0.05,
-    }}
+    }
+    saltyrtc['have_internal'] = pytest.mark.skipif(
+        saltyrtc['external_server'] is None,
+        reason='requires the usage of the internal server')
+    return {'saltyrtc': saltyrtc}
 
 
 def default_event_loop(request=None, config=None):
