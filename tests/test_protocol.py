@@ -319,7 +319,8 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_initiator_handshake(
-            self, cookie_factory, initiator_key, pack_nonce, client_factory
+            self, cookie_factory, initiator_key, pack_nonce, client_factory,
+            server_permanent_key
     ):
         """
         Check that we can do a complete handshake for an initiator.
@@ -342,7 +343,7 @@ class TestProtocol:
 
         # server-auth
         client.sign_box = libnacl.public.Box(
-            sk=initiator_key, pk=pytest.saltyrtc.permanent_key.pk)
+            sk=initiator_key, pk=server_permanent_key.pk)
         message, nonce, ck, s, d, scsn = yield from client.recv()
         assert s == 0x00
         assert d == 0x01
@@ -360,7 +361,8 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_responder_handshake(
-            self, cookie_factory, responder_key, pack_nonce, client_factory
+            self, cookie_factory, responder_key, pack_nonce, client_factory,
+            server_permanent_key
     ):
         """
         Check that we can do a complete handshake for a responder.
@@ -390,7 +392,7 @@ class TestProtocol:
 
         # server-auth
         client.sign_box = libnacl.public.Box(
-            sk=responder_key, pk=pytest.saltyrtc.permanent_key.pk)
+            sk=responder_key, pk=server_permanent_key.pk)
         message, nonce, ck, s, d, scsn = yield from client.recv()
         assert s == 0x00
         assert 0x01 < d <= 0xff

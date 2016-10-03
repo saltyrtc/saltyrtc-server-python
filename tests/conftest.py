@@ -159,6 +159,14 @@ def url(port):
 
 
 @pytest.fixture(scope='module')
+def server_permanent_key():
+    """
+    Return the server's permanent test NaCl key pair.
+    """
+    return util.load_permanent_key(pytest.saltyrtc.permanent_key)
+
+
+@pytest.fixture(scope='module')
 def server_key():
     """
     Return a server NaCl key pair to be used by the server only.
@@ -199,7 +207,7 @@ def cookie_factory():
 
 
 @pytest.fixture(scope='module')
-def server(request, event_loop, port):
+def server(request, event_loop, port, server_permanent_key):
     """
     Return a :class:`saltyrtc.Server` instance.
     """
@@ -221,7 +229,7 @@ def server(request, event_loop, port):
     if not pytest.saltyrtc.external_server:
         coroutine = serve(
             util.create_ssl_context(pytest.saltyrtc.cert),
-            util.load_permanent_key(pytest.saltyrtc.permanent_key),
+            server_permanent_key,
             host=pytest.saltyrtc.ip,
             port=port,
             loop=event_loop
@@ -300,7 +308,7 @@ def ws_client_factory(initiator_key, url, event_loop, server):
 
 @pytest.fixture(scope='module')
 def client_factory(
-        initiator_key, url, event_loop, server, responder_key,
+        initiator_key, url, event_loop, server, server_permanent_key, responder_key,
         pack_nonce, pack_message, unpack_message
 ):
     """
@@ -325,7 +333,7 @@ def client_factory(
         if cookie is None:
             cookie = random_cookie()
         if permanent_key is None:
-            permanent_key = util.load_permanent_key(pytest.saltyrtc.permanent_key).pk
+            permanent_key = server_permanent_key.pk
         _kwargs = {
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
