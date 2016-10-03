@@ -75,12 +75,12 @@ def cli(ctx, verbosity, colored):
             click.echo('Please install saltyrtc.server[logging] for logging support.',
                        err=True)
             ctx.exit(code=_ErrorCode.import_error)
-            return
 
         # Translate logging level
         level = _get_logging_level(verbosity)
 
         # Enable asyncio debug logging if verbosity is high enough
+        # noinspection PyUnboundLocalVariable
         if level <= logbook.DEBUG:
             os.environ['PYTHONASYNCIODEBUG'] = '1'
 
