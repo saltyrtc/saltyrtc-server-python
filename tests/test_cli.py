@@ -126,6 +126,18 @@ class TestCLI:
             )
         assert 'invalid choice' in exc_info.value.output
 
+    @pytest.saltyrtc.no_uvloop
+    @pytest.mark.asyncio
+    def test_serve_uvloop_unavailable(self, cli):
+        with pytest.raises(subprocess.CalledProcessError) as exc_info:
+            yield from cli(
+                'serve',
+                '-sc', pytest.saltyrtc.cert,
+                '-k', pytest.saltyrtc.permanent_key,
+                '-l', 'uvloop',
+            )
+        assert "Cannot use event loop 'uvloop'" in exc_info.value.output
+
     @pytest.mark.asyncio
     def test_serve_asyncio(self, cli, timeout_factory):
         output = yield from cli(

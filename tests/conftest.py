@@ -40,6 +40,8 @@ def pytest_namespace():
         have_uvloop = False
     saltyrtc = {
         'have_uvloop': pytest.mark.skipif(not have_uvloop, reason='requires uvloop'),
+        'no_uvloop': pytest.mark.skipif(
+            have_uvloop, reason='requires uvloop to be not installed'),
         'ip': '127.0.0.1',
         'port': 8766,
         'external_server': False,

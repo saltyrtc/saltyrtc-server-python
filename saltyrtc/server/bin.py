@@ -167,7 +167,6 @@ def serve(ctx, **arguments):
                         "'SALTYRTC_SAFETY_OFF' is set to "
                         "'yes-and-i-know-what-im-doing'"), err=True)
             ctx.exit(code=_ErrorCode.safety_error)
-            return
 
     # Create SSL context
     ssl_context = None
@@ -187,7 +186,7 @@ def serve(ctx, **arguments):
             click.echo("Cannot use event loop 'uvloop', make sure it is installed.",
                        err=True)
             ctx.exit(code=_ErrorCode.import_error)
-            return
+        # noinspection PyUnboundLocalVariable
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
     # Get event loop
