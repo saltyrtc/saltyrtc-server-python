@@ -34,7 +34,7 @@ def pytest_report_header(config):
 def pytest_namespace():
     try:
         # noinspection PyPackageRequirements,PyUnresolvedReferences
-        import uvloop
+        import uvloop  # noqa
         have_uvloop = True
     except ImportError:
         have_uvloop = False
