@@ -19,12 +19,12 @@ from .common import (
     validate_drop_reason,
     validate_hash,
     validate_initiator_connected,
+    validate_ping_interval,
     validate_public_key,
     validate_responder_id,
     validate_responder_ids,
     validate_signed_keys,
     validate_subprotocols,
-    validate_ping_interval,
 )
 from .exception import (
     MessageError,
