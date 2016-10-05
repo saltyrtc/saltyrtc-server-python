@@ -407,6 +407,9 @@ class TestProtocol:
     def test_client_factory_handshake(
             self, client_factory, initiator_key, responder_key
     ):
+        """
+        Check that we can do a complete handshake using the client factory.
+        """
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
         assert len(i['signed_keys']) == saltyrtc.SIGNED_KEYS_CIPHERTEXT_LENGTH
@@ -421,6 +424,58 @@ class TestProtocol:
         signed_keys = responder.sign_box.decrypt(
             r['signed_keys'], nonce=r['nonces']['server-auth'])
         assert signed_keys == r['ssk'] + responder_key.pk
+        yield from responder.close()
+
+    @pytest.mark.asyncio
+    def test_keep_alive_pings_initiator(self, server, client_factory):
+        """
+        Check that the server sends ping messages in the requested
+        interval.
+        """
+        if pytest.saltyrtc.external_server:
+            return  # TODO: Remove after merge with update-cli
+
+        # Initiator handshake
+        initiator, i = yield from client_factory(
+            ping_interval=1,
+            initiator_handshake=True
+        )
+
+        # Wait for two pings (including pongs)
+        yield from asyncio.sleep(2.1)
+
+        # Check ping counter
+        assert len(server.protocols) == 1
+        protocol = next(iter(server.protocols))
+        assert protocol.client.keep_alive_pings == 2
+
+        # Bye
+        yield from initiator.close()
+
+    @pytest.mark.asyncio
+    def test_keep_alive_pings_responder(self, server, client_factory):
+        """
+        Check that the server sends ping messages in the requested
+        interval.
+        """
+        if pytest.saltyrtc.external_server:
+            return  # TODO: Remove after merge with update-cli
+
+        # Responder handshake
+        responder, r = yield from client_factory(
+            ping_interval=1,
+            responder_handshake=True
+        )
+
+        # Wait for two pings (including pongs)
+        yield from asyncio.sleep(1.1)
+
+        # Check ping counter
+        assert len(server.protocols) == 1
+        protocol = next(iter(server.protocols))
+        assert protocol.client.keep_alive_pings == 1
+
+        # Bye
         yield from responder.close()
 
     @pytest.mark.asyncio
