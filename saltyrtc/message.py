@@ -24,6 +24,7 @@ from .common import (
     validate_responder_ids,
     validate_signed_keys,
     validate_subprotocols,
+    validate_ping_interval,
 )
 from .exception import (
     MessageError,
@@ -467,13 +468,16 @@ class ClientAuthMessage(AbstractBaseMessage):
     encrypted = True
 
     @classmethod
-    def create(cls, source, destination, server_cookie, subprotocols):
+    def create(cls, source, destination, server_cookie, subprotocols, ping_interval=None):
         # noinspection PyCallingNonCallable
-        return cls(source, destination, {
+        payload = {
             'type': cls.type.value,
             'your_cookie': server_cookie,
             'subprotocols': subprotocols,
-        })
+        }
+        if ping_interval is not None:
+            payload['ping_interval'] = ping_interval
+        return cls(source, destination, payload)
 
     @classmethod
     def check_payload(cls, client, payload):
@@ -482,6 +486,9 @@ class ClientAuthMessage(AbstractBaseMessage):
         """
         validate_cookie(payload.get('your_cookie'))
         validate_subprotocols(payload.get('subprotocols'))
+        ping_interval = payload.get('ping_interval')
+        if ping_interval is not None:
+            validate_ping_interval(ping_interval)
         return payload
 
     @property
@@ -491,6 +498,10 @@ class ClientAuthMessage(AbstractBaseMessage):
     @property
     def subprotocols(self):
         return self.payload['subprotocols']
+
+    @property
+    def ping_interval(self):
+        return self.payload.get('ping_interval')
 
 
 class ServerAuthMessage(AbstractBaseMessage):

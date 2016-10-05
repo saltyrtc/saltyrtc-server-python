@@ -8,7 +8,6 @@ import websockets
 
 from . import util
 from .common import (
-    KEEP_ALIVE_INTERVAL,
     KEEP_ALIVE_TIMEOUT,
     KEY_LENGTH,
     AddressType,
@@ -184,6 +183,7 @@ class PathClient:
         'authenticated',
         'keep_alive_interval',
         'keep_alive_timeout',
+        'keep_alive_pings',
         '_task_queue'
     )
 
@@ -206,8 +206,9 @@ class PathClient:
         self.log = util.get_logger('path.{}.client.{:x}'.format(path_number, id(self)))
         self.type = None
         self.authenticated = False
-        self.keep_alive_interval = KEEP_ALIVE_INTERVAL
+        self.keep_alive_interval = None
         self.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
+        self.keep_alive_pings = 0
 
         # Queue for tasks to be run on the client (relay messages, closing, ...)
         self._task_queue = asyncio.Queue(loop=self._loop)

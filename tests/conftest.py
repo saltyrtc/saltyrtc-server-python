@@ -305,7 +305,7 @@ def client_factory(
     def _client_factory(
             ws_client=None,
             path=initiator_key, timeout=None, csn=None, cookie=None, permanent_key=None,
-            initiator_handshake=False, responder_handshake=False,
+            ping_interval=None, initiator_handshake=False, responder_handshake=False,
             **kwargs
     ):
         if cookie is None:
@@ -355,11 +355,14 @@ def client_factory(
         client.box = libnacl.public.Box(sk=key, pk=ssk)
         nonce = pack_nonce(cck, 0x00, 0x00, ccsn)
         nonces['client-auth'] = nonce
-        yield from client.send(nonce, {
+        payload = {
             'type': 'client-auth',
             'your_cookie': sck,
             'subprotocols': pytest.saltyrtc.subprotocols,
-        }, timeout=timeout)
+        }
+        if ping_interval is not None:
+            payload['ping_interval'] = ping_interval
+        yield from client.send(nonce, payload, timeout=timeout)
         ccsn += 1
 
         # server-auth
