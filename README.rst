@@ -69,11 +69,6 @@ command to see usage information:
 
     $ saltyrtc-server --help
 
-Documentation
-*************
-
-TODO
-
 Contributing
 ************
 
