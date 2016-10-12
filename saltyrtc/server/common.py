@@ -15,7 +15,6 @@ __all__ = (
     'SIGNED_KEYS_CIPHERTEXT_LENGTH',
     'RELAY_TIMEOUT',
     'KEEP_ALIVE_TIMEOUT',
-    'KEEP_ALIVE_INTERVAL',
     'OverflowSentinel',
     'SubProtocol',
     'CloseCode',
@@ -32,6 +31,7 @@ __all__ = (
     'validate_responder_id',
     'validate_responder_ids',
     'validate_hash',
+    'validate_ping_interval',
     'validate_drop_reason',
     'sign_keys',
 )
@@ -43,9 +43,8 @@ NONCE_FORMATTER = '!16s2B6s'
 COOKIE_LENGTH = 16
 HASH_LENGTH = 32
 SIGNED_KEYS_CIPHERTEXT_LENGTH = 80
-RELAY_TIMEOUT = 30.0  # TODO: Sane?
-KEEP_ALIVE_TIMEOUT = 30.0  # TODO: Sane?
-KEEP_ALIVE_INTERVAL = 60.0  # TODO: Sane?
+RELAY_TIMEOUT = 30.0
+KEEP_ALIVE_TIMEOUT = 30.0
 
 
 class OverflowSentinel:
@@ -164,6 +163,11 @@ def validate_responder_ids(ids):
 def validate_hash(hash_):
     if not isinstance(hash_, bytes) or len(hash_) != HASH_LENGTH:
         raise MessageError('Invalid hash')
+
+
+def validate_ping_interval(ping_interval):
+    if not isinstance(ping_interval, int) or ping_interval <= 0:
+        raise MessageError('Invalid ping interval')
 
 
 def validate_drop_reason(reason):

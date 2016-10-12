@@ -238,8 +238,11 @@ class ServerProtocol(Protocol):
             raise ValueError('Invalid address type: {}'.format(client.type))
 
         # Task: Keep alive (if requested)
-        client.log.debug('Starting keep-alive task')
-        tasks.append(self.keep_alive_loop())
+        if client.keep_alive_interval is not None:
+            client.log.debug('Starting keep-alive task')
+            tasks.append(self.keep_alive_loop())
+        else:
+            client.log.debug('No keep-alive requested')
 
         # Wait until complete
         tasks = [self._loop.create_task(coroutine) for coroutine in tasks]
@@ -310,14 +313,20 @@ class ServerProtocol(Protocol):
         self._validate_cookie(message.server_cookie, initiator.cookie_out)
         self._validate_subprotocol(message.subprotocols)
 
+        # Set the keep alive interval (if any)
+        if message.ping_interval is not None:
+            initiator.log.debug('Setting keep-alive interval to {}',
+                                message.ping_interval)
+            initiator.keep_alive_interval = message.ping_interval
+
         # Authenticated
         previous_initiator = path.set_initiator(initiator)
         if previous_initiator is not None:
             # Drop previous initiator using the task queue of the previous initiator
             path.log.debug('Dropping previous initiator {}', previous_initiator)
             previous_initiator.log.debug('Dropping (another initiator connected)')
-            coro = previous_initiator.close(code=CloseCode.drop_by_initiator.value)
-            yield from previous_initiator.enqueue_task(coro)
+            coroutine = previous_initiator.close(code=CloseCode.drop_by_initiator.value)
+            yield from previous_initiator.enqueue_task(coroutine)
 
         # Send new-initiator message if any responder is present
         responder_ids = path.get_responder_ids()
@@ -360,6 +369,12 @@ class ServerProtocol(Protocol):
         # Validate cookie and ensure no sub-protocol downgrade took place
         self._validate_cookie(message.server_cookie, responder.cookie_out)
         self._validate_subprotocol(message.subprotocols)
+
+        # Set the keep alive interval (if any)
+        if message.ping_interval is not None:
+            responder.log.debug('Setting keep-alive interval to {}',
+                                message.ping_interval)
+            responder.keep_alive_interval = message.ping_interval
 
         # Authenticated
         id_ = path.add_responder(responder)
@@ -512,6 +527,7 @@ class ServerProtocol(Protocol):
                 raise PingTimeoutError(client)
             else:
                 client.log.debug('Pong')
+                client.keep_alive_pings += 1
 
     def _validate_cookie(self, expected_cookie, actual_cookie):
         """
