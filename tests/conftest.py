@@ -3,6 +3,8 @@ import os
 import socket
 import ssl
 import struct
+import subprocess
+import sys
 from contextlib import closing
 
 import libnacl.public
@@ -11,7 +13,13 @@ import pytest
 import umsgpack
 import websockets
 
-import saltyrtc
+from saltyrtc.server import (
+    NONCE_FORMATTER,
+    NONCE_LENGTH,
+    SubProtocol,
+    serve,
+    util,
+)
 
 
 def pytest_addoption(parser):
@@ -24,20 +32,34 @@ def pytest_report_header(config):
 
 
 def pytest_namespace():
-    return {'saltyrtc': {
+    try:
+        # noinspection PyPackageRequirements,PyUnresolvedReferences
+        import uvloop  # noqa
+        have_uvloop = True
+    except ImportError:
+        have_uvloop = False
+    saltyrtc = {
+        'have_uvloop': pytest.mark.skipif(not have_uvloop, reason='requires uvloop'),
+        'no_uvloop': pytest.mark.skipif(
+            have_uvloop, reason='requires uvloop to be not installed'),
         'ip': '127.0.0.1',
         'port': 8766,
         'external_server': False,
+        'cli_path': os.path.join(sys.exec_prefix, 'bin', 'saltyrtc-server'),
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
-        'permanent_key': saltyrtc.util.load_permanent_key(os.path.normpath(
-            os.path.join(os.path.abspath(__file__), os.pardir, 'permanent.key'))),
+        'permanent_key': os.path.normpath(
+            os.path.join(os.path.abspath(__file__), os.pardir, 'permanent.key')),
         'subprotocols': [
-            saltyrtc.SubProtocol.saltyrtc_v1.value
+            SubProtocol.saltyrtc_v1.value
         ],
         'debug': True,
         'timeout': 0.05,
-    }}
+    }
+    saltyrtc['have_internal'] = pytest.mark.skipif(
+        saltyrtc['external_server'] is None,
+        reason='requires the usage of the internal server')
+    return {'saltyrtc': saltyrtc}
 
 
 def default_event_loop(request=None, config=None):
@@ -88,7 +110,7 @@ def random_cookie():
     return os.urandom(16)
 
 
-def _get_timeout(timeout):
+def _get_timeout(timeout=None):
     """
     Return the defined timeout. In case 'debug' has been activated,
     the timeout will be multiplied by 10.
@@ -137,11 +159,24 @@ def port():
 
 
 @pytest.fixture(scope='module')
+def timeout_factory():
+    return _get_timeout
+
+
+@pytest.fixture(scope='module')
 def url(port):
     """
     Return the URL where the server can be reached.
     """
     return 'wss://{}:{}'.format(pytest.saltyrtc.ip, port)
+
+
+@pytest.fixture(scope='module')
+def server_permanent_key():
+    """
+    Return the server's permanent test NaCl key pair.
+    """
+    return util.load_permanent_key(pytest.saltyrtc.permanent_key)
 
 
 @pytest.fixture(scope='module')
@@ -185,7 +220,7 @@ def cookie_factory():
 
 
 @pytest.fixture(scope='module')
-def server(request, event_loop, port):
+def server(request, event_loop, port, server_permanent_key):
     """
     Return a :class:`saltyrtc.Server` instance.
     """
@@ -194,7 +229,7 @@ def server(request, event_loop, port):
         os.environ['PYTHONASYNCIODEBUG'] = '1'
 
         # Enable logging
-        saltyrtc.util.enable_logging(level=logbook.TRACE, redirect_loggers={
+        util.enable_logging(level=logbook.TRACE, redirect_loggers={
             'asyncio': logbook.DEBUG,
             'websockets': logbook.DEBUG,
         })
@@ -205,9 +240,9 @@ def server(request, event_loop, port):
 
     # Setup server
     if not pytest.saltyrtc.external_server:
-        coroutine = saltyrtc.serve(
-            saltyrtc.util.create_ssl_context(pytest.saltyrtc.cert),
-            pytest.saltyrtc.permanent_key,
+        coroutine = serve(
+            util.create_ssl_context(pytest.saltyrtc.cert),
+            server_permanent_key,
             host=pytest.saltyrtc.ip,
             port=port,
             loop=event_loop
@@ -286,7 +321,7 @@ def ws_client_factory(initiator_key, url, event_loop, server):
 
 @pytest.fixture(scope='module')
 def client_factory(
-        initiator_key, url, event_loop, server, responder_key,
+        initiator_key, url, event_loop, server, server_permanent_key, responder_key,
         pack_nonce, pack_message, unpack_message
 ):
     """
@@ -311,7 +346,7 @@ def client_factory(
         if cookie is None:
             cookie = random_cookie()
         if permanent_key is None:
-            permanent_key = pytest.saltyrtc.permanent_key.pk
+            permanent_key = server_permanent_key.pk
         _kwargs = {
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
@@ -395,13 +430,13 @@ def unpack_message(event_loop):
     def _unpack_message(client, box=None, timeout=None):
         timeout = _get_timeout(timeout)
         data = yield from asyncio.wait_for(client.recv(), timeout, loop=event_loop)
-        nonce = data[:saltyrtc.NONCE_LENGTH]
+        nonce = data[:NONCE_LENGTH]
         (cookie,
          source, destination,
-         combined_sequence_number) = struct.unpack(saltyrtc.NONCE_FORMATTER, nonce)
+         combined_sequence_number) = struct.unpack(NONCE_FORMATTER, nonce)
         combined_sequence_number, *_ = struct.unpack(
             '!Q', b'\x00\x00' + combined_sequence_number)
-        data = data[saltyrtc.NONCE_LENGTH:]
+        data = data[NONCE_LENGTH:]
         if box is not None:
             data = box.decrypt(data, nonce=nonce)
         else:
@@ -421,7 +456,7 @@ def unpack_message(event_loop):
 def pack_nonce():
     def _pack_nonce(cookie, source, destination, combined_sequence_number):
         return struct.pack(
-            saltyrtc.NONCE_FORMATTER,
+            NONCE_FORMATTER,
             cookie,
             source, destination,
             struct.pack('!Q', combined_sequence_number)[2:]
@@ -441,3 +476,98 @@ def pack_message(event_loop):
         yield from asyncio.wait_for(client.send(data), timeout, loop=event_loop)
         return data
     return _pack_message
+
+
+@pytest.fixture(scope='module')
+def cli(event_loop):
+    @asyncio.coroutine
+    def _call_cli(*args, input=None, timeout=3.0, signal=None, env=None):
+        # Prepare environment
+        if env is None:
+            env = os.environ.copy()
+
+        # Call CLI in subprocess and get output
+        parameters = [sys.executable, pytest.saltyrtc.cli_path] + list(args)
+        if isinstance(input, str):
+            input = input.encode('utf-8')
+
+        # Create process
+        create = asyncio.create_subprocess_exec(
+            *parameters, env=env, stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        process = yield from create
+
+        # Wait for process to terminate
+        task = event_loop.create_task(process.communicate(input=input))
+        maybe_shielded_task = task
+        if signal is not None:
+            maybe_shielded_task = asyncio.shield(maybe_shielded_task, loop=event_loop)
+        output = None
+        timeout_exc = False
+        try:
+            output, _ = yield from asyncio.wait_for(
+                maybe_shielded_task, timeout, loop=event_loop)
+        except asyncio.TimeoutError:
+            if signal is None:
+                raise
+            timeout_exc = True
+
+        # Send signal (if requested)
+        if timeout_exc and signal is not None:
+            try:
+                signals = list(signal)
+            except TypeError:
+                signals = [signal]
+            length = len(signals)
+            for i, signal in enumerate(signals):
+                shielded_task = asyncio.shield(task, loop=event_loop)
+                process.send_signal(signal)
+                try:
+                    output, _ = yield from asyncio.wait_for(
+                        shielded_task, timeout, loop=event_loop)
+                except asyncio.TimeoutError:
+                    if i == (length - 1):
+                        task.cancel()
+                        raise
+
+        # Process output
+        output = output.decode('utf-8')
+
+        # Strip leading empty lines and pydev debugger output
+        rubbish = [
+            'pydev debugger: process',
+            'Traceback (most recent call last):',
+        ]
+        lines = []
+        skip_following_empty_lines = True
+        for line in output.splitlines(keepends=True):
+            if any((line.startswith(s) for s in rubbish)):
+                skip_following_empty_lines = True
+            elif not skip_following_empty_lines or len(line.strip()) > 0:
+                lines.append(line)
+                skip_following_empty_lines = False
+
+        # Strip trailing empty lines
+        empty_lines_count = 0
+        for line in reversed(lines):
+            if len(line.strip()) > 0:
+                break
+            empty_lines_count += 1
+        if empty_lines_count > 0:
+            lines = lines[:-empty_lines_count]
+        output = ''.join(lines)
+
+        # Check return code
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(
+                process.returncode, parameters, output=output)
+        return output
+    return _call_cli
+
+
+@pytest.fixture(scope='function')
+def fake_logbook_env(tmpdir):
+    tmpdir.join("logbook.py").write("raise ImportError('h3h3')")
+    env = os.environ.copy()
+    env['PYTHONPATH'] = ':'.join((str(tmpdir), env.get('PYTHONPATH', '')))
+    return env

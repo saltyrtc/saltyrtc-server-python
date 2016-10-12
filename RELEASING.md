@@ -25,7 +25,7 @@ Signing key: https://lgrahl.de/pgp-key.txt
 4. Do a signed commit and signed tag of the release:
 
   ```bash
-  git add setup.py CHANGELOG.md
+  git add saltyrtc/__init__.py.py CHANGELOG.rst
   git commit -S${GPG} -m "Release v${VERSION}"
   git tag -u ${GPG} -m "Release v${VERSION}" v${VERSION}
   ```

@@ -12,18 +12,16 @@ from .message import *  # noqa
 # noinspection PyUnresolvedReferences
 from .protocol import *  # noqa
 # noinspection PyUnresolvedReferences
-from .client import *  # noqa
-# noinspection PyUnresolvedReferences
 from .server import *  # noqa
 # noinspection PyUnresolvedReferences
 from .util import *  # noqa
 
 __all__ = tuple(itertools.chain(
+    ('bin',),
     exception.__all__,  # noqa
     common.__all__,  # noqa
     message.__all__,  # noqa
     protocol.__all__,  # noqa
-    client.__all__,  # noqa
     server.__all__,  # noqa
     util.__all__,  # noqa
 ))

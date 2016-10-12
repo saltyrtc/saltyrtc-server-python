@@ -4,10 +4,8 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
-ExecStart=/srv/saltyrtc-server-python/venv/bin/python examples/debug.py
+ExecStart=/srv/saltyrtc-server-python/venv/bin/saltyrtc-server serve -sc /path/to/cert.pem -sk /path/to/key.pem -k /path/to/permanent-keyfile -p 8765
 WorkingDirectory=/srv/saltyrtc-server-python
-Environment=SALTYRTC_TLS_CERT=/path/to/cert.pem
-Environment=SALTYRTC_TLS_KEY=/path/to/key.pem
 User=saltyrtc
 Group=saltyrtc
 Restart=always

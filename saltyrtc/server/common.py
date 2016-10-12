@@ -1,3 +1,7 @@
+"""
+This package will be moved to `saltyrtc.common` as soon as a SaltyRTC
+client is being written.
+"""
 import enum
 
 from .exception import MessageError

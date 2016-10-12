@@ -29,7 +29,7 @@ before_install:
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
 install:
   - pip install -U setuptools pip
-  - "pip install .[test]"
+  - "pip install .[dev]"
   - pip install codecov
 
 # Run flake8, isort, check docs & tests
@@ -37,7 +37,7 @@ script:
   - flake8 .
   - isort -rc -c . || (isort -rc -df . && return 1)
   - python setup.py checkdocs
-  - py.test --cov-config .coveragerc --cov=saltyrtc --loop=$EVENT_LOOP
+  - py.test --cov-config .coveragerc --cov=saltyrtc.server --loop=$EVENT_LOOP
 
 # After success
 after_success:

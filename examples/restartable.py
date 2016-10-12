@@ -5,7 +5,7 @@ import sys
 
 import logbook.more
 
-import saltyrtc
+import saltyrtc.server
 
 
 def env(name, default=None):
@@ -26,12 +26,13 @@ def main():
 
     The signal *HUP* will restart the server.
     """
-    while True:
-        loop = asyncio.get_event_loop()
+    # Get event loop
+    loop = asyncio.get_event_loop()
 
+    while True:
         # Create SSL context
         if env('SALTYRTC_DISABLE_TLS') != 'yes-and-i-know-what-im-doing':
-            ssl_context = saltyrtc.util.create_ssl_context(
+            ssl_context = saltyrtc.server.create_ssl_context(
                 certfile=require_env('SALTYRTC_TLS_CERT'),
                 keyfile=require_env('SALTYRTC_TLS_KEY'),
             )
@@ -40,32 +41,33 @@ def main():
 
         # Get permanent key
         if env('SALTYRTC_DISABLE_SERVER_PERMANENT_KEY') != 'yes-and-i-know-what-im-doing':
-            permanent_key = saltyrtc.util.load_permanent_key(
+            permanent_key = saltyrtc.server.load_permanent_key(
                 require_env('SALTYRTC_SERVER_PERMANENT_KEY'))
         else:
             permanent_key = None
 
         # Start server
         port = int(env('SALTYRTC_PORT', '8765'))
-        coroutine = saltyrtc.serve(ssl_context, permanent_key, port=port)
+        coroutine = saltyrtc.server.serve(ssl_context, permanent_key, port=port)
         server = loop.run_until_complete(coroutine)
 
         # Restart server on HUP signal
         restart_signal = asyncio.Future(loop=loop)
 
-        def restart_signal_handler(*_):
-            def callback():
-                restart_signal.set_result(True)
-            loop.call_soon_threadsafe(callback)
+        def _restart_signal_handler(*_):
+            restart_signal.set_result(True)
 
         # Register restart server routine
-        signal.signal(signal.SIGHUP, restart_signal_handler)
+        loop.add_signal_handler(signal.SIGHUP, _restart_signal_handler)
 
         # Wait until Ctrl+C has been pressed
         try:
             loop.run_until_complete(restart_signal)
         except KeyboardInterrupt:
             pass
+
+        # Remove the signal handler
+        loop.remove_signal_handler(signal.SIGHUP)
 
         # Wait until server is closed and close the event loop
         server.close()
@@ -75,13 +77,16 @@ def main():
         if not restart_signal.done():
             break
 
+    # Close loop
+    loop.close()
+
 
 if __name__ == '__main__':
     # Enable asyncio debug logging
     os.environ['PYTHONASYNCIODEBUG'] = '1'
 
     # Enable logging
-    saltyrtc.util.enable_logging(level=logbook.TRACE, redirect_loggers={
+    saltyrtc.server.enable_logging(level=logbook.TRACE, redirect_loggers={
         'asyncio': logbook.DEBUG,
         'websockets': logbook.DEBUG,
     })
