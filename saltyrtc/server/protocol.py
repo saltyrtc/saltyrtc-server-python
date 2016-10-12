@@ -8,6 +8,7 @@ import websockets
 
 from . import util
 from .common import (
+    KEEP_ALIVE_INTERVAL_MIN,
     KEEP_ALIVE_TIMEOUT,
     KEY_LENGTH,
     AddressType,
@@ -206,7 +207,7 @@ class PathClient:
         self.log = util.get_logger('path.{}.client.{:x}'.format(path_number, id(self)))
         self.type = None
         self.authenticated = False
-        self.keep_alive_interval = None
+        self.keep_alive_interval = KEEP_ALIVE_INTERVAL_MIN
         self.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
         self.keep_alive_pings = 0
 

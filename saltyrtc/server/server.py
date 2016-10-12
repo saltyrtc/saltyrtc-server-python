@@ -237,12 +237,9 @@ class ServerProtocol(Protocol):
         else:
             raise ValueError('Invalid address type: {}'.format(client.type))
 
-        # Task: Keep alive (if requested)
-        if client.keep_alive_interval is not None:
-            client.log.debug('Starting keep-alive task')
-            tasks.append(self.keep_alive_loop())
-        else:
-            client.log.debug('No keep-alive requested')
+        # Task: Keep alive
+        client.log.debug('Starting keep-alive task')
+        tasks.append(self.keep_alive_loop())
 
         # Wait until complete
         tasks = [self._loop.create_task(coroutine) for coroutine in tasks]
