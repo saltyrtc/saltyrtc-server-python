@@ -32,7 +32,7 @@ def _h(text):
     from helps for :func:`click.command`). So, we have to do it
     ourselves.
     """
-    return text.replace('\n', '')
+    return text.replace('\n', ' ')
 
 
 def _get_logging_level(verbosity):
@@ -138,7 +138,7 @@ Path to a file that contains the SSL certificate."""))
 @click.option('-sk', '--sslkey', type=click.Path(exists=True), help=_h("""
 Path to a file that contains the SSL private key. Will be read from
 the SSL certificate file if not present."""))
-@click.option('-k', '--key', type=click.Path(exists=True), help=_h("""
+@click.option('-k', '--key', type=click.Path(), help=_h("""
 Path to a or a hex-encoded private permanent key of the server (e.g.
 a NaCl private key)."""))
 @click.option('-h', '--host', help='Bind to a specific host.')
@@ -246,7 +246,3 @@ def main():
     finally:
         if obj['logging_handler'] is not None:
             obj['logging_handler'].pop_application()
-
-
-if __name__ == '__main__':
-    main()

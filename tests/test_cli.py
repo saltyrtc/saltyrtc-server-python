@@ -86,11 +86,18 @@ class TestCLI:
         assert 'ssl.SSLError' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_invalid_key(self, cli, tmpdir):
+    def test_serve_invalid_key_file(self, cli, tmpdir):
         keyfile = tmpdir.join('keyfile.key')
         keyfile.write('6d656f77')
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             yield from cli('serve', '-sc', pytest.saltyrtc.cert, '-k', str(keyfile))
+        assert 'ValueError' in exc_info.value.output
+
+    @pytest.mark.asyncio
+    def test_serve_invalid_hex_encoded_key(self, cli):
+        key = open(pytest.saltyrtc.permanent_key, 'r').read()[63:]
+        with pytest.raises(subprocess.CalledProcessError) as exc_info:
+            yield from cli('serve', '-sc', pytest.saltyrtc.cert, '-k', key)
         assert 'ValueError' in exc_info.value.output
 
     @pytest.mark.asyncio
@@ -144,6 +151,18 @@ class TestCLI:
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-k', pytest.saltyrtc.permanent_key,
+            '-p', '8443',
+            timeout=timeout_factory(),
+            signal=signal.SIGINT,
+        )
+        assert 'Stopped' in output
+
+    @pytest.mark.asyncio
+    def test_serve_asyncio_hex_encoded_key(self, cli, timeout_factory):
+        output = yield from cli(
+            'serve',
+            '-sc', pytest.saltyrtc.cert,
+            '-k', open(pytest.saltyrtc.permanent_key, 'r').read(),
             '-p', '8443',
             timeout=timeout_factory(),
             signal=signal.SIGINT,
