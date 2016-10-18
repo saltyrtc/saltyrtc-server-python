@@ -124,6 +124,22 @@ class TestProtocol:
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
+    def test_invalid_message_length(
+            self, sleep, cookie_factory, pack_nonce, client_factory
+    ):
+        """
+        The server must close the connection when a packet containing
+        less than 25 bytes has been received.
+        """
+        client = yield from client_factory()
+        yield from client.recv()
+        cck, ccsn = cookie_factory(), 2 ** 32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), b'', pack=False)
+        yield from sleep()
+        assert not client.ws_client.open
+        assert client.ws_client.close_code == CloseCode.protocol_error
+
+    @pytest.mark.asyncio
     def test_duplicated_cookie(self, sleep, initiator_key, pack_nonce, client_factory):
         """
         Check that the server closes with Protocol Error when a client
@@ -436,9 +452,6 @@ class TestProtocol:
         Check that the server sends ping messages in the requested
         interval.
         """
-        if pytest.saltyrtc.external_server:
-            return  # TODO: Remove after merge with update-cli
-
         # Initiator handshake
         initiator, i = yield from client_factory(
             ping_interval=1,
@@ -456,15 +469,13 @@ class TestProtocol:
         # Bye
         yield from initiator.close()
 
+    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_keep_alive_pings_responder(self, server, client_factory):
         """
         Check that the server sends ping messages in the requested
         interval.
         """
-        if pytest.saltyrtc.external_server:
-            return  # TODO: Remove after merge with update-cli
-
         # Responder handshake
         responder, r = yield from client_factory(
             ping_interval=1,

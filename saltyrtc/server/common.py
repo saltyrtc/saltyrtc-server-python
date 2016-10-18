@@ -7,6 +7,7 @@ import enum
 from .exception import MessageError
 
 __all__ = (
+    'DATA_LENGTH_MIN',
     'KEY_LENGTH',
     'NONCE_LENGTH',
     'NONCE_FORMATTER',
@@ -37,7 +38,7 @@ __all__ = (
     'sign_keys',
 )
 
-
+DATA_LENGTH_MIN = 25
 KEY_LENGTH = 32
 NONCE_LENGTH = 24
 NONCE_FORMATTER = '!16s2B6s'

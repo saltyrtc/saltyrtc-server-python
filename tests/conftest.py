@@ -272,12 +272,12 @@ class Client:
         self.session_key = None
         self.box = None
 
-    def send(self, nonce, message, box=_DefaultBox, timeout=None):
+    def send(self, nonce, message, box=_DefaultBox, timeout=None, pack=True):
         if timeout is None:
             timeout = self.timeout
         return (yield from self.pack_and_send(
             self.ws_client, nonce, message,
-            box=self.box if box == _DefaultBox else box, timeout=timeout
+            box=self.box if box == _DefaultBox else box, timeout=timeout, pack=pack
         ))
 
     def recv(self, box=_DefaultBox, timeout=None):
@@ -467,8 +467,11 @@ def pack_nonce():
 @pytest.fixture(scope='module')
 def pack_message(event_loop):
     @asyncio.coroutine
-    def _pack_message(client, nonce, message, box=None, timeout=None):
-        data = umsgpack.packb(message)
+    def _pack_message(client, nonce, message, box=None, timeout=None, pack=True):
+        if pack:
+            data = umsgpack.packb(message)
+        else:
+            data = message
         if box is not None:
             _, data = box.encrypt(data, nonce=nonce, pack_nonce=False)
         data = b''.join((nonce, data))

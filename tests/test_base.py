@@ -1,6 +1,7 @@
 """
 TODO: Describe tests
 """
+import libnacl.public
 import pytest
 import websockets
 
@@ -27,3 +28,15 @@ class TestPrerequisities:
         pong = yield from client.ping()
         yield from pong
         yield from client.close()
+
+    def test_packet_min_length(self):
+        """
+        Check that an empty NaCl message takes exactly 40 bytes (24
+        bytes nonce and 16 bytes NaCl authenticator).
+        """
+        a = libnacl.public.SecretKey()
+        b = libnacl.public.SecretKey()
+        box = libnacl.public.Box(sk=a.sk, pk=b.pk)
+        nonce, data = box.encrypt(b'', pack_nonce=False)
+        assert len(nonce) == 24
+        assert len(data) == 16

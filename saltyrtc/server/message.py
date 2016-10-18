@@ -9,6 +9,7 @@ import umsgpack
 from .common import sign_keys as sign_keys_
 from .common import (
     COOKIE_LENGTH,
+    DATA_LENGTH_MIN,
     NONCE_FORMATTER,
     NONCE_LENGTH,
     AddressType,
@@ -206,6 +207,11 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         MessageError
         MessageFlowError
         """
+        # Check length
+        length = len(data)
+        if length < DATA_LENGTH_MIN:
+            raise MessageError('Message too short: {} bytes'.format(length))
+
         # Unpack and check nonce
         (nonce,
          source, source_type,
