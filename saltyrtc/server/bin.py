@@ -195,6 +195,8 @@ def serve(ctx, **arguments):
     while True:
         # Run the server
         click.echo('Starting')
+        if key is not None:
+            click.echo('Public permanent key: {}'.format(key.hex_pk().decode('ascii')))
         coroutine = server.serve(ssl_context, key, host=host, port=port, loop=loop)
         server_ = loop.run_until_complete(coroutine)
 
