@@ -493,6 +493,29 @@ class TestProtocol:
         # Bye
         yield from responder.close()
 
+    @pytest.saltyrtc.have_internal
+    @pytest.mark.asyncio
+    def test_keep_alive_ignore_invalid(self, server, client_factory):
+        """
+        Check that the server ignores invalid keep alive intervals.
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(
+            ping_interval=0,
+            initiator_handshake=True
+        )
+
+        # Wait for a second
+        yield from asyncio.sleep(1.1)
+
+        # Check ping counter
+        assert len(server.protocols) == 1
+        protocol = next(iter(server.protocols))
+        assert protocol.client.keep_alive_pings == 0
+
+        # Bye
+        yield from initiator.close()
+
     @pytest.mark.asyncio
     def test_keep_alive_timeout(
             self, sleep, server, ws_client_factory, client_factory
@@ -509,7 +532,7 @@ class TestProtocol:
         # Patch server's keep alive interval and timeout
         assert len(server.protocols) == 1
         protocol = next(iter(server.protocols))
-        protocol.client.keep_alive_interval = 0
+        protocol.client._keep_alive_interval = 0
         protocol.client.keep_alive_timeout = 0.001
 
         # Initiator handshake

@@ -16,6 +16,7 @@ __all__ = (
     'SIGNED_KEYS_CIPHERTEXT_LENGTH',
     'RELAY_TIMEOUT',
     'KEEP_ALIVE_INTERVAL_MIN',
+    'KEEP_ALIVE_INTERVAL_DEFAULT',
     'KEEP_ALIVE_TIMEOUT',
     'OverflowSentinel',
     'SubProtocol',
@@ -46,7 +47,8 @@ COOKIE_LENGTH = 16
 HASH_LENGTH = 32
 SIGNED_KEYS_CIPHERTEXT_LENGTH = 80
 RELAY_TIMEOUT = 30.0
-KEEP_ALIVE_INTERVAL_MIN = 3600.0
+KEEP_ALIVE_INTERVAL_MIN = 1.0
+KEEP_ALIVE_INTERVAL_DEFAULT = 3600.0
 KEEP_ALIVE_TIMEOUT = 30.0
 
 
@@ -169,7 +171,7 @@ def validate_hash(hash_):
 
 
 def validate_ping_interval(ping_interval):
-    if not isinstance(ping_interval, int) or ping_interval <= 0:
+    if not isinstance(ping_interval, int) or ping_interval < 0:
         raise MessageError('Invalid ping interval')
 
 
