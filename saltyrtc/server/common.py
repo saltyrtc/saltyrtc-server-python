@@ -169,7 +169,7 @@ def validate_hash(hash_):
 
 
 def validate_ping_interval(ping_interval):
-    if not isinstance(ping_interval, int) or ping_interval <= 0:
+    if not isinstance(ping_interval, int) or ping_interval < 0:
         raise MessageError('Invalid ping interval')
 
 
