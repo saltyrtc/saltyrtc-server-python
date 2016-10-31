@@ -8,6 +8,7 @@ import websockets
 
 from . import util
 from .common import (
+    KEEP_ALIVE_INTERVAL_DEFAULT,
     KEEP_ALIVE_INTERVAL_MIN,
     KEEP_ALIVE_TIMEOUT,
     KEY_LENGTH,
@@ -179,10 +180,10 @@ class PathClient:
         '_box',
         '_sign_box',
         '_id',
+        '_keep_alive_interval',
         'log',
         'type',
         'authenticated',
-        'keep_alive_interval',
         'keep_alive_timeout',
         'keep_alive_pings',
         '_task_queue'
@@ -204,10 +205,10 @@ class PathClient:
         self._box = None
         self._sign_box = None
         self._id = AddressType.server
+        self._keep_alive_interval = KEEP_ALIVE_INTERVAL_DEFAULT
         self.log = util.get_logger('path.{}.client.{:x}'.format(path_number, id(self)))
         self.type = None
         self.authenticated = False
-        self.keep_alive_interval = KEEP_ALIVE_INTERVAL_MIN
         self.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
         self.keep_alive_pings = 0
 
@@ -243,6 +244,22 @@ class PathClient:
         """
         self._id = id_
         self.log.debug('Assigned id: {}', id_)
+
+    @property
+    def keep_alive_interval(self):
+        """
+        Return the currently set keep alive interval.
+        """
+        return self._keep_alive_interval
+
+    @keep_alive_interval.setter
+    def keep_alive_interval(self, interval):
+        """
+        Assign a new keep alive interval. Will ignore values less than
+        `KEEP_ALIVE_INTERVAL_MIN`.
+        """
+        if interval >= KEEP_ALIVE_INTERVAL_MIN:
+            self._keep_alive_interval = interval
 
     @property
     def client_key(self):
