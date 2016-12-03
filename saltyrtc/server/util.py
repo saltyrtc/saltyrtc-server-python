@@ -24,6 +24,7 @@ __all__ = (
 def _logging_error(*args, **kwargs):
     raise ImportError('Please install saltyrtc.server[logging] for logging support')
 
+
 try:
     # noinspection PyPackageRequirements,PyUnresolvedReferences
     import logbook
