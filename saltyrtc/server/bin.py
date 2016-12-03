@@ -128,6 +128,9 @@ def generate(key_file):
         file.write(key_pair.hex_sk())
     os.umask(current_umask)
 
+    # Print public key
+    click.echo('Public permanent key: {}'.format(key_pair.hex_pk().decode('ascii')))
+
 
 @cli.command(short_help='Start the signalling server.', help="""
 Start the SaltyRTC signalling server. A HUP signal will restart the
