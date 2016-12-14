@@ -55,7 +55,7 @@ class Path:
             if client is not None:
                 if client.connection_closed.done():
                     self.remove_client(client)
-                    self.log.warning('Removed dead client {}', client)
+                    self.log.notice('Removed dead client {}', client)
                 else:
                     return False
         return True
