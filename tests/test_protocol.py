@@ -14,6 +14,15 @@ from saltyrtc.server.common import (
 )
 
 
+class _FakePathClient:
+    def __init__(self):
+        self.connection_closed = asyncio.Future()
+        self.connection_closed.set_result(None)
+
+    def update_log_name(self, id_):
+        pass
+
+
 class TestProtocol:
     @pytest.mark.asyncio
     def test_no_subprotocols(self, sleep, ws_client_factory):
@@ -1237,15 +1246,43 @@ class TestProtocol:
         # Bye
         yield from first_responder.close()
         yield from second_responder.close()
+        # Dunno why this is needed but there seems to be a timing issue (#protocols not 0)
+        yield from sleep()
 
+    @pytest.saltyrtc.have_internal
+    @pytest.mark.asyncio
+    def test_path_full_lite(self, sleep, initiator_key, server, client_factory):
+        """
+        Add 253 fake responders to a path. Then, add a 254th responder
+        and check that the correct error code (Path Full) is being
+        returned.
+        """
+        assert len(server.protocols) == 0
+
+        # Get path instance of server
+        path = server.paths.get(initiator_key.pk)
+
+        # Add fake clients to path
+        clients = [_FakePathClient() for _ in range(0x02, 0x100)]
+        for client in clients:
+            path.add_responder(client)
+
+        # Now the path is full
+        with pytest.raises(websockets.ConnectionClosed) as exc_info:
+            yield from client_factory(responder_handshake=True)
+        assert exc_info.value.code == CloseCode.path_full_error
+
+        # Remove fake clients from path
+        for client in clients:
+            path.remove_client(client)
+
+    @pytest.saltyrtc.long_test
     @pytest.mark.asyncio
     def test_path_full(self, event_loop, client_factory):
         """
-        Add 253 responder to a path. Then, add a 254th responder and
-        check that the correct error code (Path Full) is being
+        Add 253 responders to a path. Then, add a 254th responder
+        and check that the correct error code (Path Full) is being
         returned.
-
-        Note: This test takes a few seconds.
         """
         tasks = [client_factory(responder_handshake=True, timeout=20.0)
                  for _ in range(0x02, 0x100)]
