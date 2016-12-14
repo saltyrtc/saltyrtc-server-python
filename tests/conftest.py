@@ -22,6 +22,12 @@ from saltyrtc.server import (
 )
 
 
+class CalledProcessError(subprocess.CalledProcessError):
+    def __str__(self):
+        return "Command '{}' returned non-zero exit status {}:\n{}".format(
+            self.cmd, self.returncode, self.output)
+
+
 def pytest_addoption(parser):
     help_ = 'loop: Use a different event loop, supported: asyncio, uvloop'
     parser.addoption("--loop", action="store", help=help_)
@@ -53,11 +59,15 @@ def pytest_namespace():
         'subprotocols': [
             SubProtocol.saltyrtc_v1.value
         ],
-        'debug': True,
-        'timeout': 0.05,
+        'debug': logbook.NOTICE,
+        'timeout': 0.1,
+        'run_long_tests': False,
     }
     saltyrtc['have_internal'] = pytest.mark.skipif(
         saltyrtc['external_server'] is None,
+        reason='requires the usage of the internal server')
+    saltyrtc['long_test'] = pytest.mark.skipif(
+        not saltyrtc['run_long_tests'],
         reason='requires the usage of the internal server')
     return {'saltyrtc': saltyrtc}
 
@@ -229,9 +239,9 @@ def server(request, event_loop, port, server_permanent_key):
         os.environ['PYTHONASYNCIODEBUG'] = '1'
 
         # Enable logging
-        util.enable_logging(level=logbook.TRACE, redirect_loggers={
-            'asyncio': logbook.DEBUG,
-            'websockets': logbook.DEBUG,
+        util.enable_logging(level=logbook.NOTICE, redirect_loggers={
+            'asyncio': logbook.WARNING,
+            'websockets': logbook.WARNING,
         })
 
         # Push handler
@@ -562,7 +572,7 @@ def cli(event_loop):
 
         # Check return code
         if process.returncode != 0:
-            raise subprocess.CalledProcessError(
+            raise CalledProcessError(
                 process.returncode, parameters, output=output)
         return output
     return _call_cli
