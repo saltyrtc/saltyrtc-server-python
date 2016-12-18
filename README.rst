@@ -91,6 +91,24 @@ imports (``isort``) and run the project's tests:
     $ isort -rc .
     $ py.test
 
+Reporting Security Issues
+*************************
+
+Please report security issues directly to one or both of the following
+contacts:
+
+-  Danilo Bargen
+
+   -  Email: mail@dbrgn.ch
+   -  Threema: EBEP4UCA
+   -  GPG: `EA456E8BAF0109429583EED83578F667F2F3A5FA`_
+
+-  Lennart Grahl
+
+   -  Email: lennart.grahl@gmail.com
+   -  Threema: MSFVEW6C
+   -  GPG: `3FDB14868A2B36D638F3C495F98FBED10482ABA6`_
+
 .. _asyncio: https://docs.python.org/3/library/asyncio.html
 .. _venv: https://docs.python.org/3/library/venv.html
 .. _virtualenvwrapper: https://virtualenvwrapper.readthedocs.io/
@@ -102,3 +120,5 @@ imports (``isort``) and run the project's tests:
    :target: https://codecov.io/gh/saltyrtc/saltyrtc-server-python
 .. |PyPI| image:: https://badge.fury.io/py/saltyrtc.server.svg
    :target: https://badge.fury.io/py/saltyrtc.server
+.. _EA456E8BAF0109429583EED83578F667F2F3A5FA: https://keybase.io/dbrgn
+.. _3FDB14868A2B36D638F3C495F98FBED10482ABA6: https://keybase.io/lgrahl
