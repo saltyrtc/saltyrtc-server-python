@@ -1,6 +1,11 @@
 import asyncio
 import binascii
 import inspect
+from collections.abc import Coroutine
+from typing import (
+    Dict,
+    List,
+)
 
 import websockets
 
@@ -11,6 +16,10 @@ from .common import (
     CloseCode,
     MessageType,
     SubProtocol,
+)
+from .events import (
+    Event,
+    EventRegistry,
 )
 from .exception import (
     Disconnected,
@@ -45,7 +54,10 @@ __all__ = (
 
 
 @asyncio.coroutine
-def serve(ssl_context, key, paths=None, host=None, port=8765, loop=None):
+def serve(
+        ssl_context, key, paths=None, host=None, port=8765, loop=None,
+        event_callbacks: Dict[Event, List[Coroutine]] = None
+):
     """
     Start serving SaltyRTC Signalling Clients.
 
@@ -62,7 +74,9 @@ def serve(ssl_context, key, paths=None, host=None, port=8765, loop=None):
           `8765`.
         - `loop`: A :class:`asyncio.BaseEventLoop` instance or `None`
           if the default event loop should be used.
-
+        - `event_callbacks`: An optional dict with keys being an :class:`Event`
+          and the value being a list of callback coroutines. The callback will
+          be called every time the event occurs.
 
     """
     if loop is None:
@@ -74,6 +88,12 @@ def serve(ssl_context, key, paths=None, host=None, port=8765, loop=None):
 
     # Create server
     server = Server(key, paths, loop=loop)
+
+    # Register event callbacks
+    if event_callbacks is not None:
+        for event, callbacks in event_callbacks.items():
+            for callback in callbacks:
+                server.register_event_callback(event, callback)
 
     # Start server
     ws_server = yield from websockets.serve(
@@ -228,11 +248,14 @@ class ServerProtocol(Protocol):
         tasks = [self.task_loop()]
 
         # Task: Poll for messages
+        path = binascii.hexlify(self.path.initiator_key).decode('ascii')
         if client.type == AddressType.initiator:
             client.log.debug('Starting runner for initiator')
+            self._server._raise_event(Event.INITIATOR_CONNECTED, path)
             tasks.append(self.initiator_receive_loop())
         elif client.type == AddressType.responder:
             client.log.debug('Starting runner for responder')
+            self._server._raise_event(Event.RESPONDER_CONNECTED, path)
             tasks.append(self.responder_receive_loop())
         else:
             raise ValueError('Invalid address type: {}'.format(client.type))
@@ -592,6 +615,9 @@ class Server(asyncio.AbstractServer):
         # Store server protocols
         self.protocols = set()
 
+        # Event Registry
+        self._events = EventRegistry()
+
     @property
     def server(self):
         return self._server
@@ -629,6 +655,19 @@ class Server(asyncio.AbstractServer):
         self.protocols.remove(protocol)
         self._log.debug('Protocol unregistered: {}', protocol)
         self.paths.clean(protocol.path)
+
+    def register_event_callback(self, event: Event, callback: Coroutine):
+        """
+        Register a new event callback.
+        """
+        self._events.register(event, callback)
+
+    def _raise_event(self, event: Event, *data):
+        """
+        Raise an event and call all registered event callbacks.
+        """
+        for callback in self._events.get_callbacks(event):
+            self._loop.create_task(callback(event, *data))
 
     def close(self):
         """

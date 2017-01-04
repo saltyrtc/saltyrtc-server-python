@@ -15,6 +15,8 @@ from .protocol import *  # noqa
 from .server import *  # noqa
 # noinspection PyUnresolvedReferences
 from .util import *  # noqa
+# noinspection PyUnresolvedReferences
+from .events import *  # noqa
 
 __all__ = tuple(itertools.chain(
     ('bin',),
@@ -24,6 +26,7 @@ __all__ = tuple(itertools.chain(
     protocol.__all__,  # noqa
     server.__all__,  # noqa
     util.__all__,  # noqa
+    events.__all__,  # noqa
 ))
 
 __author__ = 'Lennart Grahl <lennart.grahl@gmail.com>'
