@@ -1,10 +1,14 @@
 import collections
-from collections.abc import Coroutine
 from enum import (
     Enum,
     unique,
 )
 from typing import List
+
+try:
+    from collections.abc import Coroutine
+except ImportError:  # python 3.4
+    from backports_abc import Coroutine
 
 __all__ = ('Event',)
 

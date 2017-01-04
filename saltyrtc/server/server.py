@@ -1,7 +1,6 @@
 import asyncio
 import binascii
 import inspect
-from collections.abc import Coroutine
 from typing import (
     Dict,
     List,
@@ -44,6 +43,11 @@ from .protocol import (
     PathClient,
     Protocol,
 )
+
+try:
+    from collections.abc import Coroutine
+except ImportError:  # python 3.4
+    from backports_abc import Coroutine
 
 __all__ = (
     'serve',
