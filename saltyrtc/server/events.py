@@ -1,8 +1,5 @@
 import collections
-from enum import (
-    Enum,
-    unique,
-)
+import enum
 from typing import List
 
 try:
@@ -13,8 +10,8 @@ except ImportError:  # python 3.4
 __all__ = ('Event',)
 
 
-@unique
-class Event(Enum):
+@enum.unique
+class Event(enum.Enum):
     INITIATOR_CONNECTED = 'initiator-connected'
     RESPONDER_CONNECTED = 'responder-connected'
 
