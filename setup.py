@@ -61,7 +61,11 @@ setup(
     ],
     tests_require=tests_require,
     extras_require={
-        ':python_version<="3.4"': ['asyncio>=3.4.3'],
+        ':python_version<="3.4"': [
+            'asyncio>=3.4.3',
+            'typing>=3,<4',
+            'backports_abc==0.5',
+        ],
         'dev': tests_require,
         'logging': logging_require,
         'uvloop': ['uvloop>=0.5.3'],

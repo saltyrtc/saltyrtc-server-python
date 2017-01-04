@@ -3,6 +3,7 @@ The tests provided in this module make sure that the server is
 compliant to the SaltyRTC protocol.
 """
 import asyncio
+import collections
 
 import libnacl.public
 import pytest
@@ -12,6 +13,7 @@ from saltyrtc.server.common import (
     SIGNED_KEYS_CIPHERTEXT_LENGTH,
     CloseCode,
 )
+from saltyrtc.server.events import Event
 
 
 class _FakePathClient:
@@ -1299,3 +1301,57 @@ class TestProtocol:
         # Close all clients
         tasks = [client.close() for client, _ in clients]
         yield from asyncio.wait(tasks, loop=event_loop)
+
+    @pytest.mark.asyncio
+    def test_event_emitted(
+            self, sleep, server, initiator_key, responder_key,
+            cookie_factory, client_factory
+    ):
+        # Dictionary where fired events are added
+        events_fired = collections.defaultdict(list)
+
+        @asyncio.coroutine
+        def callback(event: Event, *data):
+            events_fired[event].append(data)
+
+        # Register event callback for all events
+        for event in Event:
+            server.register_event_callback(event, callback)
+
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 456987
+        i['rcck'] = cookie_factory()
+        i['rbox'] = libnacl.public.Box(sk=initiator_key, pk=responder_key.pk)
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 24
+        r['icck'] = cookie_factory()
+        r['ibox'] = libnacl.public.Box(sk=responder_key, pk=initiator_key.pk)
+
+        yield from initiator.recv()
+        assert set(events_fired.keys()) == {
+            Event.initiator_connected,
+            Event.responder_connected,
+        }
+        assert events_fired[Event.initiator_connected] == [
+            (initiator_key.hex_pk().decode('ascii'),)
+        ]
+        assert events_fired[Event.responder_connected] == [
+            (initiator_key.hex_pk().decode('ascii'),)
+        ]
+
+        yield from initiator.close()
+        yield from responder.close()
+        yield from sleep()
+
+        assert set(events_fired.keys()) == {
+            Event.initiator_connected,
+            Event.responder_connected,
+            Event.disconnected,
+        }
+        assert events_fired[Event.disconnected] == [
+            (initiator_key.hex_pk().decode('ascii'), 1000),
+            (initiator_key.hex_pk().decode('ascii'), 1000),
+        ]

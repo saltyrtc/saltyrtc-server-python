@@ -1,6 +1,10 @@
 import asyncio
 import binascii
 import inspect
+from typing import (
+    Dict,
+    List,
+)
 
 import websockets
 
@@ -11,6 +15,10 @@ from .common import (
     CloseCode,
     MessageType,
     SubProtocol,
+)
+from .events import (
+    Event,
+    EventRegistry,
 )
 from .exception import (
     Disconnected,
@@ -36,6 +44,11 @@ from .protocol import (
     Protocol,
 )
 
+try:
+    from collections.abc import Coroutine
+except ImportError:  # python 3.4
+    from backports_abc import Coroutine
+
 __all__ = (
     'serve',
     'ServerProtocol',
@@ -45,7 +58,10 @@ __all__ = (
 
 
 @asyncio.coroutine
-def serve(ssl_context, key, paths=None, host=None, port=8765, loop=None):
+def serve(
+        ssl_context, key, paths=None, host=None, port=8765, loop=None,
+        event_callbacks: Dict[Event, List[Coroutine]] = None
+):
     """
     Start serving SaltyRTC Signalling Clients.
 
@@ -62,7 +78,9 @@ def serve(ssl_context, key, paths=None, host=None, port=8765, loop=None):
           `8765`.
         - `loop`: A :class:`asyncio.BaseEventLoop` instance or `None`
           if the default event loop should be used.
-
+        - `event_callbacks`: An optional dict with keys being an :class:`Event`
+          and the value being a list of callback coroutines. The callback will
+          be called every time the event occurs.
 
     """
     if loop is None:
@@ -74,6 +92,12 @@ def serve(ssl_context, key, paths=None, host=None, port=8765, loop=None):
 
     # Create server
     server = Server(key, paths, loop=loop)
+
+    # Register event callbacks
+    if event_callbacks is not None:
+        for event, callbacks in event_callbacks.items():
+            for callback in callbacks:
+                server.register_event_callback(event, callback)
 
     # Start server
     ws_server = yield from websockets.serve(
@@ -163,19 +187,29 @@ class ServerProtocol(Protocol):
         self._server.register(self)
 
         # Handle client until disconnected or an exception occurred
+        hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
         try:
             yield from self.handle_client()
-        except Disconnected:
+        except Disconnected as exc:
             client.log.info('Connection closed by remote')
+            self._server._raise_event(Event.disconnected, hex_path, exc.reason)
         except SlotsFullError as exc:
             client.log.notice('Closing because all path slots are full: {}', exc)
             yield from client.close(code=CloseCode.path_full_error.value)
+            self._server._raise_event(
+                    Event.disconnected, hex_path, CloseCode.path_full_error.value)
         except SignalingError as exc:
             client.log.notice('Closing due to protocol error: {}', exc)
             yield from client.close(code=CloseCode.protocol_error.value)
+            self._server._raise_event(
+                    Event.disconnected, hex_path, CloseCode.protocol_error.value)
         except Exception as exc:
             client.log.exception('Closing due to exception:', exc)
             yield from client.close(code=CloseCode.internal_error.value)
+            self._server._raise_event(
+                    Event.disconnected, hex_path, CloseCode.internal_error.value)
+        else:
+            client.log.error('Client closed without exception')
 
         # Remove client from path
         path.remove_client(client)
@@ -228,11 +262,14 @@ class ServerProtocol(Protocol):
         tasks = [self.task_loop()]
 
         # Task: Poll for messages
+        hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
         if client.type == AddressType.initiator:
             client.log.debug('Starting runner for initiator')
+            self._server._raise_event(Event.initiator_connected, hex_path)
             tasks.append(self.initiator_receive_loop())
         elif client.type == AddressType.responder:
             client.log.debug('Starting runner for responder')
+            self._server._raise_event(Event.responder_connected, hex_path)
             tasks.append(self.responder_receive_loop())
         else:
             raise ValueError('Invalid address type: {}'.format(client.type))
@@ -253,13 +290,11 @@ class ServerProtocol(Protocol):
                 client.log.debug('Cancelling task {}', pending_task)
                 pending_task.cancel()
 
-            # Connection closed?
-            if not client.connection_closed.done():
-                # Raise (or re-raise)
-                if exc is None:
-                    client.log.error('Task {} returned unexpectedly', task)
-                    raise SignalingError('A task returned unexpectedly')
-                raise exc
+            # Raise (or re-raise)
+            if exc is None:
+                client.log.error('Task {} returned unexpectedly', task)
+                raise SignalingError('A task returned unexpectedly')
+            raise exc
 
     @asyncio.coroutine
     def handshake(self):
@@ -592,6 +627,9 @@ class Server(asyncio.AbstractServer):
         # Store server protocols
         self.protocols = set()
 
+        # Event Registry
+        self._events = EventRegistry()
+
     @property
     def server(self):
         return self._server
@@ -629,6 +667,19 @@ class Server(asyncio.AbstractServer):
         self.protocols.remove(protocol)
         self._log.debug('Protocol unregistered: {}', protocol)
         self.paths.clean(protocol.path)
+
+    def register_event_callback(self, event: Event, callback: Coroutine):
+        """
+        Register a new event callback.
+        """
+        self._events.register(event, callback)
+
+    def _raise_event(self, event: Event, *data):
+        """
+        Raise an event and call all registered event callbacks.
+        """
+        for callback in self._events.get_callbacks(event):
+            self._loop.create_task(callback(event, *data))
 
     def close(self):
         """
