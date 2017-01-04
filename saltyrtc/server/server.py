@@ -187,19 +187,29 @@ class ServerProtocol(Protocol):
         self._server.register(self)
 
         # Handle client until disconnected or an exception occurred
+        hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
         try:
             yield from self.handle_client()
-        except Disconnected:
+        except Disconnected as exc:
             client.log.info('Connection closed by remote')
+            self._server._raise_event(Event.disconnected, hex_path, exc.reason)
         except SlotsFullError as exc:
             client.log.notice('Closing because all path slots are full: {}', exc)
             yield from client.close(code=CloseCode.path_full_error.value)
+            self._server._raise_event(
+                    Event.disconnected, hex_path, CloseCode.path_full_error.value)
         except SignalingError as exc:
             client.log.notice('Closing due to protocol error: {}', exc)
             yield from client.close(code=CloseCode.protocol_error.value)
+            self._server._raise_event(
+                    Event.disconnected, hex_path, CloseCode.protocol_error.value)
         except Exception as exc:
             client.log.exception('Closing due to exception:', exc)
             yield from client.close(code=CloseCode.internal_error.value)
+            self._server._raise_event(
+                    Event.disconnected, hex_path, CloseCode.internal_error.value)
+        else:
+            client.log.error('Client closed without exception')
 
         # Remove client from path
         path.remove_client(client)
@@ -280,13 +290,11 @@ class ServerProtocol(Protocol):
                 client.log.debug('Cancelling task {}', pending_task)
                 pending_task.cancel()
 
-            # Connection closed?
-            if not client.connection_closed.done():
-                # Raise (or re-raise)
-                if exc is None:
-                    client.log.error('Task {} returned unexpectedly', task)
-                    raise SignalingError('A task returned unexpectedly')
-                raise exc
+            # Raise (or re-raise)
+            if exc is None:
+                client.log.error('Task {} returned unexpectedly', task)
+                raise SignalingError('A task returned unexpectedly')
+            raise exc
 
     @asyncio.coroutine
     def handshake(self):

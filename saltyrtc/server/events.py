@@ -14,6 +14,7 @@ __all__ = ('Event',)
 class Event(enum.Enum):
     initiator_connected = 'initiator-connected'
     responder_connected = 'responder-connected'
+    disconnected = 'disconnected'
 
 
 class EventRegistry:

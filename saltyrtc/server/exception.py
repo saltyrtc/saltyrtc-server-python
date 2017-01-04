@@ -53,6 +53,8 @@ class Disconnected(Exception):
     """
     TODO: Describe
     """
+    def __init__(self, reason: int = None):
+        self.reason = reason
 
 
 class MessageError(SignalingError):

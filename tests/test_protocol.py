@@ -1304,7 +1304,8 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_event_emitted(
-            self, server, initiator_key, responder_key, cookie_factory, client_factory
+            self, sleep, server, initiator_key, responder_key,
+            cookie_factory, client_factory
     ):
         # Dictionary where fired events are added
         events_fired = collections.defaultdict(list)
@@ -1330,7 +1331,10 @@ class TestProtocol:
         r['ibox'] = libnacl.public.Box(sk=responder_key, pk=initiator_key.pk)
 
         yield from initiator.recv()
-        assert set(events_fired.keys()) == {e for e in Event}
+        assert set(events_fired.keys()) == {
+            Event.initiator_connected,
+            Event.responder_connected,
+        }
         assert events_fired[Event.initiator_connected] == [
             (initiator_key.hex_pk().decode('ascii'),)
         ]
@@ -1338,6 +1342,16 @@ class TestProtocol:
             (initiator_key.hex_pk().decode('ascii'),)
         ]
 
-        # Bye
         yield from initiator.close()
         yield from responder.close()
+        yield from sleep()
+
+        assert set(events_fired.keys()) == {
+            Event.initiator_connected,
+            Event.responder_connected,
+            Event.disconnected,
+        }
+        assert events_fired[Event.disconnected] == [
+            (initiator_key.hex_pk().decode('ascii'), 1000),
+            (initiator_key.hex_pk().decode('ascii'), 1000),
+        ]

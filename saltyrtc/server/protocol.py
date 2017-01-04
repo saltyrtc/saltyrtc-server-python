@@ -492,7 +492,7 @@ class PathClient:
             yield from self._connection.send(data)
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while sending')
-            raise Disconnected() from exc
+            raise Disconnected(exc.code) from exc
 
     @asyncio.coroutine
     def receive(self):
@@ -504,7 +504,7 @@ class PathClient:
             data = yield from self._connection.recv()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while receiving')
-            raise Disconnected() from exc
+            raise Disconnected(exc.code) from exc
         self.log.debug('Received message')
 
         # Unpack data and return
@@ -523,7 +523,7 @@ class PathClient:
             return (yield from self._connection.ping())
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while pinging')
-            raise Disconnected() from exc
+            raise Disconnected(exc.code) from exc
 
     @asyncio.coroutine
     def close(self, code=1000):
