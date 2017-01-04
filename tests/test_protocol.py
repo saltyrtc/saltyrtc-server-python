@@ -1331,10 +1331,10 @@ class TestProtocol:
 
         yield from initiator.recv()
         assert set(events_fired.keys()) == {e for e in Event}
-        assert events_fired[Event.INITIATOR_CONNECTED] == [
+        assert events_fired[Event.initiator_connected] == [
             (initiator_key.hex_pk().decode('ascii'),)
         ]
-        assert events_fired[Event.RESPONDER_CONNECTED] == [
+        assert events_fired[Event.responder_connected] == [
             (initiator_key.hex_pk().decode('ascii'),)
         ]
 

@@ -12,8 +12,8 @@ __all__ = ('Event',)
 
 @enum.unique
 class Event(enum.Enum):
-    INITIATOR_CONNECTED = 'initiator-connected'
-    RESPONDER_CONNECTED = 'responder-connected'
+    initiator_connected = 'initiator-connected'
+    responder_connected = 'responder-connected'
 
 
 class EventRegistry:

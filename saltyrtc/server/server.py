@@ -255,11 +255,11 @@ class ServerProtocol(Protocol):
         path = binascii.hexlify(self.path.initiator_key).decode('ascii')
         if client.type == AddressType.initiator:
             client.log.debug('Starting runner for initiator')
-            self._server._raise_event(Event.INITIATOR_CONNECTED, path)
+            self._server._raise_event(Event.initiator_connected, path)
             tasks.append(self.initiator_receive_loop())
         elif client.type == AddressType.responder:
             client.log.debug('Starting runner for responder')
-            self._server._raise_event(Event.RESPONDER_CONNECTED, path)
+            self._server._raise_event(Event.responder_connected, path)
             tasks.append(self.responder_receive_loop())
         else:
             raise ValueError('Invalid address type: {}'.format(client.type))
