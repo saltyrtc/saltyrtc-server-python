@@ -262,14 +262,14 @@ class ServerProtocol(Protocol):
         tasks = [self.task_loop()]
 
         # Task: Poll for messages
-        path = binascii.hexlify(self.path.initiator_key).decode('ascii')
+        hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
         if client.type == AddressType.initiator:
             client.log.debug('Starting runner for initiator')
-            self._server._raise_event(Event.initiator_connected, path)
+            self._server._raise_event(Event.initiator_connected, hex_path)
             tasks.append(self.initiator_receive_loop())
         elif client.type == AddressType.responder:
             client.log.debug('Starting runner for responder')
-            self._server._raise_event(Event.responder_connected, path)
+            self._server._raise_event(Event.responder_connected, hex_path)
             tasks.append(self.responder_receive_loop())
         else:
             raise ValueError('Invalid address type: {}'.format(client.type))
