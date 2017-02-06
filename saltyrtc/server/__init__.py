@@ -1,5 +1,6 @@
 """
-TODO: Describe project
+This is a SaltyRTC server implementation for Python 3.4+ using
+:mod:`asyncio`.
 """
 import itertools
 
@@ -31,4 +32,4 @@ __all__ = tuple(itertools.chain(
 
 __author__ = 'Lennart Grahl <lennart.grahl@gmail.com>'
 __status__ = 'Beta'
-__version__ = '0.9.10'
+__version__ = '0.10.0'

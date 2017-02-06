@@ -1,6 +1,8 @@
 import asyncio
 import binascii
 import inspect
+
+from collections import OrderedDict
 from typing import (
     Dict,
     List,
@@ -27,6 +29,7 @@ from .exception import (
     MessageFlowError,
     PathError,
     PingTimeoutError,
+    ServerKeyError,
     SignalingError,
     SlotsFullError,
 )
@@ -47,6 +50,7 @@ from .protocol import (
 try:
     from collections.abc import Coroutine
 except ImportError:  # python 3.4
+    # noinspection PyPackageRequirements
     from backports_abc import Coroutine
 
 __all__ = (
@@ -59,7 +63,7 @@ __all__ = (
 
 @asyncio.coroutine
 def serve(
-        ssl_context, key, paths=None, host=None, port=8765, loop=None,
+        ssl_context, keys, paths=None, host=None, port=8765, loop=None,
         event_callbacks: Dict[Event, List[Coroutine]] = None
 ):
     """
@@ -67,8 +71,9 @@ def serve(
 
     Arguments:
         - `ssl_context`: An `ssl.SSLContext` instance for WSS.
-        - `key`: A :class:`libnacl.public.SecretKey` instance
-          containing the permanent private key of the server.
+        - `keys`: A sorted iterable of :class:`libnacl.public.SecretKey`
+          instances containing permanent private keys of the server.
+          The first key will be designated as the primary key.
         - `paths`: A :class:`Paths` instance that maps path names to
           :class:`Path` instances. Can be used to share paths on
           multiple WebSockets. Defaults to an empty paths instance.
@@ -78,10 +83,12 @@ def serve(
           `8765`.
         - `loop`: A :class:`asyncio.BaseEventLoop` instance or `None`
           if the default event loop should be used.
-        - `event_callbacks`: An optional dict with keys being an :class:`Event`
-          and the value being a list of callback coroutines. The callback will
-          be called every time the event occurs.
+        - `event_callbacks`: An optional dict with keys being an
+          :class:`Event` and the value being a list of callback
+          coroutines. The callback will be called every time the event
+          occurs.
 
+    Raises :exc:`ServerKeyError` in case one or more keys have been repeated.
     """
     if loop is None:
         loop = asyncio.get_event_loop()
@@ -91,7 +98,7 @@ def serve(
         paths = Paths()
 
     # Create server
-    server = Server(key, paths, loop=loop)
+    server = Server(keys, paths, loop=loop)
 
     # Register event callbacks
     if event_callbacks is not None:
@@ -192,21 +199,26 @@ class ServerProtocol(Protocol):
             yield from self.handle_client()
         except Disconnected as exc:
             client.log.info('Connection closed by remote')
-            self._server._raise_event(Event.disconnected, hex_path, exc.reason)
+            self._server.raise_event(Event.disconnected, hex_path, exc.reason)
         except SlotsFullError as exc:
             client.log.notice('Closing because all path slots are full: {}', exc)
             yield from client.close(code=CloseCode.path_full_error.value)
-            self._server._raise_event(
+            self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.path_full_error.value)
+        except ServerKeyError as exc:
+            client.log.notice('Closing due to server key error: {}', exc)
+            yield from client.close(code=CloseCode.invalid_key.value)
+            self._server.raise_event(
+                    Event.disconnected, hex_path, CloseCode.invalid_key.value)
         except SignalingError as exc:
             client.log.notice('Closing due to protocol error: {}', exc)
             yield from client.close(code=CloseCode.protocol_error.value)
-            self._server._raise_event(
+            self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.protocol_error.value)
         except Exception as exc:
             client.log.exception('Closing due to exception:', exc)
             yield from client.close(code=CloseCode.internal_error.value)
-            self._server._raise_event(
+            self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.internal_error.value)
         else:
             client.log.error('Client closed without exception')
@@ -234,7 +246,7 @@ class ServerProtocol(Protocol):
         path = self._server.paths.get(initiator_key)
 
         # Create client instance
-        client = PathClient(connection, path.number, initiator_key, self._server.key)
+        client = PathClient(connection, path.number, initiator_key)
 
         # Return path and client
         return path, client
@@ -249,6 +261,7 @@ class ServerProtocol(Protocol):
         MessageFlowError
         SlotsFullError
         DowngradeError
+        ServerKeyError
         """
         client = self.client
 
@@ -265,11 +278,11 @@ class ServerProtocol(Protocol):
         hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
         if client.type == AddressType.initiator:
             client.log.debug('Starting runner for initiator')
-            self._server._raise_event(Event.initiator_connected, hex_path)
+            self._server.raise_event(Event.initiator_connected, hex_path)
             tasks.append(self.initiator_receive_loop())
         elif client.type == AddressType.responder:
             client.log.debug('Starting runner for responder')
-            self._server._raise_event(Event.responder_connected, hex_path)
+            self._server.raise_event(Event.responder_connected, hex_path)
             tasks.append(self.responder_receive_loop())
         else:
             raise ValueError('Invalid address type: {}'.format(client.type))
@@ -304,6 +317,7 @@ class ServerProtocol(Protocol):
         MessageFlowError
         SlotsFullError
         DowngradeError
+        ServerKeyError
         """
         client = self.client
 
@@ -326,7 +340,6 @@ class ServerProtocol(Protocol):
             # Client is a responder
             client.type = AddressType.responder
             yield from self.handshake_responder(message)
-
         else:
             error = "Expected 'client-hello' or 'client-auth', got '{}'"
             raise MessageFlowError(error.format(message.type))
@@ -338,18 +351,12 @@ class ServerProtocol(Protocol):
         MessageError
         MessageFlowError
         DowngradeError
+        ServerKeyError
         """
         path, initiator = self.path, self.client
 
-        # Validate cookie and ensure no sub-protocol downgrade took place
-        self._validate_cookie(message.server_cookie, initiator.cookie_out)
-        self._validate_subprotocol(message.subprotocols)
-
-        # Set the keep alive interval (if any)
-        if message.ping_interval is not None:
-            initiator.log.debug('Setting keep-alive interval to {}',
-                                message.ping_interval)
-            initiator.keep_alive_interval = message.ping_interval
+        # Handle client-auth
+        self._handle_client_auth(message)
 
         # Authenticated
         previous_initiator = path.set_initiator(initiator)
@@ -374,7 +381,7 @@ class ServerProtocol(Protocol):
         responder_ids = path.get_responder_ids()
         message = ServerAuthMessage.create(
             AddressType.server, initiator.id, initiator.cookie_in,
-            sign_keys=self._server.key is not None, responder_ids=responder_ids)
+            sign_keys=len(self._server.keys) > 0, responder_ids=responder_ids)
         initiator.log.debug('Sending server-auth including responder ids')
         yield from initiator.send(message)
 
@@ -386,6 +393,7 @@ class ServerProtocol(Protocol):
         MessageFlowError
         SlotsFullError
         DowngradeError
+        ServerKeyError
         """
         path, responder = self.path, self.client
 
@@ -398,15 +406,8 @@ class ServerProtocol(Protocol):
             error = "Expected 'client-auth', got '{}'"
             raise MessageFlowError(error.format(message.type))
 
-        # Validate cookie and ensure no sub-protocol downgrade took place
-        self._validate_cookie(message.server_cookie, responder.cookie_out)
-        self._validate_subprotocol(message.subprotocols)
-
-        # Set the keep alive interval (if any)
-        if message.ping_interval is not None:
-            responder.log.debug('Setting keep-alive interval to {}',
-                                message.ping_interval)
-            responder.keep_alive_interval = message.ping_interval
+        # Handle client-auth
+        self._handle_client_auth(message)
 
         # Authenticated
         id_ = path.add_responder(responder)
@@ -423,7 +424,7 @@ class ServerProtocol(Protocol):
         # Send server-auth
         message = ServerAuthMessage.create(
             AddressType.server, responder.id, responder.cookie_in,
-            sign_keys=self._server.key is not None,
+            sign_keys=len(self._server.keys) > 0,
             initiator_connected=initiator_connected)
         responder.log.debug('Sending server-auth without responder ids')
         yield from responder.send(message)
@@ -561,6 +562,42 @@ class ServerProtocol(Protocol):
                 client.log.debug('Pong')
                 client.keep_alive_pings += 1
 
+    def _handle_client_auth(self, message):
+        """
+        MessageError
+        DowngradeError
+        ServerKeyError
+        """
+        client = self.client
+
+        # Validate cookie and ensure no sub-protocol downgrade took place
+        self._validate_cookie(message.server_cookie, client.cookie_out)
+        self._validate_subprotocol(message.subprotocols)
+
+        # Set the keep alive interval (if any)
+        if message.ping_interval is not None:
+            client.log.debug('Setting keep-alive interval to {}', message.ping_interval)
+            client.keep_alive_interval = message.ping_interval
+
+        # Set the public permanent key the client wants to use (or fallback to primary)
+        server_keys_count = len(self._server.keys)
+        if message.server_key is not None:
+            # No permanent key pair?
+            if server_keys_count == 0:
+                raise ServerKeyError('Server does not have a permanent public key')
+
+            # Find the key instance
+            server_key = self._server.keys.get(message.server_key)
+            if server_key is None:
+                raise ServerKeyError(
+                    'Server does not have the requested permanent public key')
+
+            # Set the key instance on the client
+            client.server_permanent_key = server_key
+        elif server_keys_count > 0:
+            # Use primary permanent key
+            client.server_permanent_key = next(iter(self._server.keys.values()))
+
     def _validate_cookie(self, expected_cookie, actual_cookie):
         """
         MessageError
@@ -613,15 +650,21 @@ class Server(asyncio.AbstractServer):
         SubProtocol.saltyrtc_v1.value
     ]
 
-    def __init__(self, key, paths, loop=None):
+    def __init__(self, keys, paths, loop=None):
         self._log = util.get_logger('server')
         self._loop = asyncio.get_event_loop() if loop is None else loop
 
         # WebSocket server instance
         self._server = None
 
-        # Store key and paths
-        self.key = key
+        # Validate & store keys
+        if keys is None:
+            keys = []
+        if len(keys) != len({key.pk for key in keys}):
+            raise ServerKeyError('Repeated permanent keys')
+        self.keys = OrderedDict(((key.pk, key) for key in keys))
+
+        # Store paths
         self.paths = paths
 
         # Store server protocols
@@ -674,7 +717,7 @@ class Server(asyncio.AbstractServer):
         """
         self._events.register(event, callback)
 
-    def _raise_event(self, event: Event, *data):
+    def raise_event(self, event: Event, *data):
         """
         Raise an event and call all registered event callbacks.
         """

@@ -54,8 +54,10 @@ def pytest_namespace():
         'cli_path': os.path.join(sys.exec_prefix, 'bin', 'saltyrtc-server'),
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
-        'permanent_key': os.path.normpath(
+        'permanent_key_primary': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'permanent.key')),
+        'permanent_key_secondary':
+            'b452e8a5abf54c5258db323b88d03cb9e002a4a84ba6f37715678901c20411c7',
         'subprotocols': [
             SubProtocol.saltyrtc_v1.value
         ],
@@ -88,11 +90,18 @@ def unused_tcp_port():
     """
     Find an unused localhost TCP port from 1024-65535 and return it.
     """
-    if pytest.saltyrtc.debug or pytest.saltyrtc.external_server:
+    if pytest.saltyrtc.external_server:
         return pytest.saltyrtc.port
     with closing(socket.socket()) as sock:
         sock.bind((pytest.saltyrtc.ip, 0))
         return sock.getsockname()[1]
+
+
+def url(host, port):
+    """
+    Return the URL where the server can be reached.
+    """
+    return 'wss://{}:{}'.format(host, port)
 
 
 def key_pair():
@@ -164,29 +173,19 @@ def event_loop(request):
 
 
 @pytest.fixture(scope='module')
-def port():
-    return unused_tcp_port()
-
-
-@pytest.fixture(scope='module')
 def timeout_factory():
     return _get_timeout
 
 
 @pytest.fixture(scope='module')
-def url(port):
+def server_permanent_keys():
     """
-    Return the URL where the server can be reached.
+    Return the server's permanent test NaCl key pairs.
     """
-    return 'wss://{}:{}'.format(pytest.saltyrtc.ip, port)
-
-
-@pytest.fixture(scope='module')
-def server_permanent_key():
-    """
-    Return the server's permanent test NaCl key pair.
-    """
-    return util.load_permanent_key(pytest.saltyrtc.permanent_key)
+    return [
+        util.load_permanent_key(pytest.saltyrtc.permanent_key_primary),
+        util.load_permanent_key(pytest.saltyrtc.permanent_key_secondary)
+    ]
 
 
 @pytest.fixture(scope='module')
@@ -230,9 +229,23 @@ def cookie_factory():
 
 
 @pytest.fixture(scope='module')
-def server(request, event_loop, port, server_permanent_key):
+def url_factory(server):
     """
-    Return a :class:`saltyrtc.Server` instance.
+    Return the URL where the server can be reached.
+    """
+    server_ = server
+
+    def _url_factory(server=None):
+        if server is None:
+            server = server_
+        return url(*server.address)
+    return _url_factory
+
+
+@pytest.fixture(scope='module')
+def server_factory(request, event_loop, server_permanent_keys):
+    """
+    Return a factory to create :class:`saltyrtc.Server` instances.
     """
     if pytest.saltyrtc.debug:
         # Enable asyncio debug logging
@@ -248,25 +261,63 @@ def server(request, event_loop, port, server_permanent_key):
         logging_handler = logbook.StderrHandler()
         logging_handler.push_application()
 
-    # Setup server
-    if not pytest.saltyrtc.external_server:
+    _server_instances = []
+
+    def _server_factory(permanent_keys=None):
+        if permanent_keys is None:
+            permanent_keys = server_permanent_keys
+
+        # Setup server
+        port = unused_tcp_port()
         coroutine = serve(
             util.create_ssl_context(pytest.saltyrtc.cert),
-            server_permanent_key,
+            permanent_keys,
             host=pytest.saltyrtc.ip,
             port=port,
             loop=event_loop
         )
         server_ = event_loop.run_until_complete(coroutine)
+        # Inject address (little bit of a hack but meh...)
+        server_.address = (pytest.saltyrtc.ip, port)
+
+        _server_instances.append(server_)
 
         def fin():
             server_.close()
             event_loop.run_until_complete(server_.wait_closed())
-            if pytest.saltyrtc.debug:
+            _server_instances.remove(server_)
+            if pytest.saltyrtc.debug and len(_server_instances) == 0:
                 logging_handler.pop_application()
 
         request.addfinalizer(fin)
         return server_
+    return _server_factory
+
+
+class ExternalServer:
+    @property
+    def address(self):
+        return pytest.saltyrtc.ip, pytest.saltyrtc.port
+
+
+@pytest.fixture(scope='module')
+def server(server_factory):
+    """
+    Return a :class:`saltyrtc.Server` instance.
+    """
+    if pytest.saltyrtc.external_server:
+        return ExternalServer()
+    else:
+        return server_factory()
+
+
+@pytest.fixture(scope='module')
+def server_no_key(server_factory):
+    """
+    Return a :class:`saltyrtc.Server` instance that has no permanent
+    key pair.
+    """
+    return server_factory(permanent_keys=[])
 
 
 class _DefaultBox:
@@ -303,12 +354,13 @@ class Client:
 
 
 @pytest.fixture(scope='module')
-def ws_client_factory(initiator_key, url, event_loop, server):
+def ws_client_factory(initiator_key, event_loop, server):
     """
     Return a simplified :class:`websockets.client.connect` wrapper
     where no parameters are required.
     """
     # Note: The `server` argument is only required to fire up the server.
+    server_ = server
 
     # Create SSL context
     ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
@@ -316,9 +368,11 @@ def ws_client_factory(initiator_key, url, event_loop, server):
     if pytest.saltyrtc.debug:
         ssl_context.set_ciphers('RSA')
 
-    def _ws_client_factory(path=None, **kwargs):
+    def _ws_client_factory(server=None, path=None, **kwargs):
+        if server is None:
+            server = server_
         if path is None:
-            path = '{}/{}'.format(url, key_path(initiator_key))
+            path = '{}/{}'.format(url(*server.address), key_path(initiator_key))
         _kwargs = {
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
@@ -331,7 +385,7 @@ def ws_client_factory(initiator_key, url, event_loop, server):
 
 @pytest.fixture(scope='module')
 def client_factory(
-        initiator_key, url, event_loop, server, server_permanent_key, responder_key,
+        initiator_key, event_loop, server, server_permanent_keys, responder_key,
         pack_nonce, pack_message, unpack_message
 ):
     """
@@ -339,6 +393,7 @@ def client_factory(
     where no parameters are required.
     """
     # Note: The `server` argument is only required to fire up the server.
+    server_ = server
 
     # Create SSL context
     ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
@@ -348,15 +403,18 @@ def client_factory(
 
     @asyncio.coroutine
     def _client_factory(
-            ws_client=None,
+            server=None, ws_client=None,
             path=initiator_key, timeout=None, csn=None, cookie=None, permanent_key=None,
-            ping_interval=None, initiator_handshake=False, responder_handshake=False,
+            ping_interval=None, explicit_permanent_key=False,
+            initiator_handshake=False, responder_handshake=False,
             **kwargs
     ):
+        if server is None:
+            server = server_
         if cookie is None:
             cookie = random_cookie()
         if permanent_key is None:
-            permanent_key = server_permanent_key.pk
+            permanent_key = server_permanent_keys[0].pk
         _kwargs = {
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
@@ -365,7 +423,7 @@ def client_factory(
         _kwargs.update(kwargs)
         if ws_client is None:
             ws_client = yield from websockets.connect(
-                '{}/{}'.format(url, key_path(path)),
+                '{}/{}'.format(url(*server.address), key_path(path)),
                 **_kwargs
             )
         client = Client(
@@ -407,6 +465,8 @@ def client_factory(
         }
         if ping_interval is not None:
             payload['ping_interval'] = ping_interval
+        if explicit_permanent_key is not None:
+            payload['your_key'] = permanent_key
         yield from client.send(nonce, payload, timeout=timeout)
         ccsn += 1
 
