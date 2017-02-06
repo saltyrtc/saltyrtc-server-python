@@ -15,7 +15,7 @@ Signing key: https://lgrahl.de/pgp-key.txt
 2. Set variables:
 
    ```bash
-   export VERSION={VERSION}
+   export VERSION=<version>
    export GPG=0482ABA6
    ```
 
