@@ -16,7 +16,7 @@ Signing key: https://lgrahl.de/pgp-key.txt
 
    ```bash
    export VERSION=<version>
-   export GPG=0482ABA6
+   export GPG_KEY=3FDB14868A2B36D638F3C495F98FBED10482ABA6
    ```
 
 3. Update version number in ``saltyrtc/__init__.py`` and 
@@ -26,8 +26,8 @@ Signing key: https://lgrahl.de/pgp-key.txt
 
   ```bash
   git add saltyrtc/__init__.py.py CHANGELOG.rst
-  git commit -S${GPG} -m "Release v${VERSION}"
-  git tag -u ${GPG} -m "Release v${VERSION}" v${VERSION}
+  git commit -S${GPG_KEY} -m "Release v${VERSION}"
+  git tag -u ${GPG_KEY} -m "Release v${VERSION}" v${VERSION}
   ```
 
 5. Build source and binary distributions:
@@ -39,8 +39,8 @@ Signing key: https://lgrahl.de/pgp-key.txt
 6. Sign files:
 
    ```bash
-   gpg --detach-sign -u ${GPG} -a dist/saltyrtc-${VERSION}.tar.gz
-   gpg --detach-sign -u ${GPG} -a dist/saltyrtc-${VERSION}-py34.py35-none-any.whl
+   gpg --detach-sign -u ${GPG_KEY} -a dist/saltyrtc-${VERSION}.tar.gz
+   gpg --detach-sign -u ${GPG_KEY} -a dist/saltyrtc-${VERSION}-py34.py35-none-any.whl
    ```
 
 7. Upload package to PyPI and push:
