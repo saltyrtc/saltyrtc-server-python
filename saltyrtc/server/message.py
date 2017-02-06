@@ -1,5 +1,7 @@
 import abc
+import asyncio
 import binascii
+import functools
 import io
 import struct
 
@@ -48,6 +50,7 @@ __all__ = (
 )
 
 
+@asyncio.coroutine
 def unpack(client, data):
     """
     MessageError
@@ -89,6 +92,7 @@ class AbstractMessage(metaclass=abc.ABCMeta):
         self._nonce = None
 
     @abc.abstractmethod
+    @asyncio.coroutine
     def pack(self, client):
         """
         MessageError
@@ -97,6 +101,7 @@ class AbstractMessage(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     @abc.abstractmethod
+    @asyncio.coroutine
     def prepare_payload(self, client, nonce):
         """
         This method will be called as soon as the nonce has been packed
@@ -108,6 +113,7 @@ class AbstractMessage(metaclass=abc.ABCMeta):
 
     @classmethod
     @abc.abstractmethod
+    @asyncio.coroutine
     def unpack(cls, client, data):
         """
          MessageError
@@ -170,6 +176,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
             }
         return cls._message_classes
 
+    @asyncio.coroutine
     def pack(self, client):
         """
         MessageError
@@ -183,25 +190,27 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         data.write(nonce)
 
         # Prepare payload
-        self.prepare_payload(client, nonce)
+        yield from self.prepare_payload(client, nonce)
 
         # Pack payload
-        payload = self._pack_payload()
+        payload = yield from self._pack_payload(client)
 
         # Encrypt payload if required
         if self.encrypted:
             if not client.authenticated:
                 raise MessageFlowError('Cannot encrypt payload, no box available')
-            payload = self._encrypt_payload(client, nonce, payload)
+            payload = yield from self._encrypt_payload(client, nonce, payload)
 
         # Append payload and return as bytes
         data.write(payload)
         return data.getvalue()
 
+    @asyncio.coroutine
     def prepare_payload(self, client, nonce):
         return
 
     @classmethod
+    @asyncio.coroutine
     def unpack(cls, client, data):
         """
         MessageError
@@ -226,14 +235,15 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
                 # Try client-hello (unencrypted)
                 try:
-                    payload = cls._unpack_payload(data)
+                    payload = yield from cls._unpack_payload(client, data)
                 except MessageError:
                     pass
 
                 # Try client-auth (encrypted)
                 try:
-                    payload = cls._unpack_payload(
-                        cls._decrypt_payload(client, nonce, data))
+                    decrypted_data = yield from cls._decrypt_payload(
+                        client, nonce, data)
+                    payload = yield from cls._unpack_payload(client, decrypted_data)
                 except MessageError:
                     pass
 
@@ -243,8 +253,8 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
                     raise MessageError(message)
             else:
                 # Decrypt and unpack payload
-                payload = cls._unpack_payload(
-                    cls._decrypt_payload(client, nonce, data))
+                decrypted_data = yield from cls._decrypt_payload(client, nonce, data)
+                payload = yield from cls._unpack_payload(client, decrypted_data)
         else:
             message = RawMessage(
                 source, destination, data,
@@ -270,7 +280,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         except KeyError as exc:
             error_message = 'Can not handle valid message type: {}'
             raise MessageError(error_message.format(type_)) from exc
-        payload = message_class.check_payload(client, payload)
+        payload = yield from message_class.check_payload(client, payload)
 
         # Return instance
         message = message_class(
@@ -356,31 +366,37 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
         return nonce, source, source_type, destination, destination_type
 
-    def _pack_payload(self):
+    @asyncio.coroutine
+    def _pack_payload(self, client):
         try:
-            return umsgpack.packb(self.payload)
+            return (yield from client.run_in_executor(umsgpack.packb, self.payload))
         except umsgpack.PackException as exc:
             raise MessageError('Could not pack msgpack payload') from exc
 
     @classmethod
-    def _unpack_payload(cls, payload):
+    @asyncio.coroutine
+    def _unpack_payload(cls, client, payload):
         try:
-            return umsgpack.unpackb(payload)
+            return (yield from client.run_in_executor(umsgpack.unpackb, payload))
         except (umsgpack.UnpackException, TypeError) as exc:
             raise MessageError('Could not unpack msgpack payload') from exc
 
     @classmethod
+    @asyncio.coroutine
     def _encrypt_payload(cls, client, nonce, payload):
         try:
-            _, data = client.box.encrypt(payload, nonce=nonce, pack_nonce=False)
+            _, data = yield from client.run_in_executor(functools.partial(
+                client.box.encrypt, payload, nonce=nonce, pack_nonce=False))
             return data
         except ValueError as exc:
             raise MessageError('Could not encrypt payload') from exc
 
     @classmethod
+    @asyncio.coroutine
     def _decrypt_payload(cls, client, nonce, data):
         try:
-            return client.box.decrypt(data, nonce=nonce)
+            return (yield from client.run_in_executor(functools.partial(
+                client.box.decrypt, data, nonce=nonce)))
         except ValueError as exc:
             raise MessageError('Could not decrypt payload') from exc
 
@@ -402,17 +418,21 @@ class RawMessage(AbstractMessage):
         return _message_representation(
             self.__class__.__name__, self._nonce, self._data)
 
+    @asyncio.coroutine
     def pack(self, client):
         return self._data
 
+    @asyncio.coroutine
     def prepare_payload(self, client, nonce):
         return
 
     @classmethod
+    @asyncio.coroutine
     def unpack(cls, client, data):
         return AbstractBaseMessage.unpack(client, data)
 
     @classmethod
+    @asyncio.coroutine
     def check_payload(cls, client, payload):
         pass
 
@@ -430,6 +450,7 @@ class ServerHelloMessage(AbstractBaseMessage):
         })
 
     @classmethod
+    @asyncio.coroutine
     def check_payload(cls, client, payload):
         """
         MessageError
@@ -456,6 +477,7 @@ class ClientHelloMessage(AbstractBaseMessage):
         })
 
     @classmethod
+    @asyncio.coroutine
     def check_payload(cls, client, payload):
         """
         MessageError
@@ -490,6 +512,7 @@ class ClientAuthMessage(AbstractBaseMessage):
         return cls(source, destination, payload)
 
     @classmethod
+    @asyncio.coroutine
     def check_payload(cls, client, payload):
         """
         MessageError
@@ -541,6 +564,7 @@ class ServerAuthMessage(AbstractBaseMessage):
         # noinspection PyCallingNonCallable
         return cls(source, destination, payload, extra={'sign_keys': sign_keys})
 
+    @asyncio.coroutine
     def prepare_payload(self, client, nonce):
         """
         Late-signing of the keys.
@@ -549,9 +573,12 @@ class ServerAuthMessage(AbstractBaseMessage):
         signed.
         """
         if self.extra.get('sign_keys', False):
-            self.payload['signed_keys'] = sign_keys_(client, nonce)
+            self.payload['signed_keys'] = yield from client.run_in_executor(
+                sign_keys_, client.server_key.pk, client.client_key, client.sign_box,
+                nonce)
 
     @classmethod
+    @asyncio.coroutine
     def check_payload(cls, client, payload):
         """
         MessageError
@@ -606,6 +633,7 @@ class NewInitiatorMessage(AbstractBaseMessage):
         })
 
     @classmethod
+    @asyncio.coroutine
     def check_payload(cls, client, payload):
         return payload
 
@@ -623,6 +651,7 @@ class NewResponderMessage(AbstractBaseMessage):
         })
 
     @classmethod
+    @asyncio.coroutine
     def check_payload(cls, client, payload):
         """
         MessageError
@@ -651,6 +680,7 @@ class DropResponderMessage(AbstractBaseMessage):
         })
 
     @classmethod
+    @asyncio.coroutine
     def check_payload(cls, client, payload):
         """
         MessageError
@@ -681,6 +711,7 @@ class SendErrorMessage(AbstractBaseMessage):
         })
 
     @classmethod
+    @asyncio.coroutine
     def check_payload(cls, client, payload):
         """
         MessageError
