@@ -196,12 +196,12 @@ def validate_drop_reason(reason):
     return reason
 
 
-def sign_keys(client, nonce):
+def sign_keys(server_key, client_key, sign_box, nonce):
     # Sign server's public session key and client's public permanent key (in that
     # order)
-    payload = b''.join((client.server_key.pk, client.client_key))
+    payload = b''.join((server_key, client_key))
     try:
-        _, signed_keys = client.sign_box.encrypt(payload, nonce=nonce, pack_nonce=False)
+        _, signed_keys = sign_box.encrypt(payload, nonce=nonce, pack_nonce=False)
         return signed_keys
     except ValueError as exc:
         raise MessageError('Could not sign keys') from exc

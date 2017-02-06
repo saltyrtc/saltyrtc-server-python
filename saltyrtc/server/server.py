@@ -63,7 +63,7 @@ __all__ = (
 
 @asyncio.coroutine
 def serve(
-        ssl_context, keys, paths=None, host=None, port=8765, loop=None,
+        ssl_context, keys, paths=None, host=None, port=8765, loop=None, executor=None,
         event_callbacks: Dict[Event, List[Coroutine]] = None
 ):
     """
@@ -83,6 +83,9 @@ def serve(
           `8765`.
         - `loop`: A :class:`asyncio.BaseEventLoop` instance or `None`
           if the default event loop should be used.
+        - `executor`: A :class:`concurrent.futures.Executor` instance or
+          `None` if the default executor should be used for functions
+          that would normally block.
         - `event_callbacks`: An optional dict with keys being an
           :class:`Event` and the value being a list of callback
           coroutines. The callback will be called every time the event
@@ -98,7 +101,7 @@ def serve(
         paths = Paths()
 
     # Create server
-    server = Server(keys, paths, loop=loop)
+    server = Server(keys, paths, loop=loop, executor=executor)
 
     # Register event callbacks
     if event_callbacks is not None:
@@ -126,6 +129,7 @@ class ServerProtocol(Protocol):
     __slots__ = (
         '_log',
         '_loop',
+        '_executor',
         '_server',
         'subprotocol',
         'path',
@@ -133,9 +137,10 @@ class ServerProtocol(Protocol):
         'handler_task'
     )
 
-    def __init__(self, server, subprotocol, loop=None):
+    def __init__(self, server, subprotocol, loop=None, executor=None):
         self._log = util.get_logger('server.protocol')
         self._loop = asyncio.get_event_loop() if loop is None else loop
+        self._executor = executor
 
         # Server instance and subprotocol
         self._server = server
@@ -246,7 +251,8 @@ class ServerProtocol(Protocol):
         path = self._server.paths.get(initiator_key)
 
         # Create client instance
-        client = PathClient(connection, path.number, initiator_key)
+        client = PathClient(connection, path.number, initiator_key,
+                            loop=self._loop, executor=self._executor)
 
         # Return path and client
         return path, client
@@ -272,42 +278,51 @@ class ServerProtocol(Protocol):
 
         # Task: Execute enqueued tasks
         client.log.debug('Starting poll for enqueued tasks task')
-        tasks = [self.task_loop()]
+        task_loop_task = self._loop.create_task(self.task_loop())
+        tasks = [task_loop_task]
+        coroutines = []
 
         # Task: Poll for messages
         hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
         if client.type == AddressType.initiator:
             client.log.debug('Starting runner for initiator')
             self._server.raise_event(Event.initiator_connected, hex_path)
-            tasks.append(self.initiator_receive_loop())
+            coroutines.append(self.initiator_receive_loop())
         elif client.type == AddressType.responder:
             client.log.debug('Starting runner for responder')
             self._server.raise_event(Event.responder_connected, hex_path)
-            tasks.append(self.responder_receive_loop())
+            coroutines.append(self.responder_receive_loop())
         else:
             raise ValueError('Invalid address type: {}'.format(client.type))
 
         # Task: Keep alive
         client.log.debug('Starting keep-alive task')
-        tasks.append(self.keep_alive_loop())
+        coroutines.append(self.keep_alive_loop())
 
         # Wait until complete
-        tasks = [self._loop.create_task(coroutine) for coroutine in tasks]
-        done, pending = yield from asyncio.wait(
-            tasks, loop=self._loop, return_when=asyncio.FIRST_EXCEPTION)
-        for task in done:
-            exc = task.exception()
+        tasks += [self._loop.create_task(coroutine) for coroutine in coroutines]
+        while True:
+            done, pending = yield from asyncio.wait(
+                tasks, loop=self._loop, return_when=asyncio.FIRST_EXCEPTION)
+            for task in done:
+                exc = task.exception()
 
-            # Cancel pending tasks
-            for pending_task in pending:
-                client.log.debug('Cancelling task {}', pending_task)
-                pending_task.cancel()
+                # Cancel pending tasks
+                for pending_task in pending:
+                    client.log.debug('Cancelling task {}', pending_task)
+                    pending_task.cancel()
 
-            # Raise (or re-raise)
-            if exc is None:
-                client.log.error('Task {} returned unexpectedly', task)
-                raise SignalingError('A task returned unexpectedly')
-            raise exc
+                # Raise (or re-raise)
+                if exc is None:
+                    if task == task_loop_task:
+                        # Task loop may return early and it's okay
+                        client.log.debug('Task loop returned early')
+                        tasks.remove(task_loop_task)
+                    else:
+                        client.log.error('Task {} returned unexpectedly', task)
+                        raise SignalingError('A task returned unexpectedly')
+                else:
+                    raise exc
 
     @asyncio.coroutine
     def handshake(self):
@@ -498,7 +513,7 @@ class ServerProtocol(Protocol):
 
         # Prepare message
         source.log.debug('Packing relay message')
-        message_id = message.pack(source)[16:]
+        message_id = (yield from message.pack(source))[16:]
 
         @asyncio.coroutine
         def send_error_message():
@@ -650,9 +665,10 @@ class Server(asyncio.AbstractServer):
         SubProtocol.saltyrtc_v1.value
     ]
 
-    def __init__(self, keys, paths, loop=None):
+    def __init__(self, keys, paths, loop=None, executor=None):
         self._log = util.get_logger('server')
         self._loop = asyncio.get_event_loop() if loop is None else loop
+        self._executor = executor
 
         # WebSocket server instance
         self._server = None
@@ -697,7 +713,8 @@ class Server(asyncio.AbstractServer):
             # to ignore
             yield from connection.close(code=CloseCode.subprotocol_error.value)
         else:
-            protocol = ServerProtocol(self, subprotocol, loop=self._loop)
+            protocol = ServerProtocol(
+                self, subprotocol, loop=self._loop, executor=self._executor)
             protocol.connection_made(connection, ws_path)
             yield from protocol.handler_task
 
