@@ -36,14 +36,14 @@ def main():
 
     # Get permanent key
     if env('SALTYRTC_DISABLE_SERVER_PERMANENT_KEY') != 'yes-and-i-know-what-im-doing':
-        permanent_key = saltyrtc.server.load_permanent_key(
-            require_env('SALTYRTC_SERVER_PERMANENT_KEY'))
+        permanent_keys = [saltyrtc.server.load_permanent_key(
+            require_env('SALTYRTC_SERVER_PERMANENT_KEY'))]
     else:
-        permanent_key = None
+        permanent_keys = None
 
     # Start server
     port = int(env('SALTYRTC_PORT', '8765'))
-    coroutine = saltyrtc.server.serve(ssl_context, permanent_key, port=port)
+    coroutine = saltyrtc.server.serve(ssl_context, permanent_keys, port=port)
     server = loop.run_until_complete(coroutine)
 
     # Wait until Ctrl+C has been pressed

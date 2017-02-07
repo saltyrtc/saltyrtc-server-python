@@ -3,8 +3,10 @@ Contains all exceptions used for the SaltyRTC server.
 """
 __all__ = (
     'SignalingError',
+    'InternalError',
     'PathError',
     'SlotsFullError',
+    'ServerKeyError',
     'MessageFlowError',
     'PingTimeoutError',
     'Disconnected',
@@ -20,6 +22,12 @@ class SignalingError(Exception):
     """
 
 
+class InternalError(SignalingError):
+    """
+    Server misbehaved. Always report occurrences of this error!
+    """
+
+
 class PathError(SignalingError):
     """
     TODO: Describe
@@ -29,6 +37,14 @@ class PathError(SignalingError):
 class SlotsFullError(SignalingError):
     """
     No free slot for a responder.
+    """
+
+
+class ServerKeyError(SignalingError):
+    """
+    Raised when the server either does not have a permanent key pair
+    but the client requested one or the server does not have the key
+    pair that has been requested.
     """
 
 

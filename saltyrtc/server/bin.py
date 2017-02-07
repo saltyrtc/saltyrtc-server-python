@@ -52,6 +52,7 @@ def _get_logging_level(verbosity):
 class _ErrorCode(enum.IntEnum):
     safety_error = 2
     import_error = 3
+    repeated_keys = 4
 
 
 _logging_levels = 7
@@ -142,9 +143,10 @@ Path to a file that contains the SSL certificate."""))
 @click.option('-sk', '--sslkey', type=click.Path(exists=True), help=_h("""
 Path to a file that contains the SSL private key. Will be read from
 the SSL certificate file if not present."""))
-@click.option('-k', '--key', type=click.Path(), help=_h("""
+@click.option('-k', '--key', type=click.Path(), multiple=True, help=_h("""
 Path to a or a hex-encoded private permanent key of the server (e.g.
-a NaCl private key)."""))
+a NaCl private key). You can provide more than one key. The first key
+provided will be used as the primary key."""))
 @click.option('-h', '--host', help='Bind to a specific host.')
 @click.option('-p', '--port', default=443, help='Listen on a specific port.')
 @click.option('-l', '--loop', type=click.Choice(['asyncio', 'uvloop']), default='asyncio',
@@ -154,14 +156,14 @@ def serve(ctx, **arguments):
     # Get arguments
     ssl_cert = arguments.get('sslcert', None)
     ssl_key = arguments.get('sslkey', None)
-    key = arguments.get('key', None)
+    keys = arguments.get('key')
     host = arguments.get('host')
     port = arguments['port']
     loop = arguments['loop']
     safety_off = os.environ.get('SALTYRTC_SAFETY_OFF') == 'yes-and-i-know-what-im-doing'
 
     # Make sure the user provides cert & keys or has safety turned off
-    if ssl_cert is None or key is None:
+    if ssl_cert is None or len(keys) == 0:
         if safety_off:
             click.echo(('It is RECOMMENDED to use SaltyRTC with both a SSL '
                        'certificate and a server permanent key!'), err=True)
@@ -177,9 +179,17 @@ def serve(ctx, **arguments):
     if ssl_cert is not None:
         ssl_context = util.create_ssl_context(certfile=ssl_cert, keyfile=ssl_key)
 
-    # Get private permanent key of the server
-    if key is not None:
-        key = util.load_permanent_key(key)
+    # Get private permanent keys of the server
+    if len(keys) > 0:
+        keys = [util.load_permanent_key(key) for key in keys]
+
+    # Validate permanent keys
+    # Note: The permanent keys will be checked in the server coroutine but we don't want
+    #       to look stupid.
+    if len(keys) != len({key.pk for key in keys}):
+        click.echo('At least one permanent key has been supplied more than once',
+                   err=True)
+        ctx.exit(code=_ErrorCode.repeated_keys)
 
     # Set event loop policy
     if loop == 'uvloop':
@@ -199,9 +209,14 @@ def serve(ctx, **arguments):
     while True:
         # Run the server
         click.echo('Starting')
-        if key is not None:
-            click.echo('Public permanent key: {}'.format(key.hex_pk().decode('ascii')))
-        coroutine = server.serve(ssl_context, key, host=host, port=port, loop=loop)
+        if len(keys) > 0:
+            primary_key, *secondary_keys = keys
+            click.echo('Primary public permanent key: {}'.format(
+                primary_key.hex_pk().decode('ascii')))
+            for i, key in enumerate(secondary_keys, start=1):
+                click.echo('Secondary key #{}: {}'.format(
+                    i, key.hex_pk().decode('ascii')))
+        coroutine = server.serve(ssl_context, keys, host=host, port=port, loop=loop)
         server_ = loop.run_until_complete(coroutine)
 
         # Restart server on HUP signal

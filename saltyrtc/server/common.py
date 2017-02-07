@@ -64,6 +64,10 @@ class SubProtocol(enum.Enum):
     saltyrtc_v1 = 'v0.saltyrtc.org'
 
 
+# Valid drop responder reasons
+_drop_reasons = {3001, 3002, 3004, 3005}
+
+
 @enum.unique
 class CloseCode(enum.IntEnum):
     going_away = 1001
@@ -75,10 +79,11 @@ class CloseCode(enum.IntEnum):
     drop_by_initiator = 3004
     initiator_could_not_decrypt = 3005
     no_shared_tasks = 3006
+    invalid_key = 3007
 
     @property
     def is_valid_drop_reason(self):
-        return self.value != 3003 and self.value in range(3001, 3006 + 1)
+        return self.value in _drop_reasons
 
 
 @enum.unique

@@ -20,6 +20,7 @@ from .common import (
 )
 from .exception import (
     Disconnected,
+    InternalError,
     MessageError,
     MessageFlowError,
     SlotsFullError,
@@ -190,13 +191,13 @@ class PathClient:
     )
 
     def __init__(
-            self, connection, path_number, initiator_key, server_permanent_key,
+            self, connection, path_number, initiator_key,
             server_session_key=None, loop=None
     ):
         self._loop = asyncio.get_event_loop() if loop is None else loop
         self._connection = connection
         self._client_key = initiator_key
-        self._server_permanent_key = server_permanent_key
+        self._server_permanent_key = None
         self._server_session_key = server_session_key
         self._cookie_out = None
         self._cookie_in = None
@@ -282,6 +283,26 @@ class PathClient:
         return self._server_session_key
 
     @property
+    def server_permanent_key(self):
+        """
+        Return the server's permanent :class:`libnacl.public.SecretKey`
+        instance chosen by the client.
+
+        Raises `InternalError` in case the key has not been set, yet.
+        """
+        if self._server_permanent_key is None:
+            raise InternalError("Server's permanent secret key instance not set")
+        return self._server_permanent_key
+
+    @server_permanent_key.setter
+    def server_permanent_key(self, key):
+        """
+        Set the server's permanent :class:`libnacl.public.SecretKey`
+        instance chosen by the client.
+        """
+        self._server_permanent_key = key
+
+    @property
     def box(self):
         """
         Return the session's :class:`libnacl.public.Box` instance.
@@ -295,10 +316,13 @@ class PathClient:
         """
         Return the :class:`libnacl.public.Box` instance that is used for
         signing the keys in the 'server-auth' message.
+
+        Raises `InternalError` in case the server's permanent key has
+        not been set, yet.
         """
         if self._sign_box is None:
             self._sign_box = libnacl.public.Box(
-                self._server_permanent_key, self._client_key)
+                self.server_permanent_key, self._client_key)
         return self._sign_box
 
     @property

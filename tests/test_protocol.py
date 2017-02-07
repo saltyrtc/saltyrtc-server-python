@@ -49,23 +49,25 @@ class TestProtocol:
         assert client.close_code == CloseCode.subprotocol_error
 
     @pytest.mark.asyncio
-    def test_invalid_path_length(self, url, sleep, ws_client_factory):
+    def test_invalid_path_length(self, url_factory, sleep, ws_client_factory):
         """
         The server must drop the client after the connection has been
         established with a close code of *3001*.
         """
-        client = yield from ws_client_factory(path='{}/{}'.format(url, 'rawr!!!'))
+        client = yield from ws_client_factory(path='{}/{}'.format(
+            url_factory(), 'rawr!!!'))
         yield from sleep()
         assert not client.open
         assert client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_invalid_path_symbols(self, url, sleep, ws_client_factory):
+    def test_invalid_path_symbols(self, url_factory, sleep, ws_client_factory):
         """
         The server must drop the client after the connection has been
         established with a close code of *3001*.
         """
-        client = yield from ws_client_factory(path='{}/{}'.format(url, 'äöüä' * 16))
+        client = yield from ws_client_factory(path='{}/{}'.format(
+            url_factory(), 'äöüä' * 16))
         yield from sleep()
         assert not client.open
         assert client.close_code == CloseCode.protocol_error
@@ -345,7 +347,7 @@ class TestProtocol:
     @pytest.mark.asyncio
     def test_initiator_handshake(
             self, cookie_factory, initiator_key, pack_nonce, client_factory,
-            server_permanent_key
+            server_permanent_keys
     ):
         """
         Check that we can do a complete handshake for an initiator.
@@ -368,7 +370,7 @@ class TestProtocol:
 
         # server-auth
         client.sign_box = libnacl.public.Box(
-            sk=initiator_key, pk=server_permanent_key.pk)
+            sk=initiator_key, pk=server_permanent_keys[0].pk)
         message, nonce, ck, s, d, scsn = yield from client.recv()
         assert s == 0x00
         assert d == 0x01
@@ -387,7 +389,7 @@ class TestProtocol:
     @pytest.mark.asyncio
     def test_responder_handshake(
             self, cookie_factory, responder_key, pack_nonce, client_factory,
-            server_permanent_key
+            server_permanent_keys
     ):
         """
         Check that we can do a complete handshake for a responder.
@@ -417,7 +419,7 @@ class TestProtocol:
 
         # server-auth
         client.sign_box = libnacl.public.Box(
-            sk=responder_key, pk=server_permanent_key.pk)
+            sk=responder_key, pk=server_permanent_keys[0].pk)
         message, nonce, ck, s, d, scsn = yield from client.recv()
         assert s == 0x00
         assert 0x01 < d <= 0xff
@@ -816,14 +818,14 @@ class TestProtocol:
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': r['id'],
-            'reason': CloseCode.no_shared_tasks.value,
+            'reason': CloseCode.internal_error.value,
         })
 
         # Responder: Expect reason 'handover'
         yield from sleep()
         assert not responder.ws_client.open
         actual_close_code = responder.ws_client.close_code
-        assert actual_close_code == CloseCode.no_shared_tasks
+        assert actual_close_code == CloseCode.internal_error
 
         # Bye
         yield from initiator.close()
@@ -1355,3 +1357,64 @@ class TestProtocol:
             (initiator_key.hex_pk().decode('ascii'), 1000),
             (initiator_key.hex_pk().decode('ascii'), 1000),
         ]
+
+    @pytest.saltyrtc.have_internal
+    @pytest.mark.asyncio
+    def test_explicit_permanent_key_unavailable(
+            self, server_no_key, client_factory
+    ):
+        """
+        Check that the server rejects a permanent key if the server
+        has none.
+        """
+        key = libnacl.public.SecretKey()
+
+        # Expect invalid key
+        with pytest.raises(websockets.ConnectionClosed) as exc_info:
+            yield from client_factory(
+                server=server_no_key, permanent_key=key.pk, explicit_permanent_key=True,
+                initiator_handshake=True)
+        assert exc_info.value.code == CloseCode.invalid_key
+
+    @pytest.mark.asyncio
+    def test_explicit_invalid_permanent_key(
+            self, client_factory
+    ):
+        """
+        Check that the server rejects a permanent key it doesn't have.
+        """
+        key = libnacl.public.SecretKey()
+
+        # Expect invalid key
+        with pytest.raises(websockets.ConnectionClosed) as exc_info:
+            yield from client_factory(
+                permanent_key=key.pk, explicit_permanent_key=True,
+                initiator_handshake=True)
+        assert exc_info.value.code == CloseCode.invalid_key
+
+    @pytest.mark.asyncio
+    def test_explicit_permanent_key(
+            self, client_factory, initiator_key, responder_key, server_permanent_keys
+    ):
+        """
+        Check that explicitly requesting a permanent key works as
+        intended.
+        """
+        for key in server_permanent_keys:
+            # Initiator handshake
+            initiator, i = yield from client_factory(
+                permanent_key=key.pk, explicit_permanent_key=True,
+                initiator_handshake=True)
+            assert len(i['signed_keys']) == SIGNED_KEYS_CIPHERTEXT_LENGTH
+            signed_keys = initiator.sign_box.decrypt(
+                i['signed_keys'], nonce=i['nonces']['server-auth'])
+            assert signed_keys == i['ssk'] + initiator_key.pk
+            yield from initiator.close()
+
+            # Responder handshake
+            responder, r = yield from client_factory(responder_handshake=True)
+            assert len(r['signed_keys']) == SIGNED_KEYS_CIPHERTEXT_LENGTH
+            signed_keys = responder.sign_box.decrypt(
+                r['signed_keys'], nonce=r['nonces']['server-auth'])
+            assert signed_keys == r['ssk'] + responder_key.pk
+            yield from responder.close()

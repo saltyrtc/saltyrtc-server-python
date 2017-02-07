@@ -474,7 +474,9 @@ class ClientAuthMessage(AbstractBaseMessage):
     encrypted = True
 
     @classmethod
-    def create(cls, source, destination, server_cookie, subprotocols, ping_interval=None):
+    def create(
+            cls, source, destination, server_cookie, subprotocols,
+            ping_interval=None, server_key=None):
         # noinspection PyCallingNonCallable
         payload = {
             'type': cls.type.value,
@@ -483,6 +485,8 @@ class ClientAuthMessage(AbstractBaseMessage):
         }
         if ping_interval is not None:
             payload['ping_interval'] = ping_interval
+        if server_key is not None:
+            payload['your_key'] = server_key
         return cls(source, destination, payload)
 
     @classmethod
@@ -495,6 +499,9 @@ class ClientAuthMessage(AbstractBaseMessage):
         ping_interval = payload.get('ping_interval')
         if ping_interval is not None:
             validate_ping_interval(ping_interval)
+        server_key = payload.get('your_key')
+        if server_key is not None:
+            validate_public_key(server_key)
         return payload
 
     @property
@@ -508,6 +515,10 @@ class ClientAuthMessage(AbstractBaseMessage):
     @property
     def ping_interval(self):
         return self.payload.get('ping_interval')
+
+    @property
+    def server_key(self):
+        return self.payload.get('your_key')
 
 
 class ServerAuthMessage(AbstractBaseMessage):
