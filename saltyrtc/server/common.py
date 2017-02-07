@@ -61,7 +61,7 @@ class OverflowSentinel:
 
 @enum.unique
 class SubProtocol(enum.Enum):
-    saltyrtc_v1 = 'v0.saltyrtc.org'
+    saltyrtc_v1 = 'v1.saltyrtc.org'
 
 
 # Valid drop responder reasons
