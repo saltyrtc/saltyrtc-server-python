@@ -168,6 +168,7 @@ class Path:
 class PathClient:
     __slots__ = (
         '_loop',
+        '_executor',
         '_connection',
         '_client_key',
         '_server_permanent_key',
@@ -192,9 +193,10 @@ class PathClient:
 
     def __init__(
             self, connection, path_number, initiator_key,
-            server_session_key=None, loop=None
+            server_session_key=None, loop=None, executor=None
     ):
         self._loop = asyncio.get_event_loop() if loop is None else loop
+        self._executor = executor
         self._connection = connection
         self._client_key = initiator_key
         self._server_permanent_key = None
@@ -394,6 +396,19 @@ class PathClient:
         else:
             return combined_sequence_number
 
+    def run_in_executor(self, func, *args):
+        """
+        Call the internally stored event loop's
+        :meth:`AbstractEventLoop.run_in_executor` function to schedule
+        functions that would otherwise block the event loop.
+
+        Arguments:
+            - `func`: The function to be called. Use
+              :func:`functools.partial` to pass keyword arguments to
+              `func`.
+        """
+        return self._loop.run_in_executor(self._executor, func, *args)
+
     def set_client_key(self, public_key):
         """
         Set the public key of the client and update the internal box.
@@ -507,7 +522,7 @@ class PathClient:
         """
         # Pack
         self.log.debug('Packing message: {}', message.type)
-        data = message.pack(self)
+        data = yield from message.pack(self)
         self.log.trace('server >> {}', message)
 
         # Send data
@@ -532,7 +547,7 @@ class PathClient:
         self.log.debug('Received message')
 
         # Unpack data and return
-        message = unpack(self, data)
+        message = yield from unpack(self, data)
         self.log.debug('Unpacked message: {}', message.type)
         self.log.trace('server << {}', message)
         return message

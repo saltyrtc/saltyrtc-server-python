@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import os
 import socket
 import ssl
@@ -74,6 +75,8 @@ def pytest_namespace():
         ],
         'timeout': 0.4,
         'run_long_tests': False,
+        'executor': concurrent.futures.ThreadPoolExecutor((os.cpu_count() or 1) * 5),
+        # 'executor': concurrent.futures.ProcessPoolExecutor(os.cpu_count() or 1),
     }
     saltyrtc['have_internal'] = pytest.mark.skipif(
         saltyrtc['external_server'] is None,
@@ -285,7 +288,8 @@ def server_factory(request, event_loop, server_permanent_keys):
             permanent_keys,
             host=pytest.saltyrtc.ip,
             port=port,
-            loop=event_loop
+            loop=event_loop,
+            executor=pytest.saltyrtc.executor,
         )
         server_ = event_loop.run_until_complete(coroutine)
         # Inject address (little bit of a hack but meh...)
