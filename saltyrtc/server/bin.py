@@ -139,10 +139,13 @@ Start the SaltyRTC signalling server. A HUP signal will restart the
 server and reload the SSL certificate, the SSL private key and the
 private permanent key of the server.""")
 @click.option('-sc', '--sslcert', type=click.Path(exists=True), help=_h("""
-Path to a file that contains the SSL certificate."""))
+Path to a PEM file that contains the SSL certificate."""))
 @click.option('-sk', '--sslkey', type=click.Path(exists=True), help=_h("""
-Path to a file that contains the SSL private key. Will be read from
+Path to a PEM file that contains the SSL private key. Will be read from
 the SSL certificate file if not present."""))
+@click.option('-dhp', '--dhparams', type=click.Path(exists=True), help=_h("""
+Path to a PEM file that contains Diffie-Hellman parameters. Required
+for DH(E) and ECDH(E) support."""))
 @click.option('-k', '--key', type=click.Path(), multiple=True, help=_h("""
 Path to a or a hex-encoded private permanent key of the server (e.g.
 a NaCl private key). You can provide more than one key. The first key
@@ -156,6 +159,7 @@ def serve(ctx, **arguments):
     # Get arguments
     ssl_cert = arguments.get('sslcert', None)
     ssl_key = arguments.get('sslkey', None)
+    dh_params = arguments.get('dhparams', None)
     keys = arguments.get('key')
     host = arguments.get('host')
     port = arguments['port']
@@ -177,7 +181,8 @@ def serve(ctx, **arguments):
     # Create SSL context
     ssl_context = None
     if ssl_cert is not None:
-        ssl_context = util.create_ssl_context(certfile=ssl_cert, keyfile=ssl_key)
+        ssl_context = util.create_ssl_context(
+            certfile=ssl_cert, keyfile=ssl_key, dh_params_file=dh_params)
 
     # Get private permanent keys of the server
     if len(keys) > 0:

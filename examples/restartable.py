@@ -35,6 +35,7 @@ def main():
             ssl_context = saltyrtc.server.create_ssl_context(
                 certfile=require_env('SALTYRTC_TLS_CERT'),
                 keyfile=require_env('SALTYRTC_TLS_KEY'),
+                dh_params_file=require_env('SALTYRTC_DH_PARAMS'),
             )
         else:
             ssl_context = None

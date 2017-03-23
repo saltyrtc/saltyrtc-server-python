@@ -99,7 +99,7 @@ class TestCLI:
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-p', '8443',
             )
-        assert 'ssl.SSLError' in exc_info.value.output
+        assert 'SSLError' in exc_info.value.output
 
     @pytest.mark.asyncio
     def test_serve_invalid_key_file(self, cli, tmpdir):
@@ -113,6 +113,20 @@ class TestCLI:
                 '-p', '8443',
             )
         assert 'ValueError' in exc_info.value.output
+
+    @pytest.mark.asyncio
+    def test_serve_invalid_dh_params_file(self, cli, tmpdir):
+        dh_params_file = tmpdir.join('dh_params.pem')
+        dh_params_file.write('meowmeow')
+        with pytest.raises(subprocess.CalledProcessError) as exc_info:
+            yield from cli(
+                'serve',
+                '-sc', pytest.saltyrtc.cert,
+                '-k', pytest.saltyrtc.permanent_key_primary,
+                '-dhp', str(dh_params_file),
+                '-p', '8443',
+            )
+        assert 'SSLError' in exc_info.value.output
 
     @pytest.mark.asyncio
     def test_serve_invalid_hex_encoded_key(self, cli):
@@ -175,38 +189,47 @@ class TestCLI:
         assert "Cannot use event loop 'uvloop'" in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio(self, cli, timeout_factory):
+    def test_serve_asyncio(self, cli):
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
-            timeout=timeout_factory(),
             signal=signal.SIGINT,
         )
         assert 'Stopped' in output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio_hex_encoded_key(self, cli, timeout_factory):
+    def test_serve_asyncio_dh_params(self, cli):
+        output = yield from cli(
+            'serve',
+            '-sc', pytest.saltyrtc.cert,
+            '-k', pytest.saltyrtc.permanent_key_primary,
+            '-dhp', pytest.saltyrtc.dh_params,
+            '-p', '8443',
+            signal=signal.SIGINT,
+        )
+        assert 'Stopped' in output
+
+    @pytest.mark.asyncio
+    def test_serve_asyncio_hex_encoded_key(self, cli):
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-k', open(pytest.saltyrtc.permanent_key_primary, 'r').read(),
             '-p', '8443',
-            timeout=timeout_factory(),
             signal=signal.SIGINT,
         )
         assert 'Stopped' in output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio_plus_logging(self, cli, timeout_factory):
+    def test_serve_asyncio_plus_logging(self, cli):
         output = yield from cli(
             '-v', '7',
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
-            timeout=timeout_factory(),
             signal=signal.SIGINT,
         )
         assert 'Server instance' in output
@@ -214,21 +237,34 @@ class TestCLI:
 
     @pytest.saltyrtc.have_uvloop
     @pytest.mark.asyncio
-    def test_serve_uvloop(self, cli, timeout_factory):
+    def test_serve_uvloop(self, cli):
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             '-l', 'uvloop',
-            timeout=timeout_factory(),
             signal=signal.SIGINT,
         )
         assert 'Stopped' in output
 
     @pytest.saltyrtc.have_uvloop
     @pytest.mark.asyncio
-    def test_serve_uvloop_plus_logging(self, cli, timeout_factory):
+    def test_serve_uvloop_dh_params(self, cli):
+        output = yield from cli(
+            'serve',
+            '-sc', pytest.saltyrtc.cert,
+            '-k', pytest.saltyrtc.permanent_key_primary,
+            '-dhp', pytest.saltyrtc.dh_params,
+            '-p', '8443',
+            '-l', 'uvloop',
+            signal=signal.SIGINT,
+        )
+        assert 'Stopped' in output
+
+    @pytest.saltyrtc.have_uvloop
+    @pytest.mark.asyncio
+    def test_serve_uvloop_plus_logging(self, cli):
         output = yield from cli(
             '-v', '7',
             'serve',
@@ -236,20 +272,18 @@ class TestCLI:
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             '-l', 'uvloop',
-            timeout=timeout_factory(),
             signal=signal.SIGINT,
         )
         assert 'Server instance' in output
         assert 'Closing protocols' in output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio_restart(self, cli, timeout_factory):
+    def test_serve_asyncio_restart(self, cli):
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
-            timeout=timeout_factory(),
             signal=[signal.SIGHUP, signal.SIGINT],
         )
         output = output.split('\n')
@@ -268,13 +302,12 @@ class TestCLI:
         assert 'It is REQUIRED' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_safety_off(self, cli, timeout_factory):
+    def test_serve_safety_off(self, cli):
         env = os.environ.copy()
         env['SALTYRTC_SAFETY_OFF'] = 'yes-and-i-know-what-im-doing'
         output = yield from cli(
             'serve',
             '-p', '8443',
-            timeout=timeout_factory(),
             signal=signal.SIGINT,
             env=env,
         )
@@ -330,7 +363,7 @@ class TestCLI:
         assert 'ValueError' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio_2nd_key(self, cli, timeout_factory):
+    def test_serve_asyncio_2nd_key(self, cli):
         # Load keys
         primary_key = util.load_permanent_key(pytest.saltyrtc.permanent_key_primary)
         primary_key = primary_key.hex_pk().decode('ascii')
@@ -344,7 +377,6 @@ class TestCLI:
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-k', pytest.saltyrtc.permanent_key_secondary,
             '-p', '8443',
-            timeout=timeout_factory(),
             signal=signal.SIGINT,
         )
         assert 'Primary public permanent key: {}'.format(primary_key) in output
@@ -352,7 +384,7 @@ class TestCLI:
         assert 'Stopped' in output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio_2nd_key_reversed(self, cli, timeout_factory):
+    def test_serve_asyncio_2nd_key_reversed(self, cli):
         # Load keys
         primary_key = util.load_permanent_key(pytest.saltyrtc.permanent_key_primary)
         primary_key = primary_key.hex_pk().decode('ascii')
@@ -366,7 +398,6 @@ class TestCLI:
             '-k', pytest.saltyrtc.permanent_key_secondary,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
-            timeout=timeout_factory(),
             signal=signal.SIGINT,
         )
         assert 'Primary public permanent key: {}'.format(secondary_key) in output
