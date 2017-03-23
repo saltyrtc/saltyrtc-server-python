@@ -54,6 +54,8 @@ def pytest_namespace():
         'cli_path': os.path.join(sys.exec_prefix, 'bin', 'saltyrtc-server'),
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
+        'dh_params': os.path.normpath(
+            os.path.join(os.path.abspath(__file__), os.pardir, 'dh2048.pem')),
         'permanent_key_primary': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'permanent.key')),
         'permanent_key_secondary':
@@ -61,8 +63,7 @@ def pytest_namespace():
         'subprotocols': [
             SubProtocol.saltyrtc_v1.value
         ],
-        'debug': logbook.NOTICE,
-        'timeout': 0.1,
+        'timeout': 0.5,
         'run_long_tests': False,
     }
     saltyrtc['have_internal'] = pytest.mark.skipif(
@@ -136,8 +137,6 @@ def _get_timeout(timeout=None):
     """
     if timeout is None:
         timeout = pytest.saltyrtc.timeout
-        if pytest.saltyrtc.debug:
-            timeout *= 10
     return timeout
 
 
@@ -247,19 +246,18 @@ def server_factory(request, event_loop, server_permanent_keys):
     """
     Return a factory to create :class:`saltyrtc.Server` instances.
     """
-    if pytest.saltyrtc.debug:
-        # Enable asyncio debug logging
-        os.environ['PYTHONASYNCIODEBUG'] = '1'
+    # Enable asyncio debug logging
+    os.environ['PYTHONASYNCIODEBUG'] = '1'
 
-        # Enable logging
-        util.enable_logging(level=logbook.NOTICE, redirect_loggers={
-            'asyncio': logbook.WARNING,
-            'websockets': logbook.WARNING,
-        })
+    # Enable logging
+    util.enable_logging(level=logbook.NOTICE, redirect_loggers={
+        'asyncio': logbook.WARNING,
+        'websockets': logbook.WARNING,
+    })
 
-        # Push handler
-        logging_handler = logbook.StderrHandler()
-        logging_handler.push_application()
+    # Push handler
+    logging_handler = logbook.StderrHandler()
+    logging_handler.push_application()
 
     _server_instances = []
 
@@ -270,7 +268,8 @@ def server_factory(request, event_loop, server_permanent_keys):
         # Setup server
         port = unused_tcp_port()
         coroutine = serve(
-            util.create_ssl_context(pytest.saltyrtc.cert),
+            util.create_ssl_context(
+                pytest.saltyrtc.cert, dh_params_file=pytest.saltyrtc.dh_params),
             permanent_keys,
             host=pytest.saltyrtc.ip,
             port=port,
@@ -286,7 +285,7 @@ def server_factory(request, event_loop, server_permanent_keys):
             server_.close()
             event_loop.run_until_complete(server_.wait_closed())
             _server_instances.remove(server_)
-            if pytest.saltyrtc.debug and len(_server_instances) == 0:
+            if len(_server_instances) == 0:
                 logging_handler.pop_application()
 
         request.addfinalizer(fin)
@@ -363,10 +362,9 @@ def ws_client_factory(initiator_key, event_loop, server):
     server_ = server
 
     # Create SSL context
-    ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-    ssl_context.load_verify_locations(cafile=pytest.saltyrtc.cert)
-    if pytest.saltyrtc.debug:
-        ssl_context.set_ciphers('RSA')
+    ssl_context = ssl.create_default_context(
+        ssl.Purpose.SERVER_AUTH, cafile=pytest.saltyrtc.cert)
+    ssl_context.load_dh_params(pytest.saltyrtc.dh_params)
 
     def _ws_client_factory(server=None, path=None, **kwargs):
         if server is None:
@@ -396,10 +394,9 @@ def client_factory(
     server_ = server
 
     # Create SSL context
-    ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-    ssl_context.load_verify_locations(cafile=pytest.saltyrtc.cert)
-    if pytest.saltyrtc.debug:
-        ssl_context.set_ciphers('RSA')
+    ssl_context = ssl.create_default_context(
+        ssl.Purpose.SERVER_AUTH, cafile=pytest.saltyrtc.cert)
+    ssl_context.load_dh_params(pytest.saltyrtc.dh_params)
 
     @asyncio.coroutine
     def _client_factory(

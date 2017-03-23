@@ -198,7 +198,7 @@ def consteq(left, right):
     return libnacl.bytes_eq(left, right)
 
 
-def create_ssl_context(certfile, keyfile=None):
+def create_ssl_context(certfile, keyfile=None, dh_params_file=None):
     """
     Create and return a :class:`ssl.SSLContext` for the server.
     The settings are chosen by the :mod:`ssl` module, and usually
@@ -210,9 +210,14 @@ def create_ssl_context(certfile, keyfile=None):
           SSL certificate of the server.
         - `keyfile`: Path to a file that contains the private key.
           Will be read from `certfile` if not present.
+        - `dh_params_file`: Path to a file in PEM format containing
+          Diffie-Hellman parameters for DH(E) and ECDH(E). Optional
+          but highly recommended.
     """
     ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     ssl_context.load_cert_chain(certfile=certfile, keyfile=keyfile)
+    if dh_params_file is not None:
+        ssl_context.load_dh_params(dh_params_file)
     return ssl_context
 
 

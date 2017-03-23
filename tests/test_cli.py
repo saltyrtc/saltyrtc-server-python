@@ -115,6 +115,20 @@ class TestCLI:
         assert 'ValueError' in exc_info.value.output
 
     @pytest.mark.asyncio
+    def test_serve_invalid_dh_params_file(self, cli, tmpdir):
+        dh_params_file = tmpdir.join('dh_params.pem')
+        dh_params_file.write('meowmeow')
+        with pytest.raises(subprocess.CalledProcessError) as exc_info:
+            yield from cli(
+                'serve',
+                '-sc', pytest.saltyrtc.cert,
+                '-k', pytest.saltyrtc.permanent_key_primary,
+                '-dhp', str(dh_params_file),
+                '-p', '8443',
+            )
+        assert 'ssl.SSLError' in exc_info.value.output
+
+    @pytest.mark.asyncio
     def test_serve_invalid_hex_encoded_key(self, cli):
         key = open(pytest.saltyrtc.permanent_key_primary, 'r').read()[:63]
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
@@ -187,6 +201,19 @@ class TestCLI:
         assert 'Stopped' in output
 
     @pytest.mark.asyncio
+    def test_serve_asyncio_dh_params(self, cli, timeout_factory):
+        output = yield from cli(
+            'serve',
+            '-sc', pytest.saltyrtc.cert,
+            '-k', pytest.saltyrtc.permanent_key_primary,
+            '-dhp', pytest.saltyrtc.dh_params,
+            '-p', '8443',
+            timeout=timeout_factory(),
+            signal=signal.SIGINT,
+        )
+        assert 'Stopped' in output
+
+    @pytest.mark.asyncio
     def test_serve_asyncio_hex_encoded_key(self, cli, timeout_factory):
         output = yield from cli(
             'serve',
@@ -219,6 +246,21 @@ class TestCLI:
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-k', pytest.saltyrtc.permanent_key_primary,
+            '-p', '8443',
+            '-l', 'uvloop',
+            timeout=timeout_factory(),
+            signal=signal.SIGINT,
+        )
+        assert 'Stopped' in output
+
+    @pytest.saltyrtc.have_uvloop
+    @pytest.mark.asyncio
+    def test_serve_uvloop_dh_params(self, cli, timeout_factory):
+        output = yield from cli(
+            'serve',
+            '-sc', pytest.saltyrtc.cert,
+            '-k', pytest.saltyrtc.permanent_key_primary,
+            '-dhp', pytest.saltyrtc.dh_params,
             '-p', '8443',
             '-l', 'uvloop',
             timeout=timeout_factory(),
