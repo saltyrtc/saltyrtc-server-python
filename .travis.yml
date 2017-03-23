@@ -40,7 +40,7 @@ before_install:
   - >
     if [[ "$TRAVIS_PYTHON_VERSION" == "pypy3" ]]; then
       ./.travis-fix-pypy3.sh || travis_terminate 1;
-      source ${HOME}/pypy/bin/activate;
+      source ${HOME}/venv/bin/activate;
       which python;
       python --version;
       which pip;
@@ -57,8 +57,8 @@ script:
   - >
     if [[ "$TRAVIS_PYTHON_VERSION" != "pypy3" ]]; then
       flake8 . || travis_terminate 1;
+      isort -rc -c . || (isort -rc -df . && return 1) || travis_terminate 1;
     fi
-  - isort -rc -c . || (isort -rc -df . && return 1)
   - python setup.py checkdocs
   - py.test --cov-config .coveragerc --cov=saltyrtc.server --loop=$EVENT_LOOP
 
