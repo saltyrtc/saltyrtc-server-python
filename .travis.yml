@@ -22,6 +22,16 @@ matrix:
   - python: "3.5"
     env: EVENT_LOOP=uvloop
     before_script: "pip install .[uvloop]"
+  - python: "3.6"
+    env: EVENT_LOOP=asyncio
+  - python: "3.6"
+    env: EVENT_LOOP=uvloop
+    before_script: "pip install .[uvloop]"
+  - python: "pypy3-5.7.0"
+    env: EVENT_LOOP=asyncio
+  - python: "pypy3-5.7.0"
+    env: EVENT_LOOP=uvloop
+    before_script: "pip install .[uvloop]"
 
 # Install dependencies
 before_install:
