@@ -27,15 +27,16 @@ matrix:
   - python: "3.6"
     env: EVENT_LOOP=uvloop
     before_script: "pip install .[uvloop]"
-  - python: "pypy3-5.7.0"
+  - python: "pypy3"  # TODO: We actually want pypy3 >= 5.7.0
     env: EVENT_LOOP=asyncio
-  - python: "pypy3-5.7.0"
+  - python: "pypy3"  # TODO: We actually want pypy3 >= 5.7.0
     env: EVENT_LOOP=uvloop
     before_script: "pip install .[uvloop]"
 
 # Install dependencies
 before_install:
   - ./.travis-install-libsodium.sh
+  - . .travis-fix-pypy3.sh
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
 install:
   - pip install -U setuptools pip
