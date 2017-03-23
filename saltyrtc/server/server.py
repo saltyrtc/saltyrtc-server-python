@@ -692,8 +692,7 @@ class Server(asyncio.AbstractServer):
 
         # Determine ServerProtocol instance by selected sub-protocol
         if subprotocol != SubProtocol.saltyrtc_v1:
-            self._log.notice("Unsupported sub-protocol '{}', dropping client",
-                             connection.subprotocol)
+            self._log.notice('Could not negotiate a sub-protocol, dropping client')
             # We need to close the connection manually as the client may choose
             # to ignore
             yield from connection.close(code=CloseCode.subprotocol_error.value)
