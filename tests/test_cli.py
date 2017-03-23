@@ -99,7 +99,7 @@ class TestCLI:
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-p', '8443',
             )
-        assert 'ssl.SSLError' in exc_info.value.output
+        assert 'SSLError' in exc_info.value.output
 
     @pytest.mark.asyncio
     def test_serve_invalid_key_file(self, cli, tmpdir):
@@ -126,7 +126,7 @@ class TestCLI:
                 '-dhp', str(dh_params_file),
                 '-p', '8443',
             )
-        assert 'ssl.SSLError' in exc_info.value.output
+        assert 'SSLError' in exc_info.value.output
 
     @pytest.mark.asyncio
     def test_serve_invalid_hex_encoded_key(self, cli):

@@ -36,7 +36,12 @@ matrix:
 # Install dependencies
 before_install:
   - ./.travis-install-libsodium.sh
-  - . .travis-fix-pypy3.sh
+  - >
+    if [[ "$TRAVIS_PYTHON_VERSION" == 'pypy3' ]]; then
+        deactivate
+        ./.travis-fix-pypy3.sh
+        export PATH=${HOME}/pypy/bin:${PATH}
+    fi
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
 install:
   - pip install -U setuptools pip
