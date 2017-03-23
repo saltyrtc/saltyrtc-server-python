@@ -63,7 +63,7 @@ def pytest_namespace():
         'subprotocols': [
             SubProtocol.saltyrtc_v1.value
         ],
-        'timeout': 0.5,
+        'timeout': 1.0,
         'run_long_tests': False,
     }
     saltyrtc['have_internal'] = pytest.mark.skipif(

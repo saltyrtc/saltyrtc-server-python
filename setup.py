@@ -40,13 +40,13 @@ logging_require = [
 # Note: These are just tools that aren't required, so a version range
 #       is not necessary here.
 tests_require = [
-    'pytest>=3.0.2',
+    'pytest>=3.0.7',
     'pytest-asyncio>=0.5.0',
-    'pytest-cov>=2.3.1',
-    'flake8>=3.0.4',
+    'pytest-cov>=2.4.0',
+    'flake8>=3.3.0',
     'isort>=4.2.5',
     'collective.checkdocs>=0.2',
-    'Pygments>=2.1.3',  # required by checkdocs
+    'Pygments>=2.2.0',  # required by checkdocs
 ] + logging_require
 
 setup(
@@ -55,9 +55,9 @@ setup(
     packages=['saltyrtc', 'saltyrtc.server'],
     install_requires=[
         'libnacl>=1.5.0,<2',
-        'click>=6.6',  # doesn't seem to follow semantic versioning
+        'click>=6.7',  # doesn't seem to follow semantic versioning
         'websockets>=3.2,<4',
-        'u-msgpack-python>=2.2,<3',
+        'u-msgpack-python>=2.3,<3',
     ],
     tests_require=tests_require,
     extras_require={
@@ -68,7 +68,7 @@ setup(
         ],
         'dev': tests_require,
         'logging': logging_require,
-        'uvloop': ['uvloop>=0.5.3'],
+        'uvloop': ['uvloop>=0.8.0,<2'],
     },
     include_package_data=True,
     entry_points={
