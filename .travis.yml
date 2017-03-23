@@ -29,15 +29,16 @@ matrix:
     before_script: "pip install .[uvloop]"
   - python: "pypy3"  # TODO: We actually want pypy3 >= 5.7.0
     env: EVENT_LOOP=asyncio
-  - python: "pypy3"  # TODO: We actually want pypy3 >= 5.7.0
-    env: EVENT_LOOP=uvloop
-    before_script: "pip install .[uvloop]"
+# TODO: Re-enable once pypy3 is able to compile uvloop
+#  - python: "pypy3"  # TODO: We actually want pypy3 >= 5.7.0
+#    env: EVENT_LOOP=uvloop
+#    before_script: "pip install .[uvloop]"
 
 # Install dependencies
 before_install:
   - ./.travis-install-libsodium.sh
   - >
-    if [[ "$TRAVIS_PYTHON_VERSION" == 'pypy3' ]]; then
+    if [[ "$TRAVIS_PYTHON_VERSION" == "pypy3" ]]; then
       ./.travis-fix-pypy3.sh || travis_terminate 1;
       source ${HOME}/pypy/bin/activate;
       which python;
@@ -53,7 +54,10 @@ install:
 
 # Run flake8, isort, check docs & tests
 script:
-  - flake8 .
+  - >
+    if [[ "$TRAVIS_PYTHON_VERSION" != "pypy3" ]]; then
+      flake8 . || travis_terminate 1;
+    fi
   - isort -rc -c . || (isort -rc -df . && return 1)
   - python setup.py checkdocs
   - py.test --cov-config .coveragerc --cov=saltyrtc.server --loop=$EVENT_LOOP
