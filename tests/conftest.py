@@ -29,12 +29,21 @@ class CalledProcessError(subprocess.CalledProcessError):
 
 
 def pytest_addoption(parser):
-    help_ = 'loop: Use a different event loop, supported: asyncio, uvloop'
-    parser.addoption("--loop", action="store", help=help_)
+    # 'loop' parameter
+    help_ = 'Use a different event loop, supported: asyncio, uvloop'
+    parser.addoption('--loop', action='store', help=help_)
+
+    # 'timeout' parameter
+    help_ = 'Use a specific timeout in seconds (float) for tests'
+    parser.addoption('--timeout', action='store', help=help_)
 
 
 def pytest_report_header(config):
-    return 'Using event loop: {}'.format(default_event_loop(config=config))
+    lines = [
+        'Using event loop: {}'.format(default_event_loop(config=config)),
+        'Using timeout: {}s'.format(_get_timeout(config=config)),
+    ]
+    return '\n'.join(lines)
 
 
 def pytest_namespace():
@@ -63,7 +72,7 @@ def pytest_namespace():
         'subprotocols': [
             SubProtocol.saltyrtc_v1.value
         ],
-        'timeout': 1.0,
+        'timeout': 0.4,
         'run_long_tests': False,
     }
     saltyrtc['have_internal'] = pytest.mark.skipif(
@@ -130,22 +139,30 @@ def random_cookie():
     return os.urandom(16)
 
 
-def _get_timeout(timeout=None):
+def _get_timeout(timeout=None, request=None, config=None):
     """
-    Return the defined timeout. In case 'debug' has been activated,
-    the timeout will be multiplied by 10.
+    Return the defined timeout.
     """
     if timeout is None:
         timeout = pytest.saltyrtc.timeout
-    return timeout
+    if request is not None:
+        config = request.config
+    option_timeout = config.getoption("--timeout")
+    if option_timeout is not None:
+        return max(timeout, float(option_timeout))
+    else:
+        return timeout
 
 
-@asyncio.coroutine
-def _sleep(timeout=None):
+def _sleep(**kwargs):
     """
     Sleep *timeout* seconds.
     """
-    yield from asyncio.sleep(_get_timeout(timeout))
+    @asyncio.coroutine
+    def __sleep(timeout=None):
+        yield from asyncio.sleep(_get_timeout(timeout=timeout, **kwargs))
+
+    return __sleep
 
 
 @pytest.fixture(scope='module')
@@ -169,11 +186,6 @@ def event_loop(request):
     # Add finaliser and return new event loop
     request.addfinalizer(fin)
     return _event_loop
-
-
-@pytest.fixture(scope='module')
-def timeout_factory():
-    return _get_timeout
 
 
 @pytest.fixture(scope='module')
@@ -212,11 +224,11 @@ def responder_key():
 
 
 @pytest.fixture(scope='module')
-def sleep():
+def sleep(request):
     """
     Sleep *timeout* seconds.
     """
-    return _sleep
+    return _sleep(request=request)
 
 
 @pytest.fixture(scope='module')
@@ -324,11 +336,11 @@ class _DefaultBox:
 
 
 class Client:
-    def __init__(self, ws_client, pack_message, unpack_message, timeout=None):
+    def __init__(self, ws_client, pack_message, unpack_message, request, timeout=None):
         self.ws_client = ws_client
         self.pack_and_send = pack_message
         self.recv_and_unpack = unpack_message
-        self.timeout = _get_timeout(timeout)
+        self.timeout = _get_timeout(timeout=timeout, request=request)
         self.session_key = None
         self.box = None
 
@@ -383,7 +395,7 @@ def ws_client_factory(initiator_key, event_loop, server):
 
 @pytest.fixture(scope='module')
 def client_factory(
-        initiator_key, event_loop, server, server_permanent_keys, responder_key,
+        request, initiator_key, event_loop, server, server_permanent_keys, responder_key,
         pack_nonce, pack_message, unpack_message
 ):
     """
@@ -425,7 +437,7 @@ def client_factory(
             )
         client = Client(
             ws_client, pack_message, unpack_message,
-            timeout=timeout
+            request, timeout=timeout
         )
         nonces = {}
 
@@ -436,7 +448,7 @@ def client_factory(
         key = initiator_key if initiator_handshake else responder_key
 
         # server-hello
-        message, nonce, sck, s, d, start_scsn = yield from client.recv(timeout=timeout)
+        message, nonce, sck, s, d, start_scsn = yield from client.recv()
         ssk = message['key']
         nonces['server-hello'] = nonce
 
@@ -448,7 +460,7 @@ def client_factory(
             yield from client.send(nonce, {
                 'type': 'client-hello',
                 'key': responder_key.pk,
-            }, timeout=timeout)
+            })
             ccsn += 1
 
         # client-auth
@@ -464,12 +476,12 @@ def client_factory(
             payload['ping_interval'] = ping_interval
         if explicit_permanent_key is not None:
             payload['your_key'] = permanent_key
-        yield from client.send(nonce, payload, timeout=timeout)
+        yield from client.send(nonce, payload)
         ccsn += 1
 
         # server-auth
         client.sign_box = libnacl.public.Box(sk=key, pk=permanent_key)
-        message, nonce, ck, s, d, scsn = yield from client.recv(timeout=timeout)
+        message, nonce, ck, s, d, scsn = yield from client.recv()
         nonces['server-auth'] = nonce
 
         # Return client and additional data
@@ -492,10 +504,10 @@ def client_factory(
 
 
 @pytest.fixture(scope='module')
-def unpack_message(event_loop):
+def unpack_message(request, event_loop):
     @asyncio.coroutine
     def _unpack_message(client, box=None, timeout=None):
-        timeout = _get_timeout(timeout)
+        timeout = _get_timeout(timeout=timeout, request=request)
         data = yield from asyncio.wait_for(client.recv(), timeout, loop=event_loop)
         nonce = data[:NONCE_LENGTH]
         (cookie,
@@ -532,7 +544,7 @@ def pack_nonce():
 
 
 @pytest.fixture(scope='module')
-def pack_message(event_loop):
+def pack_message(request, event_loop):
     @asyncio.coroutine
     def _pack_message(client, nonce, message, box=None, timeout=None, pack=True):
         if pack:
@@ -542,16 +554,19 @@ def pack_message(event_loop):
         if box is not None:
             _, data = box.encrypt(data, nonce=nonce, pack_nonce=False)
         data = b''.join((nonce, data))
-        timeout = _get_timeout(timeout)
+        timeout = _get_timeout(timeout=timeout, request=request)
         yield from asyncio.wait_for(client.send(data), timeout, loop=event_loop)
         return data
     return _pack_message
 
 
 @pytest.fixture(scope='module')
-def cli(event_loop):
+def cli(request, event_loop):
     @asyncio.coroutine
-    def _call_cli(*args, input=None, timeout=3.0, signal=None, env=None):
+    def _call_cli(*args, input=None, timeout=None, signal=None, env=None):
+        # Get timeout
+        timeout = _get_timeout(timeout=timeout, request=request)
+
         # Prepare environment
         if env is None:
             env = os.environ.copy()

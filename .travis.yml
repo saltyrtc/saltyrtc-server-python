@@ -37,6 +37,7 @@ matrix:
 # Install dependencies
 before_install:
   - ./.travis-install-libsodium.sh
+  - export TIMEOUT=2.0
   - >
     if [[ "$TRAVIS_PYTHON_VERSION" == "pypy3" ]]; then
       ./.travis-fix-pypy3.sh || travis_terminate 1;
@@ -45,6 +46,7 @@ before_install:
       python --version;
       which pip;
       pip --version;
+      export TIMEOUT=8.0
     fi
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
 install:
@@ -60,7 +62,7 @@ script:
       isort -rc -c . || (isort -rc -df . && return 1) || travis_terminate 1;
     fi
   - python setup.py checkdocs
-  - py.test --cov-config .coveragerc --cov=saltyrtc.server --loop=$EVENT_LOOP
+  - py.test --cov-config .coveragerc --cov=saltyrtc.server --loop=$EVENT_LOOP --timeout=$TIMEOUT
 
 # After success
 after_success:
