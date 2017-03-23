@@ -38,9 +38,12 @@ before_install:
   - ./.travis-install-libsodium.sh
   - >
     if [[ "$TRAVIS_PYTHON_VERSION" == 'pypy3' ]]; then
-        deactivate || travis_terminate 1;
-        ./.travis-fix-pypy3.sh || travis_terminate 1;
-        export PATH=${HOME}/pypy/bin:${PATH} || travis_terminate 1;
+      ./.travis-fix-pypy3.sh || travis_terminate 1;
+      source ${HOME}/pypy/bin/activate;
+      which python;
+      python --version;
+      which pip;
+      pip --version;
     fi
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
 install:
