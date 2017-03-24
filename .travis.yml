@@ -46,7 +46,7 @@ before_install:
       python --version;
       which pip;
       pip --version;
-      export TIMEOUT=8.0
+      export TIMEOUT=12.0
     fi
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
 install:
