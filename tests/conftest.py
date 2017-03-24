@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import os
 import socket
 import ssl
@@ -16,6 +17,8 @@ import websockets
 from saltyrtc.server import (
     NONCE_FORMATTER,
     NONCE_LENGTH,
+    Event,
+    Server,
     SubProtocol,
     serve,
     util,
@@ -59,7 +62,6 @@ def pytest_namespace():
             have_uvloop, reason='requires uvloop to be not installed'),
         'ip': '127.0.0.1',
         'port': 8766,
-        'external_server': False,
         'cli_path': os.path.join(sys.exec_prefix, 'bin', 'saltyrtc-server'),
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
@@ -75,12 +77,9 @@ def pytest_namespace():
         'timeout': 0.4,
         'run_long_tests': False,
     }
-    saltyrtc['have_internal'] = pytest.mark.skipif(
-        saltyrtc['external_server'] is None,
-        reason='requires the usage of the internal server')
     saltyrtc['long_test'] = pytest.mark.skipif(
         not saltyrtc['run_long_tests'],
-        reason='requires the usage of the internal server')
+        reason='requires explicitly enabled long tests')
     return {'saltyrtc': saltyrtc}
 
 
@@ -100,8 +99,6 @@ def unused_tcp_port():
     """
     Find an unused localhost TCP port from 1024-65535 and return it.
     """
-    if pytest.saltyrtc.external_server:
-        return pytest.saltyrtc.port
     with closing(socket.socket()) as sock:
         sock.bind((pytest.saltyrtc.ip, 0))
         return sock.getsockname()[1]
@@ -253,6 +250,39 @@ def url_factory(server):
     return _url_factory
 
 
+class TestServer(Server):
+    def __init__(self, *args, timeout=None, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Store timeout
+        self.timeout = timeout
+
+        # Newly connection closed future
+        self._new_connection_closed_future = asyncio.Future(loop=self._loop)
+
+    def raise_event(self, event: Event, *data):
+        super().raise_event(event, *data)
+        if event == Event.disconnected:
+            self._new_connection_closed_future.set_result(None)
+            self._new_connection_closed_future = asyncio.Future(loop=self._loop)
+
+    @asyncio.coroutine
+    def wait_connections_closed(self):
+        self._log.debug('#protocols remaining: {}', len(self.protocols))
+        return asyncio.wait_for(
+            self._wait_connections_closed(), timeout=self.timeout, loop=self._loop)
+
+    def new_connection_closed(self, future=None):
+        if future is None:
+            future = self._new_connection_closed_future
+        return asyncio.wait_for(
+            future, timeout=self.timeout, loop=self._loop)
+
+    def new_connection_closed_delayed(self):
+        return functools.partial(
+            self.new_connection_closed, future=self._new_connection_closed_future)
+
+
 @pytest.fixture(scope='module')
 def server_factory(request, event_loop, server_permanent_keys):
     """
@@ -285,10 +315,12 @@ def server_factory(request, event_loop, server_permanent_keys):
             permanent_keys,
             host=pytest.saltyrtc.ip,
             port=port,
-            loop=event_loop
+            loop=event_loop,
+            server_class=TestServer,
         )
         server_ = event_loop.run_until_complete(coroutine)
-        # Inject address (little bit of a hack but meh...)
+        # Inject timeout and address (little bit of a hack but meh...)
+        server_.timeout = _get_timeout(request=request)
         server_.address = (pytest.saltyrtc.ip, port)
 
         _server_instances.append(server_)
@@ -305,21 +337,12 @@ def server_factory(request, event_loop, server_permanent_keys):
     return _server_factory
 
 
-class ExternalServer:
-    @property
-    def address(self):
-        return pytest.saltyrtc.ip, pytest.saltyrtc.port
-
-
 @pytest.fixture(scope='module')
 def server(server_factory):
     """
     Return a :class:`saltyrtc.Server` instance.
     """
-    if pytest.saltyrtc.external_server:
-        return ExternalServer()
-    else:
-        return server_factory()
+    return server_factory()
 
 
 @pytest.fixture(scope='module')
