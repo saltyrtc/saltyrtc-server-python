@@ -27,53 +27,57 @@ class _FakePathClient:
 
 class TestProtocol:
     @pytest.mark.asyncio
-    def test_no_subprotocols(self, sleep, ws_client_factory):
+    def test_no_subprotocols(self, server, ws_client_factory):
         """
         The server must drop the client after the connection has been
         established with a close code of *1002*.
         """
         client = yield from ws_client_factory(subprotocols=None)
-        yield from sleep()
+        yield from server.new_connection_closed()
         assert not client.open
         assert client.close_code == CloseCode.subprotocol_error
+        assert len(server.protocols) == 0
 
     @pytest.mark.asyncio
-    def test_invalid_subprotocols(self, sleep, ws_client_factory):
+    def test_invalid_subprotocols(self, server, ws_client_factory):
         """
         The server must drop the client after the connection has been
         established with a close code of *1002*.
         """
         client = yield from ws_client_factory(subprotocols=['kittie-protocol-3000'])
-        yield from sleep()
+        yield from server.new_connection_closed()
         assert not client.open
         assert client.close_code == CloseCode.subprotocol_error
+        assert len(server.protocols) == 0
 
     @pytest.mark.asyncio
-    def test_invalid_path_length(self, url_factory, sleep, ws_client_factory):
+    def test_invalid_path_length(self, url_factory, server, ws_client_factory):
         """
         The server must drop the client after the connection has been
         established with a close code of *3001*.
         """
         client = yield from ws_client_factory(path='{}/{}'.format(
             url_factory(), 'rawr!!!'))
-        yield from sleep()
+        yield from server.new_connection_closed()
         assert not client.open
         assert client.close_code == CloseCode.protocol_error
+        assert len(server.protocols) == 0
 
     @pytest.mark.asyncio
-    def test_invalid_path_symbols(self, url_factory, sleep, ws_client_factory):
+    def test_invalid_path_symbols(self, url_factory, server, ws_client_factory):
         """
         The server must drop the client after the connection has been
         established with a close code of *3001*.
         """
         client = yield from ws_client_factory(path='{}/{}'.format(
             url_factory(), 'äöüä' * 16))
-        yield from sleep()
+        yield from server.new_connection_closed()
         assert not client.open
         assert client.close_code == CloseCode.protocol_error
+        assert len(server.protocols) == 0
 
     @pytest.mark.asyncio
-    def test_server_hello(self, client_factory):
+    def test_server_hello(self, server, client_factory):
         """
         The server must send a valid `server-hello` on connection.
         """
@@ -84,10 +88,11 @@ class TestProtocol:
         assert message['type'] == 'server-hello'
         assert len(message['key']) == 32
         yield from client.ws_client.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
     def test_invalid_message_type(
-            self, sleep, cookie_factory, pack_nonce, client_factory
+            self, cookie_factory, pack_nonce, server, client_factory
     ):
         """
         The server must close the connection when an invalid packet has
@@ -99,12 +104,14 @@ class TestProtocol:
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'meow-hello'
         })
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_field_missing(self, sleep, cookie_factory, pack_nonce, client_factory):
+    def test_field_missing(
+            self, cookie_factory, pack_nonce, server, client_factory
+    ):
         """
         The server must close the connection when an invalid packet has
         been sent during the handshake with a close code of *3001*.
@@ -115,12 +122,14 @@ class TestProtocol:
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
             'type': 'client-hello'
         })
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_invalid_field(self, sleep, cookie_factory, pack_nonce, client_factory):
+    def test_invalid_field(
+            self, cookie_factory, pack_nonce, server, client_factory
+    ):
         """
         The server must close the connection when an invalid packet has
         been sent during the handshake with a close code of *3001*.
@@ -132,13 +141,13 @@ class TestProtocol:
             'type': 'client-hello',
             'key': b'meow?'
         })
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_invalid_message_length(
-            self, sleep, cookie_factory, pack_nonce, client_factory
+            self, cookie_factory, pack_nonce, server, client_factory
     ):
         """
         The server must close the connection when a packet containing
@@ -148,12 +157,14 @@ class TestProtocol:
         yield from client.recv()
         cck, ccsn = cookie_factory(), 2 ** 32 - 1
         yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), b'', pack=False)
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_duplicated_cookie(self, sleep, initiator_key, pack_nonce, client_factory):
+    def test_duplicated_cookie(
+            self, initiator_key, pack_nonce, server, client_factory
+    ):
         """
         Check that the server closes with Protocol Error when a client
         uses the same cookie as the server does.
@@ -173,13 +184,13 @@ class TestProtocol:
         ccsn += 1
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_invalid_repeated_cookie(
-            self, sleep, cookie_factory, initiator_key, pack_nonce, client_factory
+            self, cookie_factory, initiator_key, pack_nonce, server, client_factory
     ):
         """
         Check that the server closes with Protocol Error when a client
@@ -200,13 +211,13 @@ class TestProtocol:
         ccsn += 1
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_initiator_invalid_source(
-            self, sleep, cookie_factory, initiator_key, pack_nonce, client_factory
+            self, cookie_factory, initiator_key, pack_nonce, server, client_factory
     ):
         """
         Check that the server closes with Protocol Error when an
@@ -226,13 +237,13 @@ class TestProtocol:
         ccsn += 1
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_responder_invalid_source(
-            self, sleep, cookie_factory, responder_key, pack_nonce, client_factory
+            self, cookie_factory, responder_key, pack_nonce, server, client_factory
     ):
         """
         Check that the server closes with Protocol Error when an
@@ -252,13 +263,13 @@ class TestProtocol:
         ccsn += 1
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_invalid_destination(
-            self, sleep, cookie_factory, initiator_key, pack_nonce, client_factory
+            self, cookie_factory, initiator_key, pack_nonce, server, client_factory
     ):
         """
         Check that the server closes with Protocol Error when an
@@ -278,13 +289,13 @@ class TestProtocol:
         ccsn += 1
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_subprotocol_downgrade_1(
-            self, sleep, cookie_factory, initiator_key, pack_nonce, client_factory
+            self, cookie_factory, initiator_key, pack_nonce, server, client_factory
     ):
         """
         Check that the server drops the client in case it doesn't find
@@ -306,15 +317,14 @@ class TestProtocol:
         ccsn += 1
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
-    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_subprotocol_downgrade_2(
-            self, monkeypatch,
-            sleep, server, cookie_factory, initiator_key, pack_nonce, client_factory
+            self, monkeypatch, cookie_factory, initiator_key, pack_nonce, server,
+            client_factory
     ):
         """
         Check that the server drops the client in case it detects a
@@ -340,13 +350,13 @@ class TestProtocol:
         ccsn += 1
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_initiator_handshake(
-            self, cookie_factory, initiator_key, pack_nonce, client_factory,
+            self, cookie_factory, initiator_key, pack_nonce, server, client_factory,
             server_permanent_keys
     ):
         """
@@ -385,10 +395,11 @@ class TestProtocol:
         assert len(message['responders']) == 0
 
         yield from client.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
     def test_responder_handshake(
-            self, cookie_factory, responder_key, pack_nonce, client_factory,
+            self, cookie_factory, responder_key, pack_nonce, client_factory, server,
             server_permanent_keys
     ):
         """
@@ -434,10 +445,11 @@ class TestProtocol:
         assert not message['initiator_connected']
 
         yield from client.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
     def test_client_factory_handshake(
-            self, client_factory, initiator_key, responder_key
+            self, server, client_factory, initiator_key, responder_key
     ):
         """
         Check that we can do a complete handshake using the client factory.
@@ -457,8 +469,8 @@ class TestProtocol:
             r['signed_keys'], nonce=r['nonces']['server-auth'])
         assert signed_keys == r['ssk'] + responder_key.pk
         yield from responder.close()
+        yield from server.wait_connections_closed()
 
-    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_keep_alive_pings_initiator(self, server, client_factory):
         """
@@ -481,8 +493,8 @@ class TestProtocol:
 
         # Bye
         yield from initiator.close()
+        yield from server.wait_connections_closed()
 
-    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_keep_alive_pings_responder(self, server, client_factory):
         """
@@ -505,8 +517,8 @@ class TestProtocol:
 
         # Bye
         yield from responder.close()
+        yield from server.wait_connections_closed()
 
-    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_keep_alive_ignore_invalid(self, server, client_factory):
         """
@@ -528,10 +540,11 @@ class TestProtocol:
 
         # Bye
         yield from initiator.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
     def test_keep_alive_timeout(
-            self, sleep, server, ws_client_factory, client_factory
+            self, ws_client_factory, server, client_factory
     ):
         """
         Monkey-patch the the server's keep alive interval and timeout
@@ -553,13 +566,13 @@ class TestProtocol:
             ws_client=ws_client, initiator_handshake=True)
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not client.ws_client.open
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_initiator_invalid_source_after_handshake(
-            self, sleep, pack_nonce, client_factory
+            self, pack_nonce, server, client_factory
     ):
         """
         Check that the server closes with Protocol Error when an
@@ -574,13 +587,13 @@ class TestProtocol:
         })
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_responder_invalid_source_after_handshake(
-            self, sleep, pack_nonce, client_factory
+            self, pack_nonce, server, client_factory
     ):
         """
         Check that the server closes with Protocol Error when an
@@ -595,13 +608,13 @@ class TestProtocol:
         })
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not responder.ws_client.open
         assert responder.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_invalid_destination_after_handshake(
-            self, sleep, pack_nonce, client_factory
+            self, pack_nonce, server, client_factory
     ):
         """
         Check that the server closes with Protocol Error when an
@@ -616,12 +629,12 @@ class TestProtocol:
         })
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not responder.ws_client.open
         assert responder.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_new_initiator(self, client_factory):
+    def test_new_initiator(self, server, client_factory):
         """
         Check that the 'new-initiator' message is sent to an already
         connected responder as soon as the initiator connects.
@@ -647,9 +660,10 @@ class TestProtocol:
         # Bye
         yield from initiator.close()
         yield from responder.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_new_responder(self, client_factory):
+    def test_new_responder(self, server, client_factory):
         """
         Check that the 'new-responder' message is sent to an already
         connected initiator as soon as the responder connects.
@@ -676,9 +690,10 @@ class TestProtocol:
         # Bye
         yield from initiator.close()
         yield from responder.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_multiple_initiators(self, sleep, client_factory):
+    def test_multiple_initiators(self, server, client_factory):
         """
         Ensure that the first initiator is being dropped properly
         when another initiator connects. Also check that the responder
@@ -696,15 +711,15 @@ class TestProtocol:
         assert r['initiator_connected']
 
         # Second initiator handshake
+        connection_closed_event = server.new_connection_closed_delayed()
         second_initiator, i = yield from client_factory(initiator_handshake=True)
         # Responder is connected
         assert i['responders'] == [r['id']]
 
         # First initiator: Expect drop by initiator
-        yield from sleep()
+        yield from connection_closed_event()
         assert not first_initiator.ws_client.open
-        actual_close_code = first_initiator.ws_client.close_code
-        assert actual_close_code == CloseCode.drop_by_initiator
+        assert first_initiator.ws_client.close_code == CloseCode.drop_by_initiator
 
         # new-initiator
         message, _, sck, s, d, scsn = yield from responder.recv()
@@ -717,9 +732,10 @@ class TestProtocol:
         # Bye
         yield from second_initiator.close()
         yield from responder.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_drop_responder(self, sleep, pack_nonce, client_factory):
+    def test_drop_responder(self, pack_nonce, server, client_factory):
         """
         Check that dropping responders works on multiple responders.
         """
@@ -748,6 +764,7 @@ class TestProtocol:
         assert message['id'] == r3['id']
 
         # Drop first responder
+        connection_closed_event = server.new_connection_closed_delayed()
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': r1['id'],
@@ -755,12 +772,12 @@ class TestProtocol:
         i['ccsn'] += 1
 
         # First responder: Expect drop by initiator
-        yield from sleep()
+        yield from connection_closed_event()
         assert not first_responder.ws_client.open
-        actual_close_code = first_responder.ws_client.close_code
-        assert actual_close_code == CloseCode.drop_by_initiator
+        assert first_responder.ws_client.close_code == CloseCode.drop_by_initiator
 
         # Drop third responder
+        connection_closed_event = server.new_connection_closed_delayed()
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': r3['id'],
@@ -768,10 +785,9 @@ class TestProtocol:
         i['ccsn'] += 1
 
         # Third responder: Expect drop by initiator
-        yield from sleep()
+        yield from connection_closed_event()
         assert not third_responder.ws_client.open
-        actual_close_code = third_responder.ws_client.close_code
-        assert actual_close_code == CloseCode.drop_by_initiator
+        assert third_responder.ws_client.close_code == CloseCode.drop_by_initiator
 
         # Second responder: Still open
         assert second_responder.ws_client.open
@@ -779,9 +795,10 @@ class TestProtocol:
         # Bye
         yield from second_responder.close()
         yield from initiator.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_drop_invalid_responder(self, pack_nonce, client_factory):
+    def test_drop_invalid_responder(self, pack_nonce, server, client_factory):
         """
         Check that dropping a non-existing responder does not raise
         any errors.
@@ -800,9 +817,12 @@ class TestProtocol:
 
         # Bye
         yield from initiator.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_drop_responder_with_reason(self, sleep, pack_nonce, client_factory):
+    def test_drop_responder_with_reason(
+            self, pack_nonce, server, client_factory
+    ):
         """
         Check that a responder can be dropped with a custom reason.
         """
@@ -815,6 +835,7 @@ class TestProtocol:
         assert r['initiator_connected']
 
         # Drop responder with a different reason
+        connection_closed_event = server.new_connection_closed_delayed()
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': r['id'],
@@ -822,16 +843,18 @@ class TestProtocol:
         })
 
         # Responder: Expect reason 'handover'
-        yield from sleep()
+        yield from connection_closed_event()
         assert not responder.ws_client.open
-        actual_close_code = responder.ws_client.close_code
-        assert actual_close_code == CloseCode.internal_error
+        assert responder.ws_client.close_code == CloseCode.internal_error
 
         # Bye
         yield from initiator.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_drop_responder_invalid_reason(self, sleep, pack_nonce, client_factory):
+    def test_drop_responder_invalid_reason(
+            self, pack_nonce, server, client_factory
+    ):
         """
         Check that the server drops an initiator that uses a close code
         that is not accepted as drop reason.
@@ -841,6 +864,7 @@ class TestProtocol:
         assert len(i['responders']) == 0
 
         # Drop responder with a different reason
+        connection_closed_event = server.new_connection_closed_delayed()
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': 0xff,
@@ -848,14 +872,14 @@ class TestProtocol:
         })
 
         # Expect protocol error
-        yield from sleep()
+        yield from connection_closed_event()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.protocol_error
+        yield from server.wait_connections_closed()
 
-    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_combined_sequence_number_overflow(
-            self, sleep, server, client_factory
+            self, server, client_factory
     ):
         """
         Monkey-patch the combined sequence number of the server and
@@ -881,20 +905,22 @@ class TestProtocol:
         assert message['id'] == r['id']
 
         # Connect a new responder
+        connection_closed_event = server.new_connection_closed_delayed()
         second_responder, r = yield from client_factory(responder_handshake=True)
 
         # Expect protocol error
-        yield from sleep()
+        yield from connection_closed_event()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.protocol_error
 
         # Bye
         yield from first_responder.close()
         yield from second_responder.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
     def test_relay_errors(
-            self, sleep, pack_nonce, cookie_factory, client_factory
+            self, pack_nonce, cookie_factory, server, client_factory
     ):
         """
         Try sending relay messages to:
@@ -927,12 +953,14 @@ class TestProtocol:
         }, box=None)
 
         # Expect protocol error
-        yield from sleep()
+        yield from server.wait_connections_closed()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
-    def test_relay_unencrypted(self, pack_nonce, cookie_factory, client_factory):
+    def test_relay_unencrypted(
+            self, pack_nonce, cookie_factory, server, client_factory
+    ):
         """
         Check that the initiator and responder can communicate raw
         messages with each other (not encrypted).
@@ -985,10 +1013,12 @@ class TestProtocol:
         # Bye
         yield from initiator.close()
         yield from responder.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
     def test_relay_encrypted(
-            self, initiator_key, responder_key, pack_nonce, cookie_factory, client_factory
+            self, initiator_key, responder_key, pack_nonce, cookie_factory, server,
+            client_factory
     ):
         """
         Check that the initiator and responder can communicate raw
@@ -1044,10 +1074,11 @@ class TestProtocol:
         # Bye
         yield from initiator.close()
         yield from responder.close()
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
     def test_relay_receiver_offline(
-            self, pack_nonce, cookie_factory, client_factory
+            self, pack_nonce, cookie_factory, server, client_factory
     ):
         """
         Check that the server responds with a `send-error` message in
@@ -1077,11 +1108,11 @@ class TestProtocol:
 
         # Bye
         yield from initiator.close()
+        yield from server.wait_connections_closed()
 
-    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_peer_csn_in_overflow(
-            self, sleep, pack_nonce, cookie_factory, client_factory, server
+            self, pack_nonce, cookie_factory, server, client_factory
     ):
         """
         Check that the server does not validate the CSN for relay
@@ -1169,23 +1200,23 @@ class TestProtocol:
         assert message['type'] == 'arrrrrrrr'
 
         # Increase CSN (Overflow sentinel is set, client should be dropped)
+        connection_closed_event = server.new_connection_closed_delayed()
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': 0x02,
         })
 
         # Expect protocol error
-        yield from sleep()
+        yield from connection_closed_event()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.protocol_error
 
         # Bye
         yield from responder.close()
 
-    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_peer_csn_out_overflow(
-            self, sleep, pack_nonce, server, client_factory, cookie_factory
+            self, pack_nonce, server, client_factory, cookie_factory
     ):
         """
         Check that the server does not take its own CSN for outgoing
@@ -1240,22 +1271,21 @@ class TestProtocol:
         assert message['type'] == 'rawr'
 
         # Connect a new responder
+        connection_closed_event = server.new_connection_closed_delayed()
         second_responder, r = yield from client_factory(responder_handshake=True)
 
         # Expect protocol error
-        yield from sleep()
+        yield from connection_closed_event()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.protocol_error
 
         # Bye
         yield from first_responder.close()
         yield from second_responder.close()
-        # Dunno why this is needed but there seems to be a timing issue (#protocols not 0)
-        yield from sleep()
+        yield from server.wait_connections_closed()
 
-    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
-    def test_path_full_lite(self, sleep, initiator_key, server, client_factory):
+    def test_path_full_lite(self, initiator_key, server, client_factory):
         """
         Add 253 fake responders to a path. Then, add a 254th responder
         and check that the correct error code (Path Full) is being
@@ -1279,10 +1309,11 @@ class TestProtocol:
         # Remove fake clients from path
         for client in clients:
             path.remove_client(client)
+        yield from server.wait_connections_closed()
 
     @pytest.saltyrtc.long_test
     @pytest.mark.asyncio
-    def test_path_full(self, event_loop, client_factory):
+    def test_path_full(self, event_loop, server, client_factory):
         """
         Add 253 responders to a path. Then, add a 254th responder
         and check that the correct error code (Path Full) is being
@@ -1303,11 +1334,11 @@ class TestProtocol:
         # Close all clients
         tasks = [client.close() for client, _ in clients]
         yield from asyncio.wait(tasks, loop=event_loop)
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
     def test_event_emitted(
-            self, sleep, server, initiator_key, responder_key,
-            cookie_factory, client_factory
+            self, initiator_key, responder_key, cookie_factory, server, client_factory
     ):
         # Dictionary where fired events are added
         events_fired = collections.defaultdict(list)
@@ -1346,7 +1377,7 @@ class TestProtocol:
 
         yield from initiator.close()
         yield from responder.close()
-        yield from sleep()
+        yield from server.wait_connections_closed()
 
         assert set(events_fired.keys()) == {
             Event.initiator_connected,
@@ -1358,10 +1389,9 @@ class TestProtocol:
             (initiator_key.hex_pk().decode('ascii'), 1000),
         ]
 
-    @pytest.saltyrtc.have_internal
     @pytest.mark.asyncio
     def test_explicit_permanent_key_unavailable(
-            self, server_no_key, client_factory
+            self, server_no_key, server, client_factory
     ):
         """
         Check that the server rejects a permanent key if the server
@@ -1375,10 +1405,11 @@ class TestProtocol:
                 server=server_no_key, permanent_key=key.pk, explicit_permanent_key=True,
                 initiator_handshake=True)
         assert exc_info.value.code == CloseCode.invalid_key
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
     def test_explicit_invalid_permanent_key(
-            self, client_factory
+            self, server, client_factory
     ):
         """
         Check that the server rejects a permanent key it doesn't have.
@@ -1391,10 +1422,12 @@ class TestProtocol:
                 permanent_key=key.pk, explicit_permanent_key=True,
                 initiator_handshake=True)
         assert exc_info.value.code == CloseCode.invalid_key
+        yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
     def test_explicit_permanent_key(
-            self, client_factory, initiator_key, responder_key, server_permanent_keys
+            self, server, client_factory, initiator_key, responder_key,
+            server_permanent_keys
     ):
         """
         Check that explicitly requesting a permanent key works as
@@ -1418,3 +1451,4 @@ class TestProtocol:
                 r['signed_keys'], nonce=r['nonces']['server-auth'])
             assert signed_keys == r['ssk'] + responder_key.pk
             yield from responder.close()
+            yield from server.wait_connections_closed()
