@@ -33,20 +33,22 @@ Signing key: https://lgrahl.de/pgp-key.txt
 5. Build source and binary distributions:
 
    ```bash
+   rm -rf build dist saltyrtc.server.egg-info
+   find . \( -name \*.pyc -o -name \*.pyo -o -name __pycache__ \) -prune -exec rm -rf {} +
    python setup.py sdist bdist_wheel
    ```
 
 6. Sign files:
 
    ```bash
-   gpg --detach-sign -u ${GPG_KEY} -a dist/saltyrtc-${VERSION}.tar.gz
-   gpg --detach-sign -u ${GPG_KEY} -a dist/saltyrtc-${VERSION}-py34.py35-none-any.whl
+   gpg --detach-sign -u ${GPG_KEY} -a dist/saltyrtc.server-${VERSION}.tar.gz
+   gpg --detach-sign -u ${GPG_KEY} -a dist/saltyrtc.server-${VERSION}*.whl
    ```
 
 7. Upload package to PyPI and push:
 
    ```bash
-   twine upload "dist/saltyrtc-${VERSION}*"
+   twine upload "dist/saltyrtc.server-${VERSION}*"
    git push
    git push --tags
    ```
