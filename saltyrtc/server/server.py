@@ -64,7 +64,7 @@ __all__ = (
 @asyncio.coroutine
 def serve(
         ssl_context, keys, paths=None, host=None, port=8765, loop=None, executor=None,
-        event_callbacks: Dict[Event, List[Coroutine]] = None
+        event_callbacks: Dict[Event, List[Coroutine]] = None, server_class=None
 ):
     """
     Start serving SaltyRTC Signalling Clients.
@@ -90,6 +90,8 @@ def serve(
           :class:`Event` and the value being a list of callback
           coroutines. The callback will be called every time the event
           occurs.
+        - `server_class`: An optional :class:`Server` class to create
+          an instance from.
 
     Raises :exc:`ServerKeyError` in case one or more keys have been repeated.
     """
@@ -101,7 +103,9 @@ def serve(
         paths = Paths()
 
     # Create server
-    server = Server(keys, paths, loop=loop, executor=executor)
+    if server_class is None:
+        server_class = Server
+    server = server_class(keys, paths, loop=loop, executor=executor)
 
     # Register event callbacks
     if event_callbacks is not None:
@@ -189,6 +193,8 @@ class ServerProtocol(Protocol):
         except PathError as exc:
             self._log.notice('Closing due to path error: {}', exc)
             yield from connection.close(code=CloseCode.protocol_error.value)
+            self._server.raise_event(
+                Event.disconnected, None, CloseCode.protocol_error.value)
             return
         client.log.info('Connection established')
         client.log.debug('Worker started')
@@ -203,7 +209,7 @@ class ServerProtocol(Protocol):
         try:
             yield from self.handle_client()
         except Disconnected as exc:
-            client.log.info('Connection closed by remote')
+            client.log.info('Connection closed')
             self._server.raise_event(Event.disconnected, hex_path, exc.reason)
         except SlotsFullError as exc:
             client.log.notice('Closing because all path slots are full: {}', exc)
@@ -303,8 +309,9 @@ class ServerProtocol(Protocol):
         tasks += [self._loop.create_task(coroutine) for coroutine in coroutines]
         while True:
             done, pending = yield from asyncio.wait(
-                tasks, loop=self._loop, return_when=asyncio.FIRST_EXCEPTION)
+                tasks, loop=self._loop, return_when=asyncio.FIRST_COMPLETED)
             for task in done:
+                client.log.debug('Task done {}', done)
                 exc = task.exception()
 
                 # Cancel pending tasks
@@ -712,6 +719,7 @@ class Server(asyncio.AbstractServer):
             # We need to close the connection manually as the client may choose
             # to ignore
             yield from connection.close(code=CloseCode.subprotocol_error.value)
+            self.raise_event(Event.disconnected, None, CloseCode.subprotocol_error.value)
         else:
             protocol = ServerProtocol(
                 self, subprotocol, loop=self._loop, executor=self._executor)
@@ -749,12 +757,19 @@ class Server(asyncio.AbstractServer):
     @asyncio.coroutine
     def wait_closed(self):
         """
-        Wait until all connections are closed.
+        Wait until all connections and the server itself is closed.
+        """
+        yield from self._wait_connections_closed()
+        yield from self.server.wait_closed()
+
+    @asyncio.coroutine
+    def _wait_connections_closed(self):
+        """
+        Wait until all connections to the server have been closed.
         """
         if len(self.protocols) > 0:
             tasks = [protocol.handler_task for protocol in self.protocols]
             yield from asyncio.wait(tasks, loop=self._loop)
-        yield from self.server.wait_closed()
 
     @asyncio.coroutine
     def _close_after_all_protocols_closed(self, timeout=None):
