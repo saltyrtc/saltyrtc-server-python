@@ -19,13 +19,13 @@ Signing key: https://lgrahl.de/pgp-key.txt
    export GPG_KEY=3FDB14868A2B36D638F3C495F98FBED10482ABA6
    ```
 
-3. Update version number in ``saltyrtc/__init__.py`` and 
+3. Update version number in ``saltyrtc/server/__init__.py`` and
    ``CHANGELOG.rst``, also update the URL with the corresponding tags.
 
 4. Do a signed commit and signed tag of the release:
 
   ```bash
-  git add saltyrtc/__init__.py.py CHANGELOG.rst
+  git add saltyrtc/server/__init__.py CHANGELOG.rst
   git commit -S${GPG_KEY} -m "Release v${VERSION}"
   git tag -u ${GPG_KEY} -m "Release v${VERSION}" v${VERSION}
   ```
