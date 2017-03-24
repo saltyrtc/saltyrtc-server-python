@@ -64,7 +64,7 @@ __all__ = (
 @asyncio.coroutine
 def serve(
         ssl_context, keys, paths=None, host=None, port=8765, loop=None,
-        event_callbacks: Dict[Event, List[Coroutine]] = None
+        event_callbacks: Dict[Event, List[Coroutine]] = None, server_class=None
 ):
     """
     Start serving SaltyRTC Signalling Clients.
@@ -87,6 +87,8 @@ def serve(
           :class:`Event` and the value being a list of callback
           coroutines. The callback will be called every time the event
           occurs.
+        - `server_class`: An optional :class:`Server` class to create
+          an instance from.
 
     Raises :exc:`ServerKeyError` in case one or more keys have been repeated.
     """
@@ -98,7 +100,9 @@ def serve(
         paths = Paths()
 
     # Create server
-    server = Server(keys, paths, loop=loop)
+    if server_class is None:
+        server_class = Server
+    server = server_class(keys, paths, loop=loop)
 
     # Register event callbacks
     if event_callbacks is not None:
@@ -184,6 +188,8 @@ class ServerProtocol(Protocol):
         except PathError as exc:
             self._log.notice('Closing due to path error: {}', exc)
             yield from connection.close(code=CloseCode.protocol_error.value)
+            self._server.raise_event(
+                Event.disconnected, None, CloseCode.protocol_error.value)
             return
         client.log.info('Connection established')
         client.log.debug('Worker started')
@@ -198,7 +204,7 @@ class ServerProtocol(Protocol):
         try:
             yield from self.handle_client()
         except Disconnected as exc:
-            client.log.info('Connection closed by remote')
+            client.log.info('Connection closed')
             self._server.raise_event(Event.disconnected, hex_path, exc.reason)
         except SlotsFullError as exc:
             client.log.notice('Closing because all path slots are full: {}', exc)
@@ -246,7 +252,8 @@ class ServerProtocol(Protocol):
         path = self._server.paths.get(initiator_key)
 
         # Create client instance
-        client = PathClient(connection, path.number, initiator_key)
+        client = PathClient(connection, path.number, initiator_key,
+                            loop=self._loop)
 
         # Return path and client
         return path, client
@@ -272,42 +279,52 @@ class ServerProtocol(Protocol):
 
         # Task: Execute enqueued tasks
         client.log.debug('Starting poll for enqueued tasks task')
-        tasks = [self.task_loop()]
+        task_loop_task = self._loop.create_task(self.task_loop())
+        tasks = [task_loop_task]
+        coroutines = []
 
         # Task: Poll for messages
         hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
         if client.type == AddressType.initiator:
             client.log.debug('Starting runner for initiator')
             self._server.raise_event(Event.initiator_connected, hex_path)
-            tasks.append(self.initiator_receive_loop())
+            coroutines.append(self.initiator_receive_loop())
         elif client.type == AddressType.responder:
             client.log.debug('Starting runner for responder')
             self._server.raise_event(Event.responder_connected, hex_path)
-            tasks.append(self.responder_receive_loop())
+            coroutines.append(self.responder_receive_loop())
         else:
             raise ValueError('Invalid address type: {}'.format(client.type))
 
         # Task: Keep alive
         client.log.debug('Starting keep-alive task')
-        tasks.append(self.keep_alive_loop())
+        coroutines.append(self.keep_alive_loop())
 
         # Wait until complete
-        tasks = [self._loop.create_task(coroutine) for coroutine in tasks]
-        done, pending = yield from asyncio.wait(
-            tasks, loop=self._loop, return_when=asyncio.FIRST_EXCEPTION)
-        for task in done:
-            exc = task.exception()
+        tasks += [self._loop.create_task(coroutine) for coroutine in coroutines]
+        while True:
+            done, pending = yield from asyncio.wait(
+                tasks, loop=self._loop, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                client.log.debug('Task done {}', done)
+                exc = task.exception()
 
-            # Cancel pending tasks
-            for pending_task in pending:
-                client.log.debug('Cancelling task {}', pending_task)
-                pending_task.cancel()
+                # Cancel pending tasks
+                for pending_task in pending:
+                    client.log.debug('Cancelling task {}', pending_task)
+                    pending_task.cancel()
 
-            # Raise (or re-raise)
-            if exc is None:
-                client.log.error('Task {} returned unexpectedly', task)
-                raise SignalingError('A task returned unexpectedly')
-            raise exc
+                # Raise (or re-raise)
+                if exc is None:
+                    if task == task_loop_task:
+                        # Task loop may return early and it's okay
+                        client.log.debug('Task loop returned early')
+                        tasks.remove(task_loop_task)
+                    else:
+                        client.log.error('Task {} returned unexpectedly', task)
+                        raise SignalingError('A task returned unexpectedly')
+                else:
+                    raise exc
 
     @asyncio.coroutine
     def handshake(self):
@@ -696,6 +713,7 @@ class Server(asyncio.AbstractServer):
             # We need to close the connection manually as the client may choose
             # to ignore
             yield from connection.close(code=CloseCode.subprotocol_error.value)
+            self.raise_event(Event.disconnected, None, CloseCode.subprotocol_error.value)
         else:
             protocol = ServerProtocol(self, subprotocol, loop=self._loop)
             protocol.connection_made(connection, ws_path)
@@ -732,12 +750,19 @@ class Server(asyncio.AbstractServer):
     @asyncio.coroutine
     def wait_closed(self):
         """
-        Wait until all connections are closed.
+        Wait until all connections and the server itself is closed.
+        """
+        yield from self._wait_connections_closed()
+        yield from self.server.wait_closed()
+
+    @asyncio.coroutine
+    def _wait_connections_closed(self):
+        """
+        Wait until all connections to the server have been closed.
         """
         if len(self.protocols) > 0:
             tasks = [protocol.handler_task for protocol in self.protocols]
             yield from asyncio.wait(tasks, loop=self._loop)
-        yield from self.server.wait_closed()
 
     @asyncio.coroutine
     def _close_after_all_protocols_closed(self, timeout=None):
