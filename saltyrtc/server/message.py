@@ -4,6 +4,7 @@ import io
 import struct
 
 # noinspection PyPackageRequirements
+import libnacl
 import umsgpack
 
 from .common import sign_keys as sign_keys_
@@ -374,14 +375,14 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         try:
             _, data = client.box.encrypt(payload, nonce=nonce, pack_nonce=False)
             return data
-        except ValueError as exc:
+        except (ValueError, libnacl.CryptError) as exc:
             raise MessageError('Could not encrypt payload') from exc
 
     @classmethod
     def _decrypt_payload(cls, client, nonce, data):
         try:
             return client.box.decrypt(data, nonce=nonce)
-        except ValueError as exc:
+        except (ValueError, libnacl.CryptError) as exc:
             raise MessageError('Could not decrypt payload') from exc
 
 

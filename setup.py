@@ -55,7 +55,7 @@ setup(
     packages=['saltyrtc', 'saltyrtc.server'],
     install_requires=[
         'libnacl>=1.5.0,<2',
-        'click>=6.7',  # doesn't seem to follow semantic versioning
+        'click>=6.7',  # doesn't seem to follow semantic versioning (see #57)
         'websockets>=3.2,<4',
         'u-msgpack-python>=2.3,<3',
     ],
@@ -65,6 +65,7 @@ setup(
             'asyncio>=3.4.3',
             'typing>=3,<4',
             'backports_abc==0.5',
+            'pytest-asyncio==0.5.0',
         ],
         'dev': tests_require,
         'logging': logging_require,
