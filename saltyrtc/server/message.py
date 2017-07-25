@@ -225,18 +225,19 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
             if not client.authenticated and client.type is None:
                 payload = None
 
-                # Try client-hello (unencrypted)
-                try:
-                    payload = cls._unpack_payload(data)
-                except MessageError:
-                    pass
-
                 # Try client-auth (encrypted)
                 try:
                     payload = cls._unpack_payload(
                         cls._decrypt_payload(client, nonce, data))
                 except MessageError:
                     pass
+
+                # Try client-hello (unencrypted)
+                if payload is None:
+                    try:
+                        payload = cls._unpack_payload(data)
+                    except MessageError:
+                        payload = None
 
                 # Still no payload?
                 if payload is None:
