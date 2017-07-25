@@ -54,8 +54,8 @@ setup(
     version=get_version(),
     packages=['saltyrtc', 'saltyrtc.server'],
     install_requires=[
-        'libnacl>=1.5.0,<2',
-        'click>=6.7',  # doesn't seem to follow semantic versioning
+        'libnacl>=1.5.0,<=1.5.2',  # doesn't seem to follow semantic versioning
+        'click>=6.7',  # doesn't seem to follow semantic versioning (see #57)
         'websockets>=3.2,<4',
         'u-msgpack-python>=2.3,<3',
     ],
