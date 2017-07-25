@@ -1,6 +1,12 @@
 Changelog
 *********
 
+`1.0.1`_ (2017-07-25)
+---------------------
+
+- Fix to handle new `libnacl <https://github.com/saltstack/libnacl/pull/91>`_
+  exceptions.
+
 `1.0.0`_ (2017-03-24)
 ---------------------
 
@@ -9,4 +15,5 @@ Changelog
 
 .. _SaltyRTC 1.0 Protocol: https://github.com/saltyrtc/saltyrtc-meta/blob/protocol-1.0/Protocol.md
 
+.. _1.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v1.0.0...v1.0.1
 .. _1.0.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/aa3aceba46cc8683e640499936a6eaa406819ef8...v1.0.0
