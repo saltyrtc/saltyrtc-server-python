@@ -232,11 +232,12 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
                     pass
 
                 # Try client-auth (encrypted)
-                try:
-                    payload = cls._unpack_payload(
-                        cls._decrypt_payload(client, nonce, data))
-                except MessageError:
-                    pass
+                if payload is None:
+                    try:
+                        payload = cls._unpack_payload(
+                            cls._decrypt_payload(client, nonce, data))
+                    except MessageError:
+                        pass
 
                 # Still no payload?
                 if payload is None:
