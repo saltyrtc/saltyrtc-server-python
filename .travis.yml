@@ -37,16 +37,16 @@ matrix:
       - EVENT_LOOP=uvloop
       - TIMEOUT=2.0
     before_script: "pip install .[uvloop]"
-  - python: "pypy3"  # 2017-08-05: It's pypy3-5.8.0
+  - python: "pypy3"  # 2017-08-05: It's pypy3-5.8.0-beta
     env:
       - EVENT_LOOP=asyncio
       - TIMEOUT=16.0
 # TODO: Re-enable once pypy3 is able to compile uvloop
-  - python: "pypy3"  # 2017-08-05: It's pypy3-5.8.0
-    env:
-      - EVENT_LOOP=uvloop
-      - TIMEOUT=16.0
-    before_script: "pip install .[uvloop]"
+#  - python: "pypy3"  # 2017-08-05: It's pypy3-5.8.0-beta
+#    env:
+#      - EVENT_LOOP=uvloop
+#      - TIMEOUT=16.0
+#    before_script: "pip install .[uvloop]"
 
 # Install dependencies
 before_install:
