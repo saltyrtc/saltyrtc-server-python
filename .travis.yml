@@ -16,38 +16,41 @@ language: python
 matrix:
   include:
   - python: "3.4"
-    env: EVENT_LOOP=asyncio
+    env:
+      - EVENT_LOOP=asyncio
+      - TIMEOUT=2.0
   - python: "3.5"
-    env: EVENT_LOOP=asyncio
+    env:
+      - EVENT_LOOP=asyncio
+      - TIMEOUT=2.0
   - python: "3.5"
-    env: EVENT_LOOP=uvloop
+    env:
+      - EVENT_LOOP=uvloop
+      - TIMEOUT=2.0
     before_script: "pip install .[uvloop]"
   - python: "3.6"
-    env: EVENT_LOOP=asyncio
+    env:
+      - EVENT_LOOP=asyncio
+      - TIMEOUT=2.0
   - python: "3.6"
-    env: EVENT_LOOP=uvloop
+    env:
+      - EVENT_LOOP=uvloop
+      - TIMEOUT=2.0
     before_script: "pip install .[uvloop]"
-  - python: "pypy3"  # TODO: We actually want pypy3 >= 5.7.0
-    env: EVENT_LOOP=asyncio
+  - python: "pypy3"  # 2017-08-05: It's pypy3-5.8.0-beta
+    env:
+      - EVENT_LOOP=asyncio
+      - TIMEOUT=16.0
 # TODO: Re-enable once pypy3 is able to compile uvloop
-#  - python: "pypy3"  # TODO: We actually want pypy3 >= 5.7.0
-#    env: EVENT_LOOP=uvloop
+#  - python: "pypy3"  # 2017-08-05: It's pypy3-5.8.0-beta
+#    env:
+#      - EVENT_LOOP=uvloop
+#      - TIMEOUT=16.0
 #    before_script: "pip install .[uvloop]"
 
 # Install dependencies
 before_install:
   - ./.travis-install-libsodium.sh
-  - export TIMEOUT=2.0
-  - >
-    if [[ "$TRAVIS_PYTHON_VERSION" == "pypy3" ]]; then
-      ./.travis-fix-pypy3.sh || travis_terminate 1;
-      source ${HOME}/venv/bin/activate;
-      which python;
-      python --version;
-      which pip;
-      pip --version;
-      export TIMEOUT=12.0
-    fi
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${HOME}/libsodium/lib
 install:
   - pip install -U setuptools pip

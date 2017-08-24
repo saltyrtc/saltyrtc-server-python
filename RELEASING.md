@@ -1,7 +1,7 @@
 Release Process
 ===============
 
-Signing key: https://lgrahl.de/pgp-key.txt
+Signing key: https://lgrahl.de/pub/pgp-key.txt
 
 1. Check the code:
 
