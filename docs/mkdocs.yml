@@ -1,0 +1,20 @@
+site_name: SaltyRTC Server
+site_description: Documentation for saltyrtc-server-python.
+site_author: Lennart Grahl
+copyright: © 2016-2017 Lennart Grahl
+theme: readthedocs
+repo_url: https://github.com/saltyrtc/saltyrtc-server-python
+edit_uri: edit/master/docs/docs/
+markdown_extensions:
+  - smarty
+  - toc:
+      permalink: False
+pages:
+  - Home: index.md
+  - Guide:
+    - Installing: installing.md
+    - Usage: usage.md
+  - About: about.md
+theme_dir: theme_overrides
+extra_css:
+  - custom.css
