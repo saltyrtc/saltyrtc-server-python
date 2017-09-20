@@ -8,10 +8,10 @@ self-signed certificate.
 ## Generating a Test Certificate
 
 Use the following command to create such a certificate, valid for `localhost`
-during the next 5 years:
+during the next 90 days:
 
     $ openssl req \
-           -newkey rsa:1024 \
+           -newkey rsa:3072 \
            -x509 \
            -nodes \
            -keyout saltyrtc.key \
@@ -23,7 +23,7 @@ during the next 5 years:
            -config <(cat /etc/ssl/openssl.cnf \
              <(printf '[SAN]\nsubjectAltName=DNS:localhost')) \
            -sha256 \
-           -days 1825
+           -days 90
 
 ## Importing
 
