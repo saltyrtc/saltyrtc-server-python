@@ -17,7 +17,7 @@ Prerequisites
 
 .. code-block:: bash
 
-    $ sudo apt-get install python3 python3-pip
+    $ sudo apt-get install python3 python3-pip python3-venv
 
 We recommend using `venv`_ to create an isolated Python environment:
 
