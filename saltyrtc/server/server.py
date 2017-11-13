@@ -344,7 +344,7 @@ class ServerProtocol(Protocol):
         yield from client.send(message)
 
         # Receive client-hello or client-auth
-        client.log.debug('Waiting for client-hello')
+        client.log.debug('Waiting for client-hello or client-auth')
         message = yield from client.receive()
         if message.type == MessageType.client_auth:
             client.log.debug('Received client-auth')
