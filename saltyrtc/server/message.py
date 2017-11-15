@@ -220,6 +220,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
         # Decrypt if directed at us and keys have been exchanged
         # or just return a raw message to be sent to another client
+        expect_type = None
         if destination_type == AddressType.server:
             data = data[NONCE_LENGTH:]
             if not client.authenticated and client.type is None:
@@ -231,6 +232,8 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
                         cls._decrypt_payload(client, nonce, data))
                 except MessageError:
                     pass
+                else:
+                    expect_type = MessageType.client_auth
 
                 # Try client-hello (unencrypted)
                 if payload is None:
@@ -238,9 +241,11 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
                         payload = cls._unpack_payload(data)
                     except MessageError:
                         payload = None
+                    else:
+                        expect_type = MessageType.client_hello
 
                 # Still no payload?
-                if payload is None:
+                if expect_type is None or payload is None:
                     message = 'Expected either client-hello or client-auth, got neither'
                     raise MessageError(message)
             else:
@@ -265,6 +270,10 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
             type_ = MessageType(type_)
         except ValueError as exc:
             raise MessageError('Unknown message type: {}'.format(type_)) from exc
+
+        # Ensure type isn't violated
+        if expect_type is not None and type_ != expect_type:
+            raise MessageError('Expected type {}, got {}'.format(expect_type, type_))
 
         # Check and convert payload on appropriate message class
         try:

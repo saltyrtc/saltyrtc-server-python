@@ -355,6 +355,33 @@ class TestProtocol:
         assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
+    def test_initiator_handshake_unencrypted(
+            self, cookie_factory, pack_nonce, server, client_factory
+    ):
+        """
+        Check that we cannot do a complete handshake for an initiator
+        when 'client-auth' is not encrypted.
+        """
+        client = yield from client_factory()
+
+        # server-hello, already checked in another test
+        message, _, sck, s, d, start_scsn = yield from client.recv()
+
+        # client-auth
+        cck, ccsn = cookie_factory(), 2**32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+            'type': 'client-auth',
+            'your_cookie': sck,
+            'subprotocols': pytest.saltyrtc.subprotocols,
+        })
+        ccsn += 1
+
+        # Expect protocol error
+        yield from server.wait_connections_closed()
+        assert not client.ws_client.open
+        assert client.ws_client.close_code == CloseCode.protocol_error
+
+    @pytest.mark.asyncio
     def test_initiator_handshake(
             self, cookie_factory, initiator_key, pack_nonce, server, client_factory,
             server_permanent_keys
@@ -446,6 +473,39 @@ class TestProtocol:
 
         yield from client.close()
         yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    def test_responder_handshake_unencrypted(
+            self, cookie_factory, responder_key, pack_nonce, client_factory, server
+    ):
+        """
+        Check that we can do a complete handshake for a responder.
+        """
+        client = yield from client_factory()
+
+        # server-hello, already checked in another test
+        message, _, sck, s, d, start_scsn = yield from client.recv()
+
+        # client-hello
+        cck, ccsn = cookie_factory(), 2**32 - 1
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+            'type': 'client-hello',
+            'key': responder_key.pk,
+        })
+        ccsn += 1
+
+        # client-auth
+        yield from client.send(pack_nonce(cck, 0x00, 0x00, ccsn), {
+            'type': 'client-auth',
+            'your_cookie': sck,
+            'subprotocols': pytest.saltyrtc.subprotocols,
+        })
+        ccsn += 1
+
+        # Expect protocol error
+        yield from server.wait_connections_closed()
+        assert not client.ws_client.open
+        assert client.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_client_factory_handshake(
@@ -632,6 +692,37 @@ class TestProtocol:
         yield from server.wait_connections_closed()
         assert not responder.ws_client.open
         assert responder.ws_client.close_code == CloseCode.protocol_error
+
+    @pytest.mark.asyncio
+    def test_unencrypted_packet_after_initiator_handshake(
+            self, pack_nonce, server, client_factory
+    ):
+        """
+        Check that the server closes with Protocol Error when an
+        unencrypted packet is being sent by an initiator.
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        assert len(i['responders']) == 0
+
+        # Drop non-existing responder (encrypted)
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': 0x02,
+        })
+        i['ccsn'] += 1
+
+        # Drop non-existing responder (unencrypted)
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': 0x02,
+        }, box=None)
+        i['ccsn'] += 1
+
+        # Expect protocol error
+        yield from server.wait_connections_closed()
+        assert not initiator.ws_client.open
+        assert initiator.ws_client.close_code == CloseCode.protocol_error
 
     @pytest.mark.asyncio
     def test_new_initiator(self, server, client_factory):
