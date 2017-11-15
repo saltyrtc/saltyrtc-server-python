@@ -54,11 +54,13 @@ Signing key: https://lgrahl.de/pub/pgp-key.txt
    git push --tags
    ```
 
-8. Prepare CHANGELOG.rst for upcoming changes:
+8. Create a new release on GitHub.
+
+9. Prepare CHANGELOG.rst for upcoming changes:
 
    ```rst
    `Unreleased`_ (YYYY-MM-DD)
    --------------------------
    ```
 
-9. Pat yourself on the back and celebrate!
+10. Pat yourself on the back and celebrate!
