@@ -8,6 +8,7 @@ import websockets
 
 from . import util
 from .common import (
+    COOKIE_LENGTH,
     KEEP_ALIVE_INTERVAL_DEFAULT,
     KEEP_ALIVE_INTERVAL_MIN,
     KEEP_ALIVE_TIMEOUT,
@@ -331,7 +332,7 @@ class PathClient:
         Return the cookie of the server (outgoing messages).
         """
         if self._cookie_out is None:
-            self._cookie_out = os.urandom(16)
+            self._cookie_out = os.urandom(COOKIE_LENGTH)
         return self._cookie_out
 
     @property

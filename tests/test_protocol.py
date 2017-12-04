@@ -1036,7 +1036,8 @@ class TestProtocol:
         assert sck == i['sck']
         assert scsn == i['start_scsn'] + 2
         assert message['type'] == 'send-error'
-        assert message['id'] == data[16:]
+        assert len(message['id']) == 8
+        assert message['id'] == data[16:24]
 
         # Send relay message to an invalid destination
         yield from initiator.send(pack_nonce(i['rcck'], i['id'], 0x01, i['rccsn']), {
@@ -1195,7 +1196,8 @@ class TestProtocol:
         assert sck == i['sck']
         assert scsn == i['start_scsn'] + 2
         assert message['type'] == 'send-error'
-        assert message['id'] == data[16:]
+        assert len(message['id']) == 8
+        assert message['id'] == data[16:24]
 
         # Bye
         yield from initiator.close()

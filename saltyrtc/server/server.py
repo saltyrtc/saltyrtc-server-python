@@ -11,6 +11,8 @@ import websockets
 
 from . import util
 from .common import (
+    COOKIE_LENGTH,
+    NONCE_LENGTH,
     RELAY_TIMEOUT,
     AddressType,
     CloseCode,
@@ -543,7 +545,7 @@ class ServerProtocol(Protocol):
 
         # Prepare message
         source.log.debug('Packing relay message')
-        message_id = message.pack(source)[16:]
+        message_id = message.pack(source)[COOKIE_LENGTH:NONCE_LENGTH]
 
         @asyncio.coroutine
         def send_error_message():
