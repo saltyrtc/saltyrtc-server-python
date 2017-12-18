@@ -1,7 +1,7 @@
 SaltyRTC Signalling Server
 ==========================
 
-|Travis| |codecov| |PyPI|
+|Travis| |codecov| |PyPI| |Gitter|
 
 This is a SaltyRTC server implementation for Python 3.4+ using
 `asyncio`_.
@@ -120,5 +120,7 @@ contacts:
    :target: https://codecov.io/gh/saltyrtc/saltyrtc-server-python
 .. |PyPI| image:: https://badge.fury.io/py/saltyrtc.server.svg
    :target: https://badge.fury.io/py/saltyrtc.server
+.. |Gitter| image:: https://badges.gitter.im/saltyrtc/Lobby.svg
+   :target: https://gitter.im/saltyrtc/Lobby
 .. _EA456E8BAF0109429583EED83578F667F2F3A5FA: https://keybase.io/dbrgn
 .. _3FDB14868A2B36D638F3C495F98FBED10482ABA6: https://keybase.io/lgrahl
