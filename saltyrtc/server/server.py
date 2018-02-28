@@ -33,6 +33,7 @@ from .exception import (
     SlotsFullError,
 )
 from .message import (
+    DisconnectedMessage,
     NewInitiatorMessage,
     NewResponderMessage,
     RawMessage,
@@ -230,6 +231,32 @@ class ServerProtocol(Protocol):
 
         # Remove client from path
         path.remove_client(client)
+
+        # Send disconnected message if client was authenticated
+        if client.authenticated:
+            # Initiator: Send to all responders
+            if client.type == AddressType.initiator:
+                responder_ids = path.get_responder_ids()
+                for responder_id in responder_ids:
+                    responder = path.get_responder(responder_id)
+
+                    # Create message and add send coroutine to task queue of the responder
+                    message = DisconnectedMessage.create(
+                        AddressType.server, responder_id, client.id)
+                    responder.log.debug('Enqueueing disconnected message')
+                    yield from responder.enqueue_task(responder.send(message))
+            # Responder: Send to initiator (if present)
+            elif client.type == AddressType.responder:
+                initiator = path.get_initiator()
+                initiator_connected = initiator is not None
+                if initiator_connected:
+                    # Create message and add send coroutine to task queue of the initiator
+                    message = DisconnectedMessage.create(
+                        AddressType.server, initiator.id, client.id)
+                    initiator.log.debug('Enqueueing disconnected message')
+                    yield from initiator.enqueue_task(initiator.send(message))
+            else:
+                client.log.error('Invalid address type: {}'.format(client.type))
 
         # Remove protocol from server and stop
         self._server.unregister(self)

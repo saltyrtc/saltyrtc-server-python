@@ -18,6 +18,7 @@ from .common import (
     MessageType,
     OverflowSentinel,
     validate_cookie,
+    validate_client_id,
     validate_drop_reason,
     validate_hash,
     validate_initiator_connected,
@@ -702,3 +703,28 @@ class SendErrorMessage(AbstractBaseMessage):
     @property
     def message_hash(self):
         return self.payload['hash']
+
+
+class DisconnectedMessage(AbstractBaseMessage):
+    type = MessageType.disconnected
+    encrypted = True
+
+    @classmethod
+    def create(cls, source, destination, client_id):
+        # noinspection PyCallingNonCallable
+        return cls(source, destination, {
+            'type': cls.type.value,
+            'id': client_id,
+        })
+
+    @classmethod
+    def check_payload(cls, client, payload):
+        """
+        MessageError
+        """
+        validate_client_id(payload.get('id'))
+        return payload
+
+    @property
+    def client_id(self):
+        return self.payload['id']

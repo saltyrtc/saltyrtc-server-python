@@ -24,6 +24,7 @@ __all__ = (
     'AddressType',
     'MessageType',
     'available_slot_range',
+    'is_client_id',
     'is_initiator_id',
     'is_responder_id',
     'validate_public_key',
@@ -31,6 +32,7 @@ __all__ = (
     'validate_cookie',
     'validate_signed_keys',
     'validate_initiator_connected',
+    'validate_client_id',
     'validate_responder_id',
     'validate_responder_ids',
     'validate_hash',
@@ -111,10 +113,15 @@ class MessageType(enum.Enum):
     new_initiator = 'new-initiator'
     drop_responder = 'drop-responder'
     send_error = 'send-error'
+    disconnected = 'disconnected'
 
 
 def available_slot_range():
     return range(0x01, 0xff + 1)
+
+
+def is_client_id(id_):
+    return 0x01 <= id_ <= 0xff
 
 
 def is_initiator_id(id_):
@@ -154,6 +161,11 @@ def validate_signed_keys(signed_keys):
 def validate_initiator_connected(initiator_connected):
     if not isinstance(initiator_connected, bool):
         raise MessageError("Invalid value for field 'initiator_connected'")
+
+
+def validate_client_id(id_):
+    if not is_client_id(id_):
+        raise MessageError('Invalid client id')
 
 
 def validate_responder_id(id_):
