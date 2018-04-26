@@ -237,6 +237,7 @@ class ServerProtocol(Protocol):
             # Initiator: Send to all responders
             if client.type == AddressType.initiator:
                 responder_ids = path.get_responder_ids()
+                coroutines = []
                 for responder_id in responder_ids:
                     responder = path.get_responder(responder_id)
 
@@ -244,7 +245,8 @@ class ServerProtocol(Protocol):
                     message = DisconnectedMessage.create(
                         AddressType.server, responder_id, client.id)
                     responder.log.debug('Enqueueing disconnected message')
-                    yield from responder.enqueue_task(responder.send(message))
+                    coroutines.append(responder.enqueue_task(responder.send(message)))
+                yield from asyncio.gather(*coroutines, loop=self._loop)
             # Responder: Send to initiator (if present)
             elif client.type == AddressType.responder:
                 initiator = path.get_initiator()
