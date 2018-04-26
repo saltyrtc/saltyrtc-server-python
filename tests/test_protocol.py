@@ -1543,3 +1543,42 @@ class TestProtocol:
             assert signed_keys == r['ssk'] + responder_key.pk
             yield from responder.close()
             yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    def test_initiator_disconnected(
+            self, server, client_factory,
+    ):
+        # Client handshakes
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        responder1, r = yield from client_factory(responder_handshake=True)
+        responder2, r = yield from client_factory(responder_handshake=True)
+
+        # Disconnect initiator
+        yield from initiator.close()
+
+        # Expect 'disconnected' msgs sent to all responders
+        msg1, *_ = yield from responder1.recv()
+        msg2, *_ = yield from responder2.recv()
+        assert msg1 == msg2 == {'type': 'disconnected', 'id': i['id']}
+
+        yield from responder1.close()
+        yield from responder2.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    def test_responder_disconnected(
+            self, server, client_factory,
+    ):
+        # Client handshakes
+        responder, r = yield from client_factory(responder_handshake=True)
+        initiator, i = yield from client_factory(initiator_handshake=True)
+
+        # Disconnect initiator
+        yield from responder.close()
+
+        # Expect 'disconnected' msg sent to initiator
+        msg, *_ = yield from initiator.recv()
+        assert msg == {'type': 'disconnected', 'id': r['id']}
+
+        yield from initiator.close()
+        yield from server.wait_connections_closed()
