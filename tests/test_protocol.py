@@ -1204,6 +1204,91 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
+    def test_relay_receiver_connection_lost(
+            self, event_loop, ws_client_factory, initiator_key, pack_nonce, cookie_factory,
+            server, client_factory
+    ):
+        """
+        Check that the server responds with a `send-error` message in
+        case the message could not be sent to the recipient due to a
+        connection loss.
+        """
+        initiator_ws_client = yield from ws_client_factory()
+        responder_ws_client = yield from ws_client_factory()
+
+        # Patch server's keep alive interval and timeout
+        assert len(server.protocols) == 2
+        for protocol in server.protocols:
+            protocol.client._keep_alive_interval = 1.0
+            protocol.client.keep_alive_timeout = 1.0
+
+        # Initiator handshake
+        initiator, i = yield from client_factory(
+            ws_client=initiator_ws_client, initiator_handshake=True)
+        i['rccsn'] = 98798984
+        i['rcck'] = cookie_factory()
+
+        # Responder handshake
+        responder, r = yield from client_factory(
+            ws_client=responder_ws_client, responder_handshake=True)
+        r['iccsn'] = 2 ** 24
+        r['icck'] = cookie_factory()
+
+        # new-responder
+        yield from initiator.recv()
+
+        # Get path instance of server and responder's PathClient instance
+        path = server.paths.get(initiator_key.pk)
+        path_client = path.get_responder(0x02)
+
+        # Mock responder instance: Block sending and let the next ping time out
+        forever_blocking_future = asyncio.Future(loop=event_loop)
+
+        @asyncio.coroutine
+        def _mock_send(*_):
+            path_client.log.notice('... NOT')
+            yield from forever_blocking_future
+
+        @asyncio.coroutine
+        def _mock_ping(*_):
+            path_client.log.notice('... NOT')
+            # Dunno why asyncio treats this as a non-coroutine but it does,
+            # so this workaround is required
+            future = asyncio.Future(loop=event_loop)
+            future.set_result(forever_blocking_future)
+            return future
+
+        path_client._connection.send = _mock_send
+        path_client._connection.ping = _mock_ping
+
+        # Send relay message: initiator --> responder (mocked)
+        nonce = pack_nonce(i['rcck'], i['id'], 0x02, i['rccsn'])
+        data = yield from initiator.send(nonce, {
+            'type': 'meow',
+            'rawr': True,
+        }, box=None)
+        i['rccsn'] += 1
+
+        # Receive send-error message: initiator <-- initiator
+        message, _, sck, s, d, scsn = yield from initiator.recv(timeout=10.0)
+        assert s == 0x00
+        assert d == i['id']
+        assert sck == i['sck']
+        assert scsn == i['start_scsn'] + 3
+        assert message['type'] == 'send-error'
+        assert len(message['id']) == 8
+        assert message['id'] == data[16:24]
+
+        # Receive 'disconnected' message
+        message, *_ = yield from initiator.recv()
+        assert message == {'type': 'disconnected', 'id': r['id']}
+
+        # Bye
+        yield from initiator.close()
+        yield from responder.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
     def test_peer_csn_in_overflow(
             self, pack_nonce, cookie_factory, server, client_factory
     ):

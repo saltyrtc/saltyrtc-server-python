@@ -24,6 +24,7 @@ from .exception import (
     InternalError,
     MessageError,
     MessageFlowError,
+    SignalingError,
     SlotsFullError,
 )
 from .message import unpack
@@ -188,7 +189,8 @@ class PathClient:
         'authenticated',
         'keep_alive_timeout',
         'keep_alive_pings',
-        '_task_queue'
+        '_task_queue',
+        '_task_queue_closed',
     )
 
     def __init__(
@@ -216,6 +218,7 @@ class PathClient:
 
         # Queue for tasks to be run on the client (relay messages, closing, ...)
         self._task_queue = asyncio.Queue(loop=self._loop)
+        self._task_queue_closed = False
 
     def __str__(self):
         type_ = self.type
@@ -231,6 +234,14 @@ class PathClient:
         WebSocket connection.
         """
         return self._connection.connection_closed
+
+    @property
+    def tasks_complete(self):
+        """
+        Return whether the underlying task queue is complete (empty).
+        Will also return `True` in case the task queue has been closed.
+        """
+        return self._task_queue.empty() or self._task_queue_closed
 
     @property
     def id(self):
@@ -485,7 +496,11 @@ class PathClient:
         Arguments:
             - `coroutine_or_task`: A coroutine or a
               :class:`asyncio.Task`.
+
+        Raises :exc:`SignalingError` in case the task queue is closed.
         """
+        if self._task_queue_closed:
+            raise SignalingError('Task queue is already closed')
         yield from self._task_queue.put(coroutine_or_task)
 
     @asyncio.coroutine
@@ -496,8 +511,23 @@ class PathClient:
 
         Shall only be called from the client's :class:`Protocol`
         instance.
+
+        Raises :exc:`SignalingError` in case the task queue is closed.
         """
+        if self._task_queue_closed:
+            raise SignalingError('Task queue is already closed')
         return (yield from self._task_queue.get())
+
+    def close_task_queue(self):
+        """
+        Close the task queue, so no further tasks can be enqueued.
+
+        Raises :exc:`SignalingError` in case the task queue was already
+        closed.
+        """
+        if self._task_queue_closed:
+            raise SignalingError('Task queue is already closed')
+        self._task_queue_closed = True
 
     @asyncio.coroutine
     def send(self, message):
