@@ -210,22 +210,22 @@ class ServerProtocol(Protocol):
             self._server.raise_event(Event.disconnected, hex_path, exc.reason)
         except SlotsFullError as exc:
             client.log.notice('Closing because all path slots are full: {}', exc)
-            yield from client.close(code=CloseCode.path_full_error.value)
+            client.close(code=CloseCode.path_full_error.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.path_full_error.value)
         except ServerKeyError as exc:
             client.log.notice('Closing due to server key error: {}', exc)
-            yield from client.close(code=CloseCode.invalid_key.value)
+            client.close(code=CloseCode.invalid_key.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.invalid_key.value)
         except SignalingError as exc:
             client.log.notice('Closing due to protocol error: {}', exc)
-            yield from client.close(code=CloseCode.protocol_error.value)
+            client.close(code=CloseCode.protocol_error.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.protocol_error.value)
         except Exception as exc:
             client.log.exception('Closing due to exception:', exc)
-            yield from client.close(code=CloseCode.internal_error.value)
+            client.close(code=CloseCode.internal_error.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.internal_error.value)
         else:
@@ -235,6 +235,7 @@ class ServerProtocol(Protocol):
         path.remove_client(client)
 
         # Send disconnected message if client was authenticated
+        # TODO: Make sure to send this AFTER all pending messages have enqueued their send-error messages
         if client.authenticated:
             # Initiator: Send to all responders
             if client.type == AddressType.initiator:
@@ -261,6 +262,9 @@ class ServerProtocol(Protocol):
                     yield from initiator.enqueue_task(initiator.send(message))
             else:
                 client.log.error('Invalid address type: {}'.format(client.type))
+
+        # Wait for the connection to be closed
+        yield from client.connection_closed
 
         # Remove protocol from server and stop
         self._server.unregister(self)
@@ -604,6 +608,7 @@ class ServerProtocol(Protocol):
                 yield from asyncio.wait_for(
                     pong_future, client.keep_alive_timeout, loop=self._loop)
             except asyncio.TimeoutError:
+                client.log.debug('Ping timed out')
                 raise PingTimeoutError(client)
             else:
                 client.log.debug('Pong')
