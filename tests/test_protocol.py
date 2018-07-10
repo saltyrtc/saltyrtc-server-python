@@ -33,7 +33,7 @@ class TestProtocol:
         established with a close code of *1002*.
         """
         client = yield from ws_client_factory(subprotocols=None)
-        yield from server.new_connection_closed()
+        yield from server.wait_most_recent_connection_closed()
         assert not client.open
         assert client.close_code == CloseCode.subprotocol_error
         assert len(server.protocols) == 0
@@ -45,7 +45,7 @@ class TestProtocol:
         established with a close code of *1002*.
         """
         client = yield from ws_client_factory(subprotocols=['kittie-protocol-3000'])
-        yield from server.new_connection_closed()
+        yield from server.wait_most_recent_connection_closed()
         assert not client.open
         assert client.close_code == CloseCode.subprotocol_error
         assert len(server.protocols) == 0
@@ -58,7 +58,7 @@ class TestProtocol:
         """
         client = yield from ws_client_factory(path='{}/{}'.format(
             url_factory(), 'rawr!!!'))
-        yield from server.new_connection_closed()
+        yield from server.wait_most_recent_connection_closed()
         assert not client.open
         assert client.close_code == CloseCode.protocol_error
         assert len(server.protocols) == 0
@@ -71,7 +71,7 @@ class TestProtocol:
         """
         client = yield from ws_client_factory(path='{}/{}'.format(
             url_factory(), 'äöüä' * 16))
-        yield from server.new_connection_closed()
+        yield from server.wait_most_recent_connection_closed()
         assert not client.open
         assert client.close_code == CloseCode.protocol_error
         assert len(server.protocols) == 0
@@ -793,6 +793,7 @@ class TestProtocol:
         """
         # First initiator handshake
         first_initiator, i = yield from client_factory(initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
         # No responder connected
         assert len(i['responders']) == 0
 
@@ -802,13 +803,12 @@ class TestProtocol:
         assert r['initiator_connected']
 
         # Second initiator handshake
-        connection_closed_event = server.new_connection_closed_delayed()
         second_initiator, i = yield from client_factory(initiator_handshake=True)
         # Responder is connected
         assert i['responders'] == [r['id']]
 
         # First initiator: Expect drop by initiator
-        yield from connection_closed_event()
+        yield from connection_closed_future()
         assert not first_initiator.ws_client.open
         assert first_initiator.ws_client.close_code == CloseCode.drop_by_initiator
 
@@ -832,6 +832,7 @@ class TestProtocol:
         """
         # First responder handshake
         first_responder, r1 = yield from client_factory(responder_handshake=True)
+        first_responder_closed_future = server.wait_connection_closed_marker()
         assert not r1['initiator_connected']
 
         # Second responder (the only one that will not be dropped) handshake
@@ -844,6 +845,7 @@ class TestProtocol:
 
         # Third responder handshake
         third_responder, r3 = yield from client_factory(responder_handshake=True)
+        third_responder_closed_future = server.wait_connection_closed_marker()
         assert r3['initiator_connected']
 
         # new-responder
@@ -855,7 +857,6 @@ class TestProtocol:
         assert message['id'] == r3['id']
 
         # Drop first responder
-        connection_closed_event = server.new_connection_closed_delayed()
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': r1['id'],
@@ -863,12 +864,11 @@ class TestProtocol:
         i['ccsn'] += 1
 
         # First responder: Expect drop by initiator
-        yield from connection_closed_event()
+        yield from first_responder_closed_future()
         assert not first_responder.ws_client.open
         assert first_responder.ws_client.close_code == CloseCode.drop_by_initiator
 
         # Drop third responder
-        connection_closed_event = server.new_connection_closed_delayed()
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': r3['id'],
@@ -876,7 +876,7 @@ class TestProtocol:
         i['ccsn'] += 1
 
         # Third responder: Expect drop by initiator
-        yield from connection_closed_event()
+        yield from third_responder_closed_future()
         assert not third_responder.ws_client.open
         assert third_responder.ws_client.close_code == CloseCode.drop_by_initiator
 
@@ -923,10 +923,10 @@ class TestProtocol:
 
         # Responder handshake
         responder, r = yield from client_factory(responder_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
         assert r['initiator_connected']
 
         # Drop responder with a different reason
-        connection_closed_event = server.new_connection_closed_delayed()
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': r['id'],
@@ -934,7 +934,7 @@ class TestProtocol:
         })
 
         # Responder: Expect reason 'handover'
-        yield from connection_closed_event()
+        yield from connection_closed_future()
         assert not responder.ws_client.open
         assert responder.ws_client.close_code == CloseCode.internal_error
 
@@ -952,10 +952,10 @@ class TestProtocol:
         """
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
         assert len(i['responders']) == 0
 
         # Drop responder with a different reason
-        connection_closed_event = server.new_connection_closed_delayed()
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': 0xff,
@@ -963,7 +963,7 @@ class TestProtocol:
         })
 
         # Expect protocol error
-        yield from connection_closed_event()
+        yield from connection_closed_future()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.protocol_error
         yield from server.wait_connections_closed()
@@ -978,6 +978,7 @@ class TestProtocol:
         """
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
 
         # Patch server's combined sequence number of the initiator instance
         assert len(server.protocols) == 1
@@ -996,11 +997,10 @@ class TestProtocol:
         assert message['id'] == r['id']
 
         # Connect a new responder
-        connection_closed_event = server.new_connection_closed_delayed()
         second_responder, r = yield from client_factory(responder_handshake=True)
 
         # Expect protocol error
-        yield from connection_closed_event()
+        yield from connection_closed_future()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.protocol_error
 
@@ -1301,6 +1301,7 @@ class TestProtocol:
         """
         # Initiator handshake
         initiator, i = yield from client_factory(csn=0, initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
         i['rccsn'] = 2578  # Start peer CSN
         i['rcck'] = cookie_factory()
 
@@ -1378,14 +1379,13 @@ class TestProtocol:
         assert message['type'] == 'arrrrrrrr'
 
         # Increase CSN (Overflow sentinel is set, client should be dropped)
-        connection_closed_event = server.new_connection_closed_delayed()
         yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
             'type': 'drop-responder',
             'id': 0x02,
         })
 
         # Expect protocol error
-        yield from connection_closed_event()
+        yield from connection_closed_future()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.protocol_error
 
@@ -1402,6 +1402,7 @@ class TestProtocol:
         """
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
         i['rccsn'] = 50217
         i['rcck'] = cookie_factory()
 
@@ -1449,11 +1450,10 @@ class TestProtocol:
         assert message['type'] == 'rawr'
 
         # Connect a new responder
-        connection_closed_event = server.new_connection_closed_delayed()
         second_responder, r = yield from client_factory(responder_handshake=True)
 
         # Expect protocol error
-        yield from connection_closed_event()
+        yield from connection_closed_future()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.protocol_error
 

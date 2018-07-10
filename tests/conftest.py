@@ -8,6 +8,7 @@ import subprocess
 import sys
 from contextlib import closing
 
+import ordered_set
 import libnacl.public
 import logbook
 import pytest
@@ -257,30 +258,38 @@ class TestServer(Server):
         # Store timeout
         self.timeout = timeout
 
-        # Newly connection closed future
-        self._new_connection_closed_future = asyncio.Future(loop=self._loop)
+        # Override server protocols set
+        self.protocols = ordered_set.OrderedSet()
+
+        # Most recent connection closed future
+        self._most_recent_connection_closed_future = asyncio.Future(loop=self._loop)
 
     def raise_event(self, event: Event, *data):
         super().raise_event(event, *data)
         if event == Event.disconnected:
-            self._new_connection_closed_future.set_result(None)
-            self._new_connection_closed_future = asyncio.Future(loop=self._loop)
+            self._most_recent_connection_closed_future.set_result(None)
+            self._most_recent_connection_closed_future = asyncio.Future(loop=self._loop)
 
     @asyncio.coroutine
     def wait_connections_closed(self):
         self._log.debug('#protocols remaining: {}', len(self.protocols))
-        return asyncio.wait_for(
+        yield from asyncio.wait_for(
             self._wait_connections_closed(), timeout=self.timeout, loop=self._loop)
 
-    def new_connection_closed(self, future=None):
-        if future is None:
-            future = self._new_connection_closed_future
-        return asyncio.wait_for(
-            future, timeout=self.timeout, loop=self._loop)
+    @asyncio.coroutine
+    def wait_most_recent_connection_closed(self, connection_closed_future=None):
+        # If there is no future, we simply wait for the 'disconnected' event
+        if connection_closed_future is None:
+            connection_closed_future = self._most_recent_connection_closed_future
+        yield from asyncio.wait_for(
+            connection_closed_future, timeout=self.timeout, loop=self._loop)
 
-    def new_connection_closed_delayed(self):
+    def wait_connection_closed_marker(self):
+        protocol = self.protocols[-1]
+        connection_closed_future = protocol.client.connection_closed
         return functools.partial(
-            self.new_connection_closed, future=self._new_connection_closed_future)
+            self.wait_most_recent_connection_closed,
+            connection_closed_future=connection_closed_future)
 
 
 @pytest.fixture(scope='module')
@@ -292,7 +301,7 @@ def server_factory(request, event_loop, server_permanent_keys):
     os.environ['PYTHONASYNCIODEBUG'] = '1'
 
     # Enable logging
-    util.enable_logging(level=logbook.NOTICE, redirect_loggers={
+    util.enable_logging(level=logbook.TRACE, redirect_loggers={
         'asyncio': logbook.WARNING,
         'websockets': logbook.WARNING,
     })

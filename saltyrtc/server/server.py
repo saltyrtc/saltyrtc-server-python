@@ -210,33 +210,38 @@ class ServerProtocol(Protocol):
 
         # Handle client until disconnected or an exception occurred
         hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
+        close_future = asyncio.Future(loop=self._loop)
         try:
             yield from self.handle_client(task_loop_task)
         except Disconnected as exc:
             client.log.info('Connection closed')
+            close_future.set_result(None)
             self._server.raise_event(Event.disconnected, hex_path, exc.reason)
         except SlotsFullError as exc:
             client.log.notice('Closing because all path slots are full: {}', exc)
-            client.close(code=CloseCode.path_full_error.value)
+            close_future = client.close(code=CloseCode.path_full_error.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.path_full_error.value)
         except ServerKeyError as exc:
             client.log.notice('Closing due to server key error: {}', exc)
-            client.close(code=CloseCode.invalid_key.value)
+            close_future = client.close(code=CloseCode.invalid_key.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.invalid_key.value)
         except SignalingError as exc:
             client.log.notice('Closing due to protocol error: {}', exc)
-            client.close(code=CloseCode.protocol_error.value)
+            close_future = client.close(code=CloseCode.protocol_error.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.protocol_error.value)
         except Exception as exc:
             client.log.exception('Closing due to exception:', exc)
-            client.close(code=CloseCode.internal_error.value)
+            close_future = client.close(code=CloseCode.internal_error.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.internal_error.value)
         else:
+            # Note: This should not ever happen since 'handle_client'
+            #       contains an inifinite loop that only stops due to an exception.
             client.log.error('Client closed without exception')
+            close_future.set_result(None)
 
         # Remove client from path
         path.remove_client(client)
@@ -285,7 +290,7 @@ class ServerProtocol(Protocol):
                 client.log.error('Invalid address type: {}'.format(client.type))
 
         # Wait for the connection to be closed
-        yield from client.connection_closed
+        yield from close_future
 
         # Remove protocol from server and stop
         self._server.unregister(self)
