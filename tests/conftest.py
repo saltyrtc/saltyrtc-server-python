@@ -8,9 +8,9 @@ import subprocess
 import sys
 from contextlib import closing
 
-import ordered_set
 import libnacl.public
 import logbook
+import ordered_set
 import pytest
 import umsgpack
 import websockets

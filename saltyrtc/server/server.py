@@ -247,15 +247,17 @@ class ServerProtocol(Protocol):
         path.remove_client(client)
 
         # Wait for the task loop to complete
-        # Note: This will ensure all relay messages are cancelled and a 'send-error' is sent
-        #       before the 'disconnected' message is being created
+        # Note: This will ensure all relay messages are cancelled and a 'send-error' is
+        #       sent before the 'disconnected' message is being created.
         if client.tasks_complete:
             task_loop_task.cancel()
         client.log.debug('Waiting for the task loop to finish')
         try:
-            yield from asyncio.wait_for(task_loop_task, TASK_LOOP_TIMEOUT, loop=self._loop)
+            yield from asyncio.wait_for(task_loop_task, TASK_LOOP_TIMEOUT,
+                                        loop=self._loop)
         except asyncio.TimeoutError:
-            client.log.error('Task loop has been killed after {} seconds!', TASK_LOOP_TIMEOUT)
+            client.log.error('Task loop has been killed after {} seconds!',
+                             TASK_LOOP_TIMEOUT)
         except Exception as exc:
             client.log.warning('Task loop returned with an exception: {}', exc)
         client.close_task_queue()
@@ -623,7 +625,8 @@ class ServerProtocol(Protocol):
             source.log.info(log_message, destination_id)
             yield from send_error_message()
         else:
-            source.log.debug('Sending relayed message to 0x{:02x} successful', destination.id)
+            source.log.debug('Sending relayed message to 0x{:02x} successful',
+                             destination.id)
 
     @asyncio.coroutine
     def keep_alive_loop(self):

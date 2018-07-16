@@ -1205,8 +1205,8 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_relay_receiver_connection_lost(
-            self, event_loop, ws_client_factory, initiator_key, pack_nonce, cookie_factory,
-            server, client_factory
+            self, event_loop, ws_client_factory, initiator_key, pack_nonce,
+            cookie_factory, server, client_factory
     ):
         """
         Check that the server responds with a `send-error` message in
