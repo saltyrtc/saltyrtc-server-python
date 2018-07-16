@@ -452,13 +452,15 @@ class ServerProtocol(Protocol):
 
         # Send new-initiator message if any responder is present
         responder_ids = path.get_responder_ids()
+        coroutines = []
         for responder_id in responder_ids:
             responder = path.get_responder(responder_id)
 
             # Create message and add send coroutine to task queue of the responder
             message = NewInitiatorMessage.create(AddressType.server, responder_id)
             responder.log.debug('Enqueueing new-initiator message')
-            yield from responder.enqueue_task(responder.send(message))
+            coroutines.append(responder.enqueue_task(responder.send(message)))
+        yield from asyncio.gather(*coroutines, loop=self._loop)
 
         # Send server-auth
         responder_ids = path.get_responder_ids()
@@ -837,7 +839,7 @@ class Server(asyncio.AbstractServer):
         """
         if len(self.protocols) > 0:
             tasks = [protocol.handler_task for protocol in self.protocols]
-            yield from asyncio.wait(tasks, loop=self._loop)
+            yield from asyncio.gather(*tasks, loop=self._loop)
 
     @asyncio.coroutine
     def _close_after_all_protocols_closed(self, timeout=None):

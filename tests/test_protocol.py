@@ -1511,7 +1511,7 @@ class TestProtocol:
 
         # Close all clients
         tasks = [client.close() for client, _ in clients]
-        yield from asyncio.wait(tasks, loop=event_loop)
+        yield from asyncio.gather(*tasks, loop=event_loop)
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
