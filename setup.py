@@ -47,6 +47,7 @@ tests_require = [
     'isort>=4.2.5',
     'collective.checkdocs>=0.2',
     'Pygments>=2.2.0',  # required by checkdocs
+    'ordered-set>=3.0.0',  # required by TestServer class
 ] + logging_require
 
 setup(

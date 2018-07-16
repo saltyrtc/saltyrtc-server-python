@@ -11,6 +11,8 @@ import websockets
 
 from . import util
 from .common import (
+    COOKIE_LENGTH,
+    NONCE_LENGTH,
     RELAY_TIMEOUT,
     AddressType,
     CloseCode,
@@ -58,7 +60,10 @@ __all__ = (
     'ServerProtocol',
     'Paths',
     'Server',
+    'TASK_LOOP_TIMEOUT',
 )
+
+TASK_LOOP_TIMEOUT = 600.0
 
 
 @asyncio.coroutine
@@ -199,38 +204,62 @@ class ServerProtocol(Protocol):
         self.client = client
         self._server.register(self)
 
+        # Start task queue
+        client.log.debug('Starting to poll for enqueued tasks')
+        task_loop_task = self._loop.create_task(self.task_loop())
+
         # Handle client until disconnected or an exception occurred
         hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
+        close_future = asyncio.Future(loop=self._loop)
         try:
-            yield from self.handle_client()
+            yield from self.handle_client(task_loop_task)
         except Disconnected as exc:
             client.log.info('Connection closed')
+            close_future.set_result(None)
             self._server.raise_event(Event.disconnected, hex_path, exc.reason)
         except SlotsFullError as exc:
             client.log.notice('Closing because all path slots are full: {}', exc)
-            yield from client.close(code=CloseCode.path_full_error.value)
+            close_future = client.close(code=CloseCode.path_full_error.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.path_full_error.value)
         except ServerKeyError as exc:
             client.log.notice('Closing due to server key error: {}', exc)
-            yield from client.close(code=CloseCode.invalid_key.value)
+            close_future = client.close(code=CloseCode.invalid_key.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.invalid_key.value)
         except SignalingError as exc:
             client.log.notice('Closing due to protocol error: {}', exc)
-            yield from client.close(code=CloseCode.protocol_error.value)
+            close_future = client.close(code=CloseCode.protocol_error.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.protocol_error.value)
         except Exception as exc:
             client.log.exception('Closing due to exception:', exc)
-            yield from client.close(code=CloseCode.internal_error.value)
+            close_future = client.close(code=CloseCode.internal_error.value)
             self._server.raise_event(
                     Event.disconnected, hex_path, CloseCode.internal_error.value)
         else:
+            # Note: This should not ever happen since 'handle_client'
+            #       contains an inifinite loop that only stops due to an exception.
             client.log.error('Client closed without exception')
+            close_future.set_result(None)
 
         # Remove client from path
         path.remove_client(client)
+
+        # Wait for the task loop to complete
+        # Note: This will ensure all relay messages are cancelled and a 'send-error' is sent
+        #       before the 'disconnected' message is being created
+        if client.tasks_complete:
+            task_loop_task.cancel()
+        client.log.debug('Waiting for the task loop to finish')
+        try:
+            yield from asyncio.wait_for(task_loop_task, TASK_LOOP_TIMEOUT, loop=self._loop)
+        except asyncio.TimeoutError:
+            client.log.error('Task loop has been killed after {} seconds!', TASK_LOOP_TIMEOUT)
+        except Exception as exc:
+            client.log.warning('Task loop returned with an exception: {}', exc)
+        client.close_task_queue()
+        client.log.debug('Task queue finished and closed')
 
         # Send disconnected message if client was authenticated
         if client.authenticated:
@@ -260,6 +289,9 @@ class ServerProtocol(Protocol):
             else:
                 client.log.error('Invalid address type: {}'.format(client.type))
 
+        # Wait for the connection to be closed
+        yield from close_future
+
         # Remove protocol from server and stop
         self._server.unregister(self)
         client.log.debug('Worker stopped')
@@ -287,7 +319,7 @@ class ServerProtocol(Protocol):
         return path, client
 
     @asyncio.coroutine
-    def handle_client(self):
+    def handle_client(self, task_loop_task):
         """
         SignalingError
         PathError
@@ -305,10 +337,7 @@ class ServerProtocol(Protocol):
         yield from self.handshake()
         client.log.info('Handshake completed')
 
-        # Task: Execute enqueued tasks
-        client.log.debug('Starting poll for enqueued tasks task')
-        task_loop_task = self._loop.create_task(self.task_loop())
-        tasks = [task_loop_task]
+        # Prepare tasks
         coroutines = []
 
         # Task: Poll for messages
@@ -329,6 +358,9 @@ class ServerProtocol(Protocol):
         coroutines.append(self.keep_alive_loop())
 
         # Wait until complete
+        # Note: We also add the task loop into this list to catch any
+        #       errors that bubble up in tasks of this client.
+        tasks = [task_loop_task]
         tasks += [self._loop.create_task(coroutine) for coroutine in coroutines]
         while True:
             done, pending = yield from asyncio.wait(
@@ -338,9 +370,11 @@ class ServerProtocol(Protocol):
                 exc = task.exception()
 
                 # Cancel pending tasks
+                # Note: Be careful not to cancel the task loop
                 for pending_task in pending:
-                    client.log.debug('Cancelling task {}', pending_task)
-                    pending_task.cancel()
+                    if pending_task != task_loop_task:
+                        client.log.debug('Cancelling task {}', pending_task)
+                        pending_task.cancel()
 
                 # Raise (or re-raise)
                 if exc is None:
@@ -477,9 +511,12 @@ class ServerProtocol(Protocol):
     @asyncio.coroutine
     def task_loop(self):
         client = self.client
-        while not client.connection_closed.done():
-            # Get a task from the queue
-            task = yield from client.dequeue_task()
+        while not (client.connection_closed.done() and client.tasks_complete):
+            try:
+                # Get a task from the queue
+                task = yield from client.dequeue_task()
+            except asyncio.CancelledError:
+                break
 
             # Wait and catch exceptions, ignore cancelled tasks
             client.log.debug('Waiting for task to complete {}', task)
@@ -487,6 +524,8 @@ class ServerProtocol(Protocol):
                 yield from task
             except asyncio.CancelledError:
                 client.log.debug('Task cancelled {}', task)
+
+        client.log.debug('Stopped polling for tasks')
 
     @asyncio.coroutine
     def initiator_receive_loop(self):
@@ -543,7 +582,7 @@ class ServerProtocol(Protocol):
 
         # Prepare message
         source.log.debug('Packing relay message')
-        message_id = message.pack(source)[16:]
+        message_id = message.pack(source)[COOKIE_LENGTH:NONCE_LENGTH]
 
         @asyncio.coroutine
         def send_error_message():
@@ -573,16 +612,18 @@ class ServerProtocol(Protocol):
         except asyncio.TimeoutError:
             # Timed out, send 'send-error' to source
             log_message = 'Sending relayed message to 0x{:02x} timed out'
-            source.log.info(log_message, destination.id)
+            source.log.info(log_message, destination_id)
             yield from send_error_message()
         except Exception:
             # An exception has been triggered while sending the message.
             # Note: We don't care about the actual exception as the task
-            #       will also trigger that exception on the destination
-            #       client's handler who will log what happened.
+            #       loop will also trigger that exception on the
+            #       destination client's handler who will log what happened.
             log_message = 'Sending relayed message failed, receiver 0x{:02x} is gone'
-            source.log.info(log_message, destination.id)
+            source.log.info(log_message, destination_id)
             yield from send_error_message()
+        else:
+            source.log.debug('Sending relayed message to 0x{:02x} successful', destination.id)
 
     @asyncio.coroutine
     def keep_alive_loop(self):
@@ -602,6 +643,7 @@ class ServerProtocol(Protocol):
                 yield from asyncio.wait_for(
                     pong_future, client.keep_alive_timeout, loop=self._loop)
             except asyncio.TimeoutError:
+                client.log.debug('Ping timed out')
                 raise PingTimeoutError(client)
             else:
                 client.log.debug('Pong')
