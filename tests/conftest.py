@@ -615,7 +615,7 @@ def cli(request, event_loop):
         process = yield from create
 
         # Wait for process to terminate
-        task = event_loop.create_task(process.communicate(input=input))
+        task = asyncio.ensure_future(process.communicate(input=input), loop=event_loop)
         maybe_shielded_task = task
         if signal is not None:
             maybe_shielded_task = asyncio.shield(maybe_shielded_task, loop=event_loop)

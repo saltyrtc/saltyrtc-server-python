@@ -172,7 +172,8 @@ class ServerProtocol(Protocol):
             self._select_subprotocol = _select_subprotocol
 
     def connection_made(self, connection, ws_path):
-        self.handler_task = self._loop.create_task(self.handler(connection, ws_path))
+        self.handler_task = asyncio.ensure_future(
+            self.handler(connection, ws_path), loop=self._loop)
 
     @asyncio.coroutine
     def close(self, code=1000):
@@ -206,7 +207,7 @@ class ServerProtocol(Protocol):
 
         # Start task queue
         client.log.debug('Starting to poll for enqueued tasks')
-        task_loop_task = self._loop.create_task(self.task_loop())
+        task_loop_task = asyncio.ensure_future(self.task_loop(), loop=self._loop)
 
         # Handle client until disconnected or an exception occurred
         hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
@@ -363,7 +364,8 @@ class ServerProtocol(Protocol):
         # Note: We also add the task loop into this list to catch any
         #       errors that bubble up in tasks of this client.
         tasks = [task_loop_task]
-        tasks += [self._loop.create_task(coroutine) for coroutine in coroutines]
+        tasks += [asyncio.ensure_future(coroutine, loop=self._loop)
+                  for coroutine in coroutines]
         while True:
             done, pending = yield from asyncio.wait(
                 tasks, loop=self._loop, return_when=asyncio.FIRST_COMPLETED)
@@ -603,7 +605,7 @@ class ServerProtocol(Protocol):
             return
 
         # Add send task to task queue of the source
-        task = self._loop.create_task(destination.send(message))
+        task = asyncio.ensure_future(destination.send(message), loop=self._loop)
         destination.log.debug('Enqueueing relayed message from 0x{:02x}', source.id)
         yield from destination.enqueue_task(task)
 
@@ -812,13 +814,13 @@ class Server(asyncio.AbstractServer):
         Raise an event and call all registered event callbacks.
         """
         for callback in self._events.get_callbacks(event):
-            self._loop.create_task(callback(event, *data))
+            asyncio.ensure_future(callback(event, *data), loop=self._loop)
 
     def close(self):
         """
         Close open connections and the server.
         """
-        self._loop.create_task(self._close_after_all_protocols_closed())
+        asyncio.ensure_future(self._close_after_all_protocols_closed(), loop=self._loop)
 
     @asyncio.coroutine
     def wait_closed(self):
