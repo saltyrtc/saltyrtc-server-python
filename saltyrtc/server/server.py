@@ -260,7 +260,7 @@ class ServerProtocol(Protocol):
             client.log.error('Task loop has been killed after {} seconds!',
                              TASK_LOOP_TIMEOUT)
         except Exception as exc:
-            client.log.warning('Task loop returned with an exception: {}', exc)
+            client.log.exception('Task loop returned with an exception: {}', exc)
         client.close_task_queue()
         client.log.debug('Task queue finished and closed')
 
