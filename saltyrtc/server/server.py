@@ -215,7 +215,7 @@ class ServerProtocol(Protocol):
         try:
             yield from self.handle_client(task_loop_task)
         except Disconnected as exc:
-            client.log.info('Connection closed')
+            client.log.info('Connection closed (code: {})', exc.reason)
             close_future.set_result(None)
             self._server.raise_event(Event.disconnected, hex_path, exc.reason)
         except SlotsFullError as exc:
