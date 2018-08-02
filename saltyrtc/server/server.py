@@ -560,7 +560,7 @@ class ServerProtocol(Protocol):
                     yield from responder.enqueue_task(coroutine)
                 else:
                     log_message = 'Responder {} already dropped, nothing to do'
-                    path.log.debug(log_message, responder)
+                    path.log.debug(log_message, message.responder_id)
             else:
                 error = "Expected relay message or 'drop-responder', got '{}'"
                 raise MessageFlowError(error.format(message.type))
