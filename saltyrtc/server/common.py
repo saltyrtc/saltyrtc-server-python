@@ -133,13 +133,18 @@ def is_responder_id(id_):
 
 
 def validate_public_key(key):
-    if not isinstance(key, bytes) or len(key) != KEY_LENGTH:
-        raise MessageError('Invalid key')
+    if not isinstance(key, bytes):
+        raise MessageError('Invalid key: Must be `bytes` (is `{}`)'.format(type(key)))
+    key_length = len(key)
+    if key_length != KEY_LENGTH:
+        raise MessageError('Invalid key: Invalid length ({} != {})'.format(
+            key_length, KEY_LENGTH))
 
 
 def validate_cookie(cookie):
     if not isinstance(cookie, bytes):
-        raise MessageError('Invalid cookie: Must be `bytes` instance')
+        raise MessageError('Invalid cookie: Must be `bytes` (is `{}`)'.format(
+            type(cookie)))
     if len(cookie) != COOKIE_LENGTH:
         raise MessageError('Invalid cookie: Invalid length ({} != {})'.format(
             len(cookie), COOKIE_LENGTH))
@@ -149,28 +154,37 @@ def validate_subprotocols(subprotocols):
     try:
         iter(subprotocols)
     except TypeError as exc:
-        raise MessageError('Sub-protocol list is not iterable') from exc
+        raise MessageError('Sub-protocol list is not iterable (type `{}`)'.format(
+            type(subprotocols))) from exc
 
 
 def validate_signed_keys(signed_keys):
-    max_length = SIGNED_KEYS_CIPHERTEXT_LENGTH
-    if not isinstance(signed_keys, bytes) or len(signed_keys) != max_length:
-        raise MessageError("Invalid value for field 'signed_keys'")
+    expected_length = SIGNED_KEYS_CIPHERTEXT_LENGTH
+    if not isinstance(signed_keys, bytes):
+        error = "Invalid value for field 'signed_keys', must be `bytes` (is `{}`)".format(
+            type(signed_keys))
+        raise MessageError(error)
+    signed_keys_length = len(signed_keys)
+    if signed_keys_length != expected_length:
+        raise MessageError("Invalid length of field 'signed_keys' ({} != {})".format(
+            signed_keys_length, expected_length))
 
 
 def validate_initiator_connected(initiator_connected):
     if not isinstance(initiator_connected, bool):
-        raise MessageError("Invalid value for field 'initiator_connected'")
+        error = "Invalid value for field 'initiator_connected', must be `bool` " \
+                "(is `{}`)".format(type(initiator_connected))
+        raise MessageError(error)
 
 
 def validate_client_id(id_):
     if not is_client_id(id_):
-        raise MessageError('Invalid client id')
+        raise MessageError('Invalid client id: {}'.format(id_))
 
 
 def validate_responder_id(id_):
     if not is_responder_id(id_):
-        raise MessageError('Invalid responder id in responder list')
+        raise MessageError('Invalid responder id: {}'.format(id_))
 
 
 def validate_responder_ids(ids):
@@ -183,13 +197,20 @@ def validate_responder_ids(ids):
 
 
 def validate_hash(hash_):
-    if not isinstance(hash_, bytes) or len(hash_) != HASH_LENGTH:
-        raise MessageError('Invalid hash')
+    if not isinstance(hash_, bytes):
+        raise MessageError('Invalid hash: Must be `bytes` (is `{}`)'.format(type(hash_)))
+    hash_length = len(hash_)
+    if hash_length != HASH_LENGTH:
+        raise MessageError('Invalid hash: Invalid length ({} != {})'.format(
+            hash_length, HASH_LENGTH))
 
 
 def validate_ping_interval(ping_interval):
-    if not isinstance(ping_interval, int) or ping_interval < 0:
-        raise MessageError('Invalid ping interval')
+    if not isinstance(ping_interval, int):
+        raise MessageError('Invalid ping interval: Must be `int` (is `{}`)'.format(
+            type(ping_interval)))
+    if ping_interval < 0:
+        raise MessageError('Invalid ping interval ({} >= 0)'.format(ping_interval))
 
 
 def validate_drop_reason(reason):
@@ -201,7 +222,7 @@ def validate_drop_reason(reason):
     try:
         reason = CloseCode(reason)
     except ValueError:
-        raise MessageError('Invalid close code')
+        raise MessageError('Invalid close code: {}'.format(reason))
     if not reason.is_valid_drop_reason:
         raise MessageError('Reason not from acceptable range of close codes')
 
