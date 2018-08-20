@@ -1,10 +1,17 @@
 Changelog
 *********
 
-`2.0.0`_ (2018-07-16)
---------------------------
+`2.0.1`_ (2018-08-20)
+---------------------
 
-**Important:** Make sure your clients supports the `disconnected` message before upgrading.
+- Fix to prevent creating two path instances with the same path string
+- Various improvements to logging messages
+
+`2.0.0`_ (2018-07-16)
+---------------------
+
+**Important:** Make sure you're using Python >= 3.4.4 and that your clients support the
+`disconnected` message before upgrading.
 
 - Add support for the `disconnected` message (major)
 - Fix potential invalid order of messages when dispatching a `send-error`
@@ -30,6 +37,7 @@ Changelog
 
 .. _SaltyRTC 1.0 Protocol: https://github.com/saltyrtc/saltyrtc-meta/blob/protocol-1.0/Protocol.md
 
+.. _2.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v2.0.0...v2.0.1
 .. _2.0.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v1.0.2...v2.0.0
 .. _1.0.2: https://github.com/saltyrtc/saltyrtc-server-python/compare/v1.0.1...v1.0.2
 .. _1.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v1.0.0...v1.0.1
