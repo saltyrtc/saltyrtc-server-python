@@ -246,6 +246,7 @@ class ServerProtocol(Protocol):
 
         # Remove client from path
         path.remove_client(client)
+        self._server.paths.clean(path)
 
         # Wait for the task loop to complete
         # Note: This will ensure all relay messages are cancelled and a 'send-error' is
@@ -294,6 +295,7 @@ class ServerProtocol(Protocol):
 
         # Wait for the connection to be closed
         yield from close_future
+        client.log.debug('WS connection closed')
 
         # Remove protocol from server and stop
         self._server.unregister(self)
@@ -556,6 +558,7 @@ class ServerProtocol(Protocol):
                         'Dropping responder {}, reason: {}', responder, message.reason)
                     responder.log.debug(
                         'Dropping (requested by initiator), reason: {}', message.reason)
+                    # TODO: Mark responder as dropped and don't send relay messages
                     coroutine = responder.close(code=message.reason.value)
                     yield from responder.enqueue_task(coroutine)
                 else:
@@ -725,16 +728,17 @@ class Paths:
     def get(self, initiator_key):
         if self.paths.get(initiator_key) is None:
             self.number += 1
-            self.paths[initiator_key] = Path(initiator_key, self.number)
+            self.paths[initiator_key] = Path(initiator_key, self.number, attached=True)
             self._log.debug('Created new path: {}', self.number)
         return self.paths[initiator_key]
 
     def clean(self, path):
-        if path.empty:
+        if path.attached and path.empty:
+            path.attached = False
             try:
                 del self.paths[path.initiator_key]
             except KeyError:
-                self._log.warning('Path {} has already been removed', path.number)
+                self._log.error('Path {} has already been removed', path.number)
             else:
                 self._log.debug('Removed empty path: {}', path.number)
 
@@ -803,7 +807,6 @@ class Server(asyncio.AbstractServer):
     def unregister(self, protocol):
         self.protocols.remove(protocol)
         self._log.debug('Protocol unregistered: {}', protocol)
-        self.paths.clean(protocol.path)
 
     def register_event_callback(self, event: Event, callback: Coroutine):
         """

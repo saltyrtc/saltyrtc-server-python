@@ -37,13 +37,14 @@ __all__ = (
 
 
 class Path:
-    __slots__ = ('_slots', 'log', 'initiator_key', 'number')
+    __slots__ = ('_slots', 'log', 'initiator_key', 'number', 'attached')
 
-    def __init__(self, initiator_key, number):
+    def __init__(self, initiator_key, number, attached=True):
         self._slots = {id_: None for id_ in available_slot_range()}
         self.log = util.get_logger('path.{}'.format(number))
         self.initiator_key = initiator_key
         self.number = number
+        self.attached = attached
 
     @property
     def empty(self):

@@ -27,9 +27,9 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 long_description = '\n\n'.join((read('README.rst'), read('CHANGELOG.rst')))
 
 # Check python version
-py_version = sys.version_info[:2]
-if py_version < (3, 4):
-    raise Exception("SaltyRTC requires Python >= 3.4")
+py_version = sys.version_info[:3]
+if py_version < (3, 4, 4):
+    raise Exception("SaltyRTC requires Python >= 3.4.4")
 
 # Logging requirements
 logging_require = [
