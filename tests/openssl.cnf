@@ -1,0 +1,36 @@
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_ca
+string_mask = utf8only
+
+[req_distinguished_name]
+countryName = Country Name (2 letter code)
+countryName_default =
+countryName_min = 2
+countryName_max = 2
+stateOrProvinceName = State or Province Name (full name)
+stateOrProvinceName_default =
+localityName = Locality Name (eg, city)
+localityName_default =
+0.organizationName = Organization Name (eg, company)
+0.organizationName_default =
+organizationalUnitName = Organizational Unit Name (eg, section)
+organizationalUnitName_default	=
+commonName = Common Name (localhost)
+commonName_default = localhost
+commonName_max = 64
+emailAddress = Email Address
+emailAddress_default =
+emailAddress_max = 40
+
+[v3_ca]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:true
+keyUsage = cRLSign, keyCertSign, digitalSignature, keyEncipherment
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+IP.1 = 127.0.0.1
+IP.2 = ::1

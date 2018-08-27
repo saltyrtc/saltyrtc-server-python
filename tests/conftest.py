@@ -64,6 +64,8 @@ def pytest_namespace():
         'ip': '127.0.0.1',
         'port': 8766,
         'cli_path': os.path.join(sys.exec_prefix, 'bin', 'saltyrtc-server'),
+        'key': os.path.normpath(
+            os.path.join(os.path.abspath(__file__), os.pardir, 'key.pem')),
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
         'dh_params': os.path.normpath(
@@ -320,7 +322,8 @@ def server_factory(request, event_loop, server_permanent_keys):
         port = unused_tcp_port()
         coroutine = serve(
             util.create_ssl_context(
-                pytest.saltyrtc.cert, dh_params_file=pytest.saltyrtc.dh_params),
+                pytest.saltyrtc.cert, keyfile=pytest.saltyrtc.key,
+                dh_params_file=pytest.saltyrtc.dh_params),
             permanent_keys,
             host=pytest.saltyrtc.ip,
             port=port,

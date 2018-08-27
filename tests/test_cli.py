@@ -84,6 +84,7 @@ class TestCLI:
             yield from cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
+                '-sk', pytest.saltyrtc.key,
                 '-p', '8443',
             )
         assert 'It is REQUIRED' in exc_info.value.output
@@ -109,6 +110,7 @@ class TestCLI:
             yield from cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
+                '-sk', pytest.saltyrtc.key,
                 '-k', str(keyfile),
                 '-p', '8443',
             )
@@ -122,6 +124,7 @@ class TestCLI:
             yield from cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
+                '-sk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-dhp', str(dh_params_file),
                 '-p', '8443',
@@ -135,6 +138,7 @@ class TestCLI:
             yield from cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
+                '-sk', pytest.saltyrtc.key,
                 '-k', key,
                 '-p', '8443',
             )
@@ -146,6 +150,7 @@ class TestCLI:
             yield from cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
+                '-sk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-h', 'meow',
                 '-p', '8443',
@@ -158,6 +163,7 @@ class TestCLI:
             yield from cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
+                '-sk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-p', 'meow',
             )
@@ -169,6 +175,7 @@ class TestCLI:
             yield from cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
+                '-sk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-p', '8443',
                 '-l', 'meow',
@@ -182,6 +189,7 @@ class TestCLI:
             yield from cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
+                '-sk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-p', '8443',
                 '-l', 'uvloop',
@@ -193,6 +201,7 @@ class TestCLI:
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
+            '-sk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             signal=signal.SIGINT,
@@ -204,6 +213,7 @@ class TestCLI:
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
+            '-sk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-dhp', pytest.saltyrtc.dh_params,
             '-p', '8443',
@@ -216,6 +226,7 @@ class TestCLI:
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
+            '-sk', pytest.saltyrtc.key,
             '-k', open(pytest.saltyrtc.permanent_key_primary, 'r').read(),
             '-p', '8443',
             signal=signal.SIGINT,
@@ -228,6 +239,7 @@ class TestCLI:
             '-v', '7',
             'serve',
             '-sc', pytest.saltyrtc.cert,
+            '-sk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             signal=signal.SIGINT,
@@ -241,6 +253,7 @@ class TestCLI:
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
+            '-sk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             '-l', 'uvloop',
@@ -254,6 +267,7 @@ class TestCLI:
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
+            '-sk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-dhp', pytest.saltyrtc.dh_params,
             '-p', '8443',
@@ -269,6 +283,7 @@ class TestCLI:
             '-v', '7',
             'serve',
             '-sc', pytest.saltyrtc.cert,
+            '-sk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             '-l', 'uvloop',
@@ -282,6 +297,7 @@ class TestCLI:
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
+            '-sk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             signal=[signal.SIGHUP, signal.SIGINT],
@@ -331,6 +347,7 @@ class TestCLI:
                 yield from cli(*[
                     'serve',
                     '-sc', pytest.saltyrtc.cert,
+                    '-sk', pytest.saltyrtc.key,
                     '-p', '8443',
                 ] + key_arguments)
             assert 'key has been supplied more than once' in exc_info.value.output
@@ -343,6 +360,7 @@ class TestCLI:
             yield from cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
+                '-sk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-k', str(keyfile),
                 '-p', '8443',
@@ -356,6 +374,7 @@ class TestCLI:
             yield from cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
+                '-sk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-k', key,
                 '-p', '8443',
@@ -374,6 +393,7 @@ class TestCLI:
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
+            '-sk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-k', pytest.saltyrtc.permanent_key_secondary,
             '-p', '8443',
@@ -395,6 +415,7 @@ class TestCLI:
         output = yield from cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
+            '-sk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_secondary,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
