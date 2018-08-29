@@ -154,17 +154,6 @@ def _get_timeout(timeout=None, request=None, config=None):
         return timeout
 
 
-def _sleep(**kwargs):
-    """
-    Sleep *timeout* seconds.
-    """
-    @asyncio.coroutine
-    def __sleep(timeout=None):
-        yield from asyncio.sleep(_get_timeout(timeout=timeout, **kwargs))
-
-    return __sleep
-
-
 @pytest.fixture(scope='module')
 def event_loop(request):
     """
@@ -224,11 +213,16 @@ def responder_key():
 
 
 @pytest.fixture(scope='module')
-def sleep(request):
+def sleep(event_loop):
     """
     Sleep *timeout* seconds.
     """
-    return _sleep(request=request)
+    @asyncio.coroutine
+    def _sleep(delay, **kwargs):
+        kwargs.setdefault('loop', event_loop)
+        yield from asyncio.sleep(delay, **kwargs)
+
+    return _sleep
 
 
 @pytest.fixture(scope='module')

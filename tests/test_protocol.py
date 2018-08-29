@@ -532,7 +532,7 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_keep_alive_pings_initiator(self, server, client_factory):
+    def test_keep_alive_pings_initiator(self, sleep, server, client_factory):
         """
         Check that the server sends ping messages in the requested
         interval.
@@ -544,7 +544,7 @@ class TestProtocol:
         )
 
         # Wait for two pings (including pongs)
-        yield from asyncio.sleep(2.1)
+        yield from sleep(2.1)
 
         # Check ping counter
         assert len(server.protocols) == 1
@@ -556,7 +556,7 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_keep_alive_pings_responder(self, server, client_factory):
+    def test_keep_alive_pings_responder(self, sleep, server, client_factory):
         """
         Check that the server sends ping messages in the requested
         interval.
@@ -568,7 +568,7 @@ class TestProtocol:
         )
 
         # Wait for two pings (including pongs)
-        yield from asyncio.sleep(1.1)
+        yield from sleep(1.1)
 
         # Check ping counter
         assert len(server.protocols) == 1
@@ -580,7 +580,7 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_keep_alive_ignore_invalid(self, server, client_factory):
+    def test_keep_alive_ignore_invalid(self, sleep, server, client_factory):
         """
         Check that the server ignores invalid keep alive intervals.
         """
@@ -591,7 +591,7 @@ class TestProtocol:
         )
 
         # Wait for a second
-        yield from asyncio.sleep(1.1)
+        yield from sleep(1.1)
 
         # Check ping counter
         assert len(server.protocols) == 1
@@ -1242,12 +1242,10 @@ class TestProtocol:
         path_client = path.get_responder(0x02)
 
         # Mock responder instance: Block sending and let the next ping time out
-        forever_blocking_future = asyncio.Future(loop=event_loop)
-
         @asyncio.coroutine
         def _mock_send(*_):
             path_client.log.notice('... NOT')
-            yield from forever_blocking_future
+            yield from asyncio.Future(loop=event_loop)
 
         @asyncio.coroutine
         def _mock_ping(*_):
@@ -1255,7 +1253,7 @@ class TestProtocol:
             # Dunno why asyncio treats this as a non-coroutine but it does,
             # so this workaround is required
             future = asyncio.Future(loop=event_loop)
-            future.set_result(forever_blocking_future)
+            future.set_result(asyncio.Future(loop=event_loop))
             return future
 
         path_client._connection.send = _mock_send
@@ -1269,7 +1267,7 @@ class TestProtocol:
         }, box=None)
         i['rccsn'] += 1
 
-        # Receive send-error message: initiator <-- initiator
+        # Receive send-error message: initiator <-- initiator (mocked)
         message, _, sck, s, d, scsn = yield from initiator.recv(timeout=10.0)
         assert s == 0x00
         assert d == i['id']
