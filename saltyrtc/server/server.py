@@ -218,6 +218,11 @@ class ServerProtocol(Protocol):
             client.log.info('Connection closed (code: {})', exc.reason)
             close_future.set_result(None)
             self._server.raise_event(Event.disconnected, hex_path, exc.reason)
+        except PingTimeoutError:
+            client.log.info('Closing because of a ping timeout')
+            close_future = client.close(CloseCode.timeout)
+            self._server.raise_event(
+                Event.disconnected, hex_path, CloseCode.timeout)
         except SlotsFullError as exc:
             client.log.notice('Closing because all path slots are full: {}', exc)
             close_future = client.close(code=CloseCode.path_full_error.value)

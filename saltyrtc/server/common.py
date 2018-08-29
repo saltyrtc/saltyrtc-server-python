@@ -82,6 +82,7 @@ class CloseCode(enum.IntEnum):
     initiator_could_not_decrypt = 3005
     no_shared_tasks = 3006
     invalid_key = 3007
+    timeout = 3008
 
     @property
     def is_valid_drop_reason(self):

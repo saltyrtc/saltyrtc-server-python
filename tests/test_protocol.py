@@ -628,7 +628,7 @@ class TestProtocol:
         # Expect protocol error
         yield from server.wait_connections_closed()
         assert not client.ws_client.open
-        assert client.ws_client.close_code == CloseCode.protocol_error
+        assert client.ws_client.close_code == CloseCode.timeout
 
     @pytest.mark.asyncio
     def test_initiator_invalid_source_after_handshake(
