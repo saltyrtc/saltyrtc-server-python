@@ -26,6 +26,7 @@ from .events import (
 from .exception import (
     Disconnected,
     DowngradeError,
+    InternalError,
     MessageError,
     MessageFlowError,
     PathError,
@@ -227,25 +228,30 @@ class ServerProtocol(Protocol):
             client.log.notice('Closing because all path slots are full: {}', exc)
             close_future = client.close(code=CloseCode.path_full_error.value)
             self._server.raise_event(
-                    Event.disconnected, hex_path, CloseCode.path_full_error.value)
+                Event.disconnected, hex_path, CloseCode.path_full_error.value)
         except ServerKeyError as exc:
             client.log.notice('Closing due to server key error: {}', exc)
             close_future = client.close(code=CloseCode.invalid_key.value)
             self._server.raise_event(
-                    Event.disconnected, hex_path, CloseCode.invalid_key.value)
+                Event.disconnected, hex_path, CloseCode.invalid_key.value)
+        except InternalError as exc:
+            client.log.error('Closing due to an internal error: {}', exc)
+            close_future = client.close(code=CloseCode.internal_error.value)
+            self._server.raise_event(
+                Event.disconnected, hex_path, CloseCode.internal_error.value)
         except SignalingError as exc:
             client.log.notice('Closing due to protocol error: {}', exc)
             close_future = client.close(code=CloseCode.protocol_error.value)
             self._server.raise_event(
-                    Event.disconnected, hex_path, CloseCode.protocol_error.value)
+                Event.disconnected, hex_path, CloseCode.protocol_error.value)
         except Exception as exc:
             client.log.exception('Closing due to exception:', exc)
             close_future = client.close(code=CloseCode.internal_error.value)
             self._server.raise_event(
-                    Event.disconnected, hex_path, CloseCode.internal_error.value)
+                Event.disconnected, hex_path, CloseCode.internal_error.value)
         else:
             # Note: This should not ever happen since 'handle_client'
-            #       contains an inifinite loop that only stops due to an exception.
+            #       contains an infinite loop that only stops due to an exception.
             client.log.error('Client closed without exception')
             close_future.set_result(None)
 
