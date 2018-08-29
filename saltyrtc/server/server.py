@@ -1,6 +1,5 @@
 import asyncio
 import binascii
-import inspect
 from collections import OrderedDict
 from typing import (
     Dict,
@@ -61,16 +60,16 @@ __all__ = (
     'ServerProtocol',
     'Paths',
     'Server',
-    'TASK_LOOP_TIMEOUT',
 )
 
-TASK_LOOP_TIMEOUT = 600.0
+_TASK_QUEUE_JOIN_TIMEOUT = 10.0
 
 
 @asyncio.coroutine
 def serve(
         ssl_context, keys, paths=None, host=None, port=8765, loop=None,
-        event_callbacks: Dict[Event, List[Coroutine]] = None, server_class=None
+        event_callbacks: Dict[Event, List[Coroutine]] = None, server_class=None,
+        ws_kwargs=None,
 ):
     """
     Start serving SaltyRTC Signalling Clients.
@@ -95,6 +94,13 @@ def serve(
           occurs.
         - `server_class`: An optional :class:`Server` class to create
           an instance from.
+        - `ws_kwargs`: Additional keyword arguments passed to
+          :func:`websockets.server.serve`. Note that the fields `ssl`,
+          `host`, `port`, `loop`, and `subprotocols` will be
+          overridden. If the `compression` field is not explicitly set,
+          compression will be disabled (since the data to be compressed
+          is already encrypted, compression will have little to no
+          positive effect).
 
     Raises :exc:`ServerKeyError` in case one or more keys have been repeated.
     """
@@ -116,16 +122,19 @@ def serve(
             for callback in callbacks:
                 server.register_event_callback(event, callback)
 
-    # Start server
-    ws_server = yield from websockets.serve(
-        server.handler,
-        ssl=ssl_context,
-        host=host,
-        port=port,
-        subprotocols=server.subprotocols
-    )
+    # Prepare arguments for the WS server
+    if ws_kwargs is None:
+        ws_kwargs = {}
+    ws_kwargs['ssl'] = ssl_context
+    ws_kwargs['host'] = host
+    ws_kwargs['port'] = port
+    ws_kwargs.setdefault('compression', None)
+    ws_kwargs['subprotocols'] = server.subprotocols
 
-    # Set server instance
+    # Start WS server
+    ws_server = yield from websockets.serve(server.handler, **ws_kwargs)
+
+    # Set WS server instance
     server.server = ws_server
 
     # Return server
@@ -157,20 +166,6 @@ class ServerProtocol(Protocol):
 
         # Handler task that is set after 'connection_made' has been called
         self.handler_task = None
-
-        # Determine subprotocol selection function
-        # Might be a static method, might be a normal method, see
-        # https://github.com/aaugustin/websockets/pull/132
-        protocol = websockets.WebSocketServerProtocol
-        select_subprotocol = inspect.getattr_static(protocol, 'select_subprotocol')
-        if isinstance(select_subprotocol, staticmethod):
-            self._select_subprotocol = protocol.select_subprotocol
-        else:
-            def _select_subprotocol(client_subprotocols, server_subprotocols):
-                # noinspection PyTypeChecker
-                return protocol.select_subprotocol(
-                    None, client_subprotocols, server_subprotocols)
-            self._select_subprotocol = _select_subprotocol
 
     def connection_made(self, connection, ws_path):
         self.handler_task = asyncio.ensure_future(
@@ -206,15 +201,11 @@ class ServerProtocol(Protocol):
         self.client = client
         self._server.register(self)
 
-        # Start task queue
-        client.log.debug('Starting to poll for enqueued tasks')
-        task_loop_task = asyncio.ensure_future(self.task_loop(), loop=self._loop)
-
         # Handle client until disconnected or an exception occurred
         hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
         close_future = asyncio.Future(loop=self._loop)
         try:
-            yield from self.handle_client(task_loop_task)
+            yield from self.handle_client()
         except Disconnected as exc:
             client.log.info('Connection closed (code: {})', exc.reason)
             close_future.set_result(None)
@@ -259,22 +250,23 @@ class ServerProtocol(Protocol):
         path.remove_client(client)
         self._server.paths.clean(path)
 
-        # Wait for the task loop to complete
-        # Note: This will ensure all relay messages are cancelled and a 'send-error' is
-        #       sent before the 'disconnected' message is being created.
-        if client.tasks_complete:
-            task_loop_task.cancel()
-        client.log.debug('Waiting for the task loop to finish')
+        # Schedule closing of the client
+        # Note: This ensures the client is closed soon even if the task queue is holding
+        #       us up.
+        close_future = asyncio.ensure_future(close_future, loop=self._loop)
+
+        # Wait until all queued tasks have been processed
+        # Note: This ensure that a send-error message (and potentially other messages)
+        #       are enqueued towards other clients before the disconnect message.
+        client.log.debug('Joining task queue')
         try:
-            yield from asyncio.wait_for(task_loop_task, TASK_LOOP_TIMEOUT,
-                                        loop=self._loop)
+            yield from asyncio.wait_for(
+                client.join_task_queue(), _TASK_QUEUE_JOIN_TIMEOUT, loop=self._loop)
         except asyncio.TimeoutError:
-            client.log.error('Task loop has been killed after {} seconds!',
-                             TASK_LOOP_TIMEOUT)
-        except Exception as exc:
-            client.log.exception('Task loop returned with an exception: {}', exc)
-        client.close_task_queue()
-        client.log.debug('Task queue finished and closed')
+            client.log.error(
+                'Task queue did not close after {} seconds', _TASK_QUEUE_JOIN_TIMEOUT)
+        else:
+            client.log.debug('Task queue closed')
 
         # Send disconnected message if client was authenticated
         if client.authenticated:
@@ -335,7 +327,7 @@ class ServerProtocol(Protocol):
         return path, client
 
     @asyncio.coroutine
-    def handle_client(self, task_loop_task):
+    def handle_client(self):
         """
         SignalingError
         PathError
@@ -345,6 +337,7 @@ class ServerProtocol(Protocol):
         SlotsFullError
         DowngradeError
         ServerKeyError
+        InternalError
         """
         client = self.client
 
@@ -355,6 +348,10 @@ class ServerProtocol(Protocol):
 
         # Prepare tasks
         coroutines = []
+
+        # Task: Execute enqueued tasks
+        client.log.debug('Starting to poll for enqueued tasks')
+        coroutines.append(self.task_loop())
 
         # Task: Poll for messages
         hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
@@ -376,32 +373,34 @@ class ServerProtocol(Protocol):
         # Wait until complete
         # Note: We also add the task loop into this list to catch any
         #       errors that bubble up in tasks of this client.
-        tasks = [task_loop_task]
-        tasks += [asyncio.ensure_future(coroutine, loop=self._loop)
-                  for coroutine in coroutines]
+        tasks = [asyncio.ensure_future(coroutine, loop=self._loop)
+                 for coroutine in coroutines]
         while True:
             done, pending = yield from asyncio.wait(
                 tasks, loop=self._loop, return_when=asyncio.FIRST_COMPLETED)
+            # Note: This loop will always raise after the first task has been
+            #       processed.
+            client.log.trace('Tasks done: {}', done)
+            client.log.trace('Tasks pending: {}', pending)
             for task in done:
-                client.log.debug('Task done {}', done)
-                exc = task.exception()
+                client.log.debug('Task done {}', task)
 
                 # Cancel pending tasks
-                # Note: Be careful not to cancel the task loop
                 for pending_task in pending:
-                    if pending_task != task_loop_task:
-                        client.log.debug('Cancelling task {}', pending_task)
-                        pending_task.cancel()
+                    client.log.debug('Cancelling task {}', pending_task)
+                    pending_task.cancel()
+
+                # Cancel the task queue
+                client.cancel_task_queue()
 
                 # Raise (or re-raise)
+                if task.cancelled():
+                    client.log.error('Task {} has been cancelled', task)
+                    raise InternalError('A vital task has been cancelled')
+                exc = task.exception()
                 if exc is None:
-                    if task == task_loop_task:
-                        # Task loop may return early and it's okay
-                        client.log.debug('Task loop returned early')
-                        tasks.remove(task_loop_task)
-                    else:
-                        client.log.error('Task {} returned unexpectedly', task)
-                        raise SignalingError('A task returned unexpectedly')
+                    client.log.error('Task {} returned unexpectedly', task)
+                    raise InternalError('A task returned unexpectedly')
                 else:
                     raise exc
 
@@ -460,8 +459,9 @@ class ServerProtocol(Protocol):
             # Drop previous initiator using the task queue of the previous initiator
             path.log.debug('Dropping previous initiator {}', previous_initiator)
             previous_initiator.log.debug('Dropping (another initiator connected)')
+            # TODO: Mark previous initiator as dropped
             coroutine = previous_initiator.close(code=CloseCode.drop_by_initiator.value)
-            yield from previous_initiator.enqueue_task(coroutine)
+            asyncio.ensure_future(coroutine, loop=self._loop)
 
         # Send new-initiator message if any responder is present
         responder_ids = path.get_responder_ids()
@@ -530,21 +530,25 @@ class ServerProtocol(Protocol):
     @asyncio.coroutine
     def task_loop(self):
         client = self.client
-        while not (client.connection_closed.done() and client.tasks_complete):
-            try:
-                # Get a task from the queue
-                task = yield from client.dequeue_task()
-            except asyncio.CancelledError:
-                break
+        while not client.connection_closed.done():
+            # Get a task from the queue
+            task = yield from client.dequeue_task()
 
-            # Wait and catch exceptions, ignore cancelled tasks
+            # Wait and handle exceptions
             client.log.debug('Waiting for task to complete {}', task)
             try:
                 yield from task
-            except asyncio.CancelledError:
-                client.log.debug('Task cancelled {}', task)
-
-        client.log.debug('Stopped polling for tasks')
+            except Exception as exc:
+                if isinstance(exc, asyncio.CancelledError):
+                    client.log.debug('Cancelling active task {}', task)
+                else:
+                    client.log.debug('Exception raised in task {}, ', task)
+                if asyncio.iscoroutine(task):
+                    client.task_done(task)
+                else:
+                    task.add_done_callback(client.task_done)
+                raise
+            client.task_done(task)
 
     @asyncio.coroutine
     def initiator_receive_loop(self):
@@ -571,7 +575,7 @@ class ServerProtocol(Protocol):
                         'Dropping (requested by initiator), reason: {}', message.reason)
                     # TODO: Mark responder as dropped and don't send relay messages
                     coroutine = responder.close(code=message.reason.value)
-                    yield from responder.enqueue_task(coroutine)
+                    asyncio.ensure_future(coroutine, loop=self._loop)
                 else:
                     log_message = 'Responder {} already dropped, nothing to do'
                     path.log.debug(log_message, message.responder_id)
@@ -659,8 +663,8 @@ class ServerProtocol(Protocol):
 
             # Send ping and wait for pong
             client.log.debug('Ping')
+            pong_future = yield from client.ping()
             try:
-                pong_future = yield from client.ping()
                 yield from asyncio.wait_for(
                     pong_future, client.keep_alive_timeout, loop=self._loop)
             except asyncio.TimeoutError:
@@ -722,7 +726,7 @@ class ServerProtocol(Protocol):
         self.client.log.debug(
             'Checking for subprotocol downgrade, client: {}, server: {}',
             client_subprotocols, self._server.subprotocols)
-        chosen = self._select_subprotocol(
+        chosen = websockets.WebSocketServerProtocol.select_subprotocol(
             client_subprotocols, self._server.subprotocols)
         if chosen != self.subprotocol.value:
             raise DowngradeError('Subprotocol downgrade detected')

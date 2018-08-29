@@ -413,6 +413,7 @@ def ws_client_factory(initiator_key, event_loop, server):
         if path is None:
             path = '{}/{}'.format(url(*server.address), key_path(initiator_key))
         _kwargs = {
+            'compression': None,
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
             'loop': event_loop,
@@ -454,6 +455,7 @@ def client_factory(
         if permanent_key is None:
             permanent_key = server_permanent_keys[0].pk
         _kwargs = {
+            'compression': None,
             'subprotocols': pytest.saltyrtc.subprotocols,
             'ssl': ssl_context,
             'loop': event_loop,

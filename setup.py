@@ -40,14 +40,14 @@ logging_require = [
 # Note: These are just tools that aren't required, so a version range
 #       is not necessary here.
 tests_require = [
-    'pytest>=3.0.7',
-    'pytest-asyncio>=0.5.0',
-    'pytest-cov>=2.4.0',
-    'flake8>=3.3.0',
-    'isort>=4.2.5',
+    'pytest>=3.7.3',
+    'pytest-asyncio>=0.9.0',
+    'pytest-cov>=2.5.1',
+    'flake8>=3.5.0',
+    'isort>=4.3.4',
     'collective.checkdocs>=0.2',
     'Pygments>=2.2.0',  # required by checkdocs
-    'ordered-set>=3.0.0',  # required by TestServer class
+    'ordered-set>=3.0.1',  # required by TestServer class
 ] + logging_require
 
 setup(
@@ -57,7 +57,7 @@ setup(
     install_requires=[
         'libnacl>=1.5.0,<2',
         'click>=6.7',  # doesn't seem to follow semantic versioning (see #57)
-        'websockets>=3.2,<4',
+        'websockets>=6.0,<7',
         'u-msgpack-python>=2.3,<3',
     ],
     tests_require=tests_require,
@@ -99,6 +99,7 @@ setup(
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
         'Topic :: Communications',
         'Topic :: Internet',
         'Topic :: Security',

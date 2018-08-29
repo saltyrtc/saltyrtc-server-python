@@ -1,4 +1,5 @@
 import asyncio
+import enum
 import os
 import struct
 
@@ -34,6 +35,19 @@ __all__ = (
     'PathClient',
     'Protocol',
 )
+
+
+@enum.unique
+class _TaskQueueState(enum.IntEnum):
+    open = 1
+    cancelled = 2
+
+    @property
+    def can_enqueue(self):
+        """
+        Return whether the task queue state allows to enqueue tasks.
+        """
+        return self == _TaskQueueState.open
 
 
 class Path:
@@ -191,7 +205,7 @@ class PathClient:
         'keep_alive_timeout',
         'keep_alive_pings',
         '_task_queue',
-        '_task_queue_closed',
+        '_task_queue_state',
     )
 
     def __init__(
@@ -219,7 +233,7 @@ class PathClient:
 
         # Queue for tasks to be run on the client (relay messages, closing, ...)
         self._task_queue = asyncio.Queue(loop=self._loop)
-        self._task_queue_closed = False
+        self._task_queue_state = _TaskQueueState.open
 
     def __str__(self):
         type_ = self.type
@@ -231,18 +245,10 @@ class PathClient:
     @property
     def connection_closed(self):
         """
-        Return the 'connection_closed' future of the underlying
+        Return the 'connection_lost_waiter' future of the underlying
         WebSocket connection.
         """
-        return self._connection.connection_closed
-
-    @property
-    def tasks_complete(self):
-        """
-        Return whether the underlying task queue is complete (empty).
-        Will also return `True` in case the task queue has been closed.
-        """
-        return self._task_queue.empty() or self._task_queue_closed
+        return self._connection.connection_lost_waiter
 
     @property
     def id(self):
@@ -498,10 +504,12 @@ class PathClient:
             - `coroutine_or_task`: A coroutine or a
               :class:`asyncio.Task`.
 
-        Raises :exc:`SignalingError` in case the task queue is closed.
+        Raises :exc:`InternalError` in case the task queue has been
+        cancelled.
         """
-        if self._task_queue_closed:
-            raise SignalingError('Task queue is already closed')
+        if not self._task_queue_state.can_enqueue:
+            raise InternalError('Task queue is already {}'.format(
+                self._task_queue_state.name))
         yield from self._task_queue.put(coroutine_or_task)
 
     @asyncio.coroutine
@@ -512,23 +520,71 @@ class PathClient:
 
         Shall only be called from the client's :class:`Protocol`
         instance.
-
-        Raises :exc:`SignalingError` in case the task queue is closed.
         """
-        if self._task_queue_closed:
-            raise SignalingError('Task queue is already closed')
         return (yield from self._task_queue.get())
 
-    def close_task_queue(self):
+    def task_done(self, task):
         """
-        Close the task queue, so no further tasks can be enqueued.
+        Mark a previously dequeued task as processed.
 
-        Raises :exc:`SignalingError` in case the task queue was already
-        closed.
+        Raises :exc:`InternalError` if called more times than there
+        were tasks placed in the queue.
         """
-        if self._task_queue_closed:
-            raise SignalingError('Task queue is already closed')
-        self._task_queue_closed = True
+        self.log.debug('Done task {}', task)
+        try:
+            self._task_queue.task_done()
+        except ValueError:
+            raise InternalError('More tasks marked as done as were enqueued')
+
+    def cancel_task_queue(self):
+        """
+        Cancel all pending tasks of the task queue and prevent further
+        enqueues.
+
+        Raises :exc:`SignalingError` in case the task queue is already
+        cancelled.
+        """
+        if not self._task_queue_state.can_enqueue:
+            raise SignalingError('Task queue is already {}'.format(
+                self._task_queue_state.name))
+
+        # Cancel all pending tasks
+        #
+        # Add a 'done' callback to each task in order to mark the task queue as 'closed'
+        # after all functions, which may want to handle the cancellation, have handled
+        # that cancellation.
+        #
+        # This for example prevents a 'disconnect' message from being sent before a
+        # 'send-error' message has been sent, see:
+        # https://github.com/saltyrtc/saltyrtc-server-python/issues/77
+        self._task_queue_state = _TaskQueueState.cancelled
+        self.log.debug('Cancelling {} queued tasks', self._task_queue.qsize())
+        while True:
+            try:
+                task = self._task_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if asyncio.iscoroutine(task):
+                self.task_done(task)
+            else:
+                task.add_done_callback(self.task_done)
+            if not task.cancelled():
+                exc = task.exception()
+                if exc is not None:
+                    message = 'Ignoring exception of queued task {}: {}'
+                    self.log.debug(message, task, repr(exc))
+                else:
+                    self.log.debug('Ignoring completion of queued task {}', task)
+            else:
+                self.log.debug('Cancelling queued task {}', task)
+                task.cancel()
+
+    @asyncio.coroutine
+    def join_task_queue(self):
+        """
+        Block until all tasks of the task queue have been processed.
+        """
+        yield from self._task_queue.join()
 
     @asyncio.coroutine
     def send(self, message):
