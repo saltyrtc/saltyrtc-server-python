@@ -58,11 +58,12 @@ install:
   - pip install codecov
 
 # Run flake8, isort, check docs & tests
+# TODO: Re-enable isort once #85 has been resolved
 script:
   - >
     if [[ "$TRAVIS_PYTHON_VERSION" != "pypy3" ]]; then
       flake8 . || travis_terminate 1;
-      isort -rc -c . || (isort -rc -df . && return 1) || travis_terminate 1;
+      #isort -rc -c . || (isort -rc -df . && return 1) || travis_terminate 1;
     fi
   - python setup.py checkdocs
   - py.test --cov-config .coveragerc --cov=saltyrtc.server --loop=$EVENT_LOOP --timeout=$TIMEOUT
