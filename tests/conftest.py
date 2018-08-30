@@ -61,7 +61,7 @@ def pytest_namespace():
         'have_uvloop': pytest.mark.skipif(not have_uvloop, reason='requires uvloop'),
         'no_uvloop': pytest.mark.skipif(
             have_uvloop, reason='requires uvloop to be not installed'),
-        'ip': '127.0.0.1',
+        'host': 'localhost',
         'port': 8766,
         'cli_path': os.path.join(sys.exec_prefix, 'bin', 'saltyrtc-server'),
         'key': os.path.normpath(
@@ -103,7 +103,7 @@ def unused_tcp_port():
     Find an unused localhost TCP port from 1024-65535 and return it.
     """
     with closing(socket.socket()) as sock:
-        sock.bind((pytest.saltyrtc.ip, 0))
+        sock.bind((pytest.saltyrtc.host, 0))
         return sock.getsockname()[1]
 
 
@@ -319,7 +319,7 @@ def server_factory(request, event_loop, server_permanent_keys):
                 pytest.saltyrtc.cert, keyfile=pytest.saltyrtc.key,
                 dh_params_file=pytest.saltyrtc.dh_params),
             permanent_keys,
-            host=pytest.saltyrtc.ip,
+            host=pytest.saltyrtc.host,
             port=port,
             loop=event_loop,
             server_class=TestServer,
@@ -327,7 +327,7 @@ def server_factory(request, event_loop, server_permanent_keys):
         server_ = event_loop.run_until_complete(coroutine)
         # Inject timeout and address (little bit of a hack but meh...)
         server_.timeout = _get_timeout(request=request)
-        server_.address = (pytest.saltyrtc.ip, port)
+        server_.address = (pytest.saltyrtc.host, port)
 
         _server_instances.append(server_)
 
