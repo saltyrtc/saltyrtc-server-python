@@ -18,7 +18,8 @@ matrix:
   - python: "3.4"
     env:
     - EVENT_LOOP=asyncio
-    - TIMEOUT=8.0
+    - TIMEOUT=2.0
+    - IGNORE=tests/test_cli.py
   - python: "3.5"
     env:
     - EVENT_LOOP=asyncio
@@ -76,7 +77,13 @@ script:
       #isort -rc -c . || (isort -rc -df . && return 1) || travis_terminate 1;
     fi
   - python setup.py checkdocs
-  - py.test --cov-config .coveragerc --cov=saltyrtc.server --loop=$EVENT_LOOP --timeout=$TIMEOUT
+  - >
+    py.test \
+      --ignore=$IGNORE \
+      --cov-config .coveragerc \
+      --cov=saltyrtc.server \
+      --loop=$EVENT_LOOP \
+      --timeout=$TIMEOUT
 
 # After success
 after_success:
