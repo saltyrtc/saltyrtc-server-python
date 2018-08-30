@@ -140,13 +140,17 @@ def generate(key_file: str) -> None:
 
 @cli.command(short_help='Start the signalling server.', help="""
 Start the SaltyRTC signalling server. A HUP signal will restart the
-server and reload the SSL certificate, the SSL private key and the
+server and reload the TLS certificate, the TLS private key and the
 private permanent key of the server.""")
+@click.option('-tc', '--tlscert', type=click.Path(exists=True), help=_h("""
+Path to a PEM file that contains the TLS certificate."""))
 @click.option('-sc', '--sslcert', type=click.Path(exists=True), help=_h("""
-Path to a PEM file that contains the SSL certificate."""))
+Deprecated alias of --tlscert."""))
+@click.option('-tk', '--tlskey', type=click.Path(exists=True), help=_h("""
+Path to a PEM file that contains the TLS private key. Will be read from
+the TLS certificate file if not present."""))
 @click.option('-sk', '--sslkey', type=click.Path(exists=True), help=_h("""
-Path to a PEM file that contains the SSL private key. Will be read from
-the SSL certificate file if not present."""))
+Deprecated alias of --tlskey."""))
 @click.option('-dhp', '--dhparams', type=click.Path(exists=True), help=_h("""
 Path to a PEM file that contains Diffie-Hellman parameters. Required
 for DH(E) and ECDH(E) support."""))
@@ -161,8 +165,8 @@ provided will be used as the primary key."""))
 @click.pass_context
 def serve(ctx: click.Context, **arguments: Any) -> None:
     # Get arguments
-    ssl_cert = arguments.get('sslcert', None)  # type: Optional[str]
-    ssl_key = arguments.get('sslkey', None)  # type: Optional[str]
+    tls_cert = arguments.get('tlscert', None) or arguments.get('sslcert', None)  # type: Optional[str]
+    tls_key = arguments.get('tlskey', None) or arguments.get('sslkey', None)  # type: Optional[str]
     dh_params = arguments.get('dhparams', None)  # type: Optional[str]
     keys_str = arguments['key']  # type: Sequence[str]
     host = arguments.get('host')  # type: Optional[str]
@@ -171,12 +175,12 @@ def serve(ctx: click.Context, **arguments: Any) -> None:
     safety_off = os.environ.get('SALTYRTC_SAFETY_OFF') == 'yes-and-i-know-what-im-doing'
 
     # Make sure the user provides cert & keys or has safety turned off
-    if ssl_cert is None or len(keys_str) == 0:
+    if tls_cert is None or len(keys_str) == 0:
         if safety_off:
-            click.echo(('It is RECOMMENDED to use SaltyRTC with both a SSL '
+            click.echo(('It is RECOMMENDED to use SaltyRTC with both a TLS '
                        'certificate and a server permanent key!'), err=True)
         else:
-            click.echo(('It is REQUIRED to provide a SSL certificate and a server '
+            click.echo(('It is REQUIRED to provide a TLS certificate and a server '
                         'permanent key unless the environment variable '
                         "'SALTYRTC_SAFETY_OFF' is set to "
                         "'yes-and-i-know-what-im-doing'"), err=True)
@@ -184,9 +188,9 @@ def serve(ctx: click.Context, **arguments: Any) -> None:
 
     # Create SSL context
     ssl_context = None
-    if ssl_cert is not None:
+    if tls_cert is not None:
         ssl_context = util.create_ssl_context(
-            certfile=ssl_cert, keyfile=ssl_key, dh_params_file=dh_params)
+            certfile=tls_cert, keyfile=tls_key, dh_params_file=dh_params)
 
     # Get private permanent keys of the server
     keys = [util.load_permanent_key(key)
