@@ -551,6 +551,7 @@ class ServerProtocol(Protocol):
                 else:
                     client.log.debug('Exception raised in task {}, ', task)
                 if asyncio.iscoroutine(task):
+                    task.close()
                     client.task_done(task)
                 else:
                     task.add_done_callback(client.task_done)

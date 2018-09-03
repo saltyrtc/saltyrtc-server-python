@@ -567,19 +567,20 @@ class PathClient:
             except asyncio.QueueEmpty:
                 break
             if asyncio.iscoroutine(task):
+                task.close()
                 self.task_done(task)
             else:
                 task.add_done_callback(self.task_done)
-            if not task.cancelled():
-                exc = task.exception()
-                if exc is not None:
-                    message = 'Ignoring exception of queued task {}: {}'
-                    self.log.debug(message, task, repr(exc))
+                if not task.cancelled():
+                    exc = task.exception()
+                    if exc is not None:
+                        message = 'Ignoring exception of queued task {}: {}'
+                        self.log.debug(message, task, repr(exc))
+                    else:
+                        self.log.debug('Ignoring completion of queued task {}', task)
                 else:
-                    self.log.debug('Ignoring completion of queued task {}', task)
-            else:
-                self.log.debug('Cancelling queued task {}', task)
-                task.cancel()
+                    self.log.debug('Cancelling queued task {}', task)
+                    task.cancel()
 
     @asyncio.coroutine
     def join_task_queue(self):
