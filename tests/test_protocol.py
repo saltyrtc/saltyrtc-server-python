@@ -1202,6 +1202,43 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
+    def test_relay_send_and_close(
+            self, pack_nonce, cookie_factory, server, client_factory
+    ):
+        """
+        Ensure a relay message is being dispatched in case the client
+        immediately closes after having sent a relay message.
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        # new-responder
+        yield from initiator.recv()
+
+        # Send relay message: initiator --> responder
+        yield from initiator.send(pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn']), {
+            'type': 'meow',
+        }, box=None)
+        i['rccsn'] += 1
+
+        # Immediately close initiator
+        yield from initiator.close()
+
+        # Receive relay message: initiator --> responder
+        message, _, ck, s, d, csn = yield from responder.recv(box=None)
+
+        # Bye
+        yield from responder.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
     def test_relay_receiver_connection_lost(
             self, event_loop, ws_client_factory, initiator_key, pack_nonce,
             cookie_factory, server, client_factory
