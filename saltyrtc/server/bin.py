@@ -272,3 +272,7 @@ def main():
     finally:
         if obj['logging_handler'] is not None:
             obj['logging_handler'].pop_application()
+
+
+if __name__ == '__main__':
+    main()
