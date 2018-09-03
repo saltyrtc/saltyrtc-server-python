@@ -3,7 +3,6 @@ The tests provided in this module make sure that the server is
 compliant to the SaltyRTC protocol.
 """
 import asyncio
-import collections
 
 import libnacl.public
 import pytest
@@ -13,7 +12,6 @@ from saltyrtc.server.common import (
     SIGNED_KEYS_CIPHERTEXT_LENGTH,
     CloseCode,
 )
-from saltyrtc.server.events import Event
 
 
 class _FakePathClient:
@@ -1513,59 +1511,6 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_event_emitted(
-            self, initiator_key, responder_key, cookie_factory, server, client_factory
-    ):
-        # Dictionary where fired events are added
-        events_fired = collections.defaultdict(list)
-
-        @asyncio.coroutine
-        def callback(event: Event, *data):
-            events_fired[event].append(data)
-
-        # Register event callback for all events
-        for event in Event:
-            server.register_event_callback(event, callback)
-
-        # Initiator handshake
-        initiator, i = yield from client_factory(initiator_handshake=True)
-        i['rccsn'] = 456987
-        i['rcck'] = cookie_factory()
-        i['rbox'] = libnacl.public.Box(sk=initiator_key, pk=responder_key.pk)
-
-        # Responder handshake
-        responder, r = yield from client_factory(responder_handshake=True)
-        r['iccsn'] = 2 ** 24
-        r['icck'] = cookie_factory()
-        r['ibox'] = libnacl.public.Box(sk=responder_key, pk=initiator_key.pk)
-
-        yield from initiator.recv()
-        assert set(events_fired.keys()) == {
-            Event.initiator_connected,
-            Event.responder_connected,
-        }
-        assert events_fired[Event.initiator_connected] == [
-            (initiator_key.hex_pk().decode('ascii'),)
-        ]
-        assert events_fired[Event.responder_connected] == [
-            (initiator_key.hex_pk().decode('ascii'),)
-        ]
-
-        yield from initiator.close()
-        yield from responder.close()
-        yield from server.wait_connections_closed()
-
-        assert set(events_fired.keys()) == {
-            Event.initiator_connected,
-            Event.responder_connected,
-            Event.disconnected,
-        }
-        assert events_fired[Event.disconnected] == [
-            (initiator_key.hex_pk().decode('ascii'), 1000),
-            (initiator_key.hex_pk().decode('ascii'), 1000),
-        ]
-
-    @pytest.mark.asyncio
     def test_explicit_permanent_key_unavailable(
             self, server_no_key, server, client_factory
     ):
@@ -1630,9 +1575,12 @@ class TestProtocol:
             yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_initiator_disconnected(
-            self, server, client_factory,
-    ):
+    def test_initiator_disconnected(self, server, client_factory):
+        """
+        Check that the server sends a 'disconnected' message to all
+        responders of the associated path when the initiator
+        disconnects.
+        """
         # Client handshakes
         initiator, i = yield from client_factory(initiator_handshake=True)
         responder1, r = yield from client_factory(responder_handshake=True)
@@ -1641,7 +1589,7 @@ class TestProtocol:
         # Disconnect initiator
         yield from initiator.close()
 
-        # Expect 'disconnected' msgs sent to all responders
+        # Expect 'disconnected' messages sent to all responders
         msg1, *_ = yield from responder1.recv()
         msg2, *_ = yield from responder2.recv()
         assert msg1 == msg2 == {'type': 'disconnected', 'id': i['id']}
@@ -1651,9 +1599,11 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_responder_disconnected(
-            self, server, client_factory,
-    ):
+    def test_responder_disconnected(self, server, client_factory):
+        """
+        Check that the server sends 'disconnected' message to the
+        initiator when a responder disconnects.
+        """
         # Client handshakes
         responder, r = yield from client_factory(responder_handshake=True)
         initiator, i = yield from client_factory(initiator_handshake=True)
@@ -1661,7 +1611,7 @@ class TestProtocol:
         # Disconnect initiator
         yield from responder.close()
 
-        # Expect 'disconnected' msg sent to initiator
+        # Expect 'disconnected' message sent to initiator
         msg, *_ = yield from initiator.recv()
         assert msg == {'type': 'disconnected', 'id': r['id']}
 
