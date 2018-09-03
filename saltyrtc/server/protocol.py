@@ -543,11 +543,11 @@ class PathClient:
         Cancel all pending tasks of the task queue and prevent further
         enqueues.
 
-        Raises :exc:`SignalingError` in case the task queue is already
+        Raises :exc:`InternalError` in case the task queue is already
         cancelled.
         """
         if not self._task_queue_state.can_enqueue:
-            raise SignalingError('Task queue is already {}'.format(
+            raise InternalError('Task queue is already {}'.format(
                 self._task_queue_state.name))
 
         # Cancel all pending tasks
