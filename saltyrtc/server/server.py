@@ -378,38 +378,43 @@ class ServerProtocol(Protocol):
         while True:
             done, pending = yield from asyncio.wait(
                 tasks, loop=self._loop, return_when=asyncio.FIRST_COMPLETED)
-            # Note: This loop will always raise after the first task has been
-            #       processed.
-            client.log.trace('Tasks done: {}', done)
-            client.log.trace('Tasks pending: {}', pending)
+            exc = None
             for task in done:
                 client.log.debug('Task done {}', task)
 
-                # Cancel pending tasks
-                for pending_task in pending:
-                    client.log.debug('Cancelling task {}', pending_task)
-                    pending_task.cancel()
-
-                # Cancel the task queue
-                client.cancel_task_queue()
-
-                # Raise (or re-raise)
+                # Determine the exception to be raised
+                # Note: The first task will set the exception that will be raised.
                 if task.cancelled():
                     client.log.error('Task {} has been cancelled', task)
-                    raise InternalError('A vital task has been cancelled')
-                exc = task.exception()
-                if exc is None:
-                    # Note: This can happen in case a task returned due to the
-                    #       connection becoming closed. Since this doesn't raise an
-                    #       exception, we need to do it ourselves.
+                    if exc is None:
+                        exc = InternalError('A vital task has been cancelled')
+                    continue
+
+                task_exc = task.exception()
+                if task_exc is None:
                     connection_closed_future = client.connection_closed_future
-                    if connection_closed_future.done():
-                        raise Disconnected(connection_closed_future.result())
-                    else:
+                    if not connection_closed_future.done():
                         client.log.error('Task {} returned unexpectedly', task)
-                        raise InternalError('A task returned unexpectedly')
-                else:
-                    raise exc
+                        task_exc = InternalError('A task returned unexpectedly')
+                    else:
+                        # Note: This can happen in case a task returned due to the
+                        #       connection becoming closed. Since this doesn't raise an
+                        #       exception, we need to do it ourselves.
+                        task_exc = Disconnected(connection_closed_future.result())
+
+                if exc is None:
+                    exc = task_exc
+
+            # Cancel pending tasks
+            for pending_task in pending:
+                client.log.debug('Cancelling task {}', pending_task)
+                pending_task.cancel()
+
+            # Cancel the task queue
+            client.cancel_task_queue()
+
+            # Finally, raise the exception
+            raise exc
 
     @asyncio.coroutine
     def handshake(self):
