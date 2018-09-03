@@ -399,8 +399,15 @@ class ServerProtocol(Protocol):
                     raise InternalError('A vital task has been cancelled')
                 exc = task.exception()
                 if exc is None:
-                    client.log.error('Task {} returned unexpectedly', task)
-                    raise InternalError('A task returned unexpectedly')
+                    # Note: This can happen in case a task returned due to the
+                    #       connection becoming closed. Since this doesn't raise an
+                    #       exception, we need to do it ourselves.
+                    connection_closed_future = client.connection_closed_future
+                    if connection_closed_future.done():
+                        raise Disconnected(connection_closed_future.result())
+                    else:
+                        client.log.error('Task {} returned unexpectedly', task)
+                        raise InternalError('A task returned unexpectedly')
                 else:
                     raise exc
 
@@ -530,7 +537,7 @@ class ServerProtocol(Protocol):
     @asyncio.coroutine
     def task_loop(self):
         client = self.client
-        while not client.connection_closed.done():
+        while not client.connection_closed_future.done():
             # Get a task from the queue
             task = yield from client.dequeue_task()
 
@@ -553,7 +560,7 @@ class ServerProtocol(Protocol):
     @asyncio.coroutine
     def initiator_receive_loop(self):
         path, initiator = self.path, self.client
-        while not initiator.connection_closed.done():
+        while not initiator.connection_closed_future.done():
             # Receive relay message or drop-responder
             message = yield from initiator.receive()
 
@@ -586,7 +593,7 @@ class ServerProtocol(Protocol):
     @asyncio.coroutine
     def responder_receive_loop(self):
         path, responder = self.path, self.client
-        while not responder.connection_closed.done():
+        while not responder.connection_closed_future.done():
             # Receive relay message
             message = yield from responder.receive()
 
@@ -657,7 +664,7 @@ class ServerProtocol(Protocol):
         PingTimeoutError
         """
         client = self.client
-        while not client.connection_closed.done():
+        while not client.connection_closed_future.done():
             # Wait
             yield from asyncio.sleep(client.keep_alive_interval, loop=self._loop)
 

@@ -179,6 +179,7 @@ class PathClient:
     __slots__ = (
         '_loop',
         '_connection',
+        '_connection_closed_future',
         '_client_key',
         '_server_permanent_key',
         '_server_session_key',
@@ -207,6 +208,8 @@ class PathClient:
     ):
         self._loop = asyncio.get_event_loop() if loop is None else loop
         self._connection = connection
+        connection_closed_future = asyncio.Future(loop=self._loop)
+        self._connection_closed_future = connection_closed_future
         self._client_key = initiator_key
         self._server_permanent_key = None
         self._server_session_key = server_session_key
@@ -224,6 +227,11 @@ class PathClient:
         self.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
         self.keep_alive_pings = 0
 
+        # Schedule connection closed future
+        def _connection_closed(_):
+            connection_closed_future.set_result(connection.close_code)
+        self._connection.connection_lost_waiter.add_done_callback(_connection_closed)
+
         # Queue for tasks to be run on the client (relay messages, closing, ...)
         self._task_queue = asyncio.Queue(loop=self._loop)
         self._task_queue_state = _TaskQueueState.open
@@ -236,12 +244,13 @@ class PathClient:
             type_, self._id, hex(id(self)))
 
     @property
-    def connection_closed(self):
+    def connection_closed_future(self):
         """
-        Return the 'connection_lost_waiter' future of the underlying
-        WebSocket connection.
+        Resolves once the connection has been closed.
+
+        Return the close code.
         """
-        return self._connection.connection_lost_waiter
+        return self._connection_closed_future
 
     @property
     def id(self):

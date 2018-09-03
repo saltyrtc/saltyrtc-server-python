@@ -18,8 +18,8 @@ from saltyrtc.server.events import Event
 
 class _FakePathClient:
     def __init__(self):
-        self.connection_closed = asyncio.Future()
-        self.connection_closed.set_result(None)
+        self.connection_closed_future = asyncio.Future()
+        self.connection_closed_future.set_result(None)
 
     def update_log_name(self, id_):
         pass

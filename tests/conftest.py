@@ -282,7 +282,7 @@ class TestServer(Server):
 
     def wait_connection_closed_marker(self):
         protocol = self.protocols[-1]
-        connection_closed_future = protocol.client.connection_closed
+        connection_closed_future = protocol.client.connection_closed_future
         return functools.partial(
             self.wait_most_recent_connection_closed,
             connection_closed_future=connection_closed_future)
