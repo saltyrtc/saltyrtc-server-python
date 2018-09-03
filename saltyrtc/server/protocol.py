@@ -25,7 +25,6 @@ from .exception import (
     InternalError,
     MessageError,
     MessageFlowError,
-    SignalingError,
     SlotsFullError,
 )
 from .message import unpack
