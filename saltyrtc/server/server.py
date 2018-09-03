@@ -774,6 +774,9 @@ class Server(asyncio.AbstractServer):
         self._log = util.get_logger('server')
         self._loop = asyncio.get_event_loop() if loop is None else loop
 
+        # Protocol class
+        self._protocol_class = ServerProtocol
+
         # WebSocket server instance
         self._server = None
 
@@ -818,7 +821,7 @@ class Server(asyncio.AbstractServer):
             yield from connection.close(code=CloseCode.subprotocol_error.value)
             self.raise_event(Event.disconnected, None, CloseCode.subprotocol_error.value)
         else:
-            protocol = ServerProtocol(self, subprotocol, loop=self._loop)
+            protocol = self._protocol_class(self, subprotocol, loop=self._loop)
             protocol.connection_made(connection, ws_path)
             yield from protocol.handler_task
 
