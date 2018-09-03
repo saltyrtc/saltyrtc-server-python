@@ -43,6 +43,7 @@ tests_require = [
     'pytest>=3.7.3',
     'pytest-asyncio>=0.9.0',
     'pytest-cov>=2.5.1',
+    'pytest-mock>=1.10.0',
     'flake8>=3.5.0',
     'isort>=4.3.4',
     'collective.checkdocs>=0.2',

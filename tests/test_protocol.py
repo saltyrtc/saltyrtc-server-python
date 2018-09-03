@@ -1240,7 +1240,7 @@ class TestProtocol:
 
     @pytest.mark.asyncio
     def test_relay_receiver_connection_lost(
-            self, event_loop, ws_client_factory, initiator_key, pack_nonce,
+            self, mocker, event_loop, ws_client_factory, initiator_key, pack_nonce,
             cookie_factory, server, client_factory
     ):
         """
@@ -1291,8 +1291,8 @@ class TestProtocol:
             future.set_result(asyncio.Future(loop=event_loop))
             return future
 
-        path_client._connection.send = _mock_send
-        path_client._connection.ping = _mock_ping
+        mocker.patch.object(path_client._connection, 'send', _mock_send)
+        mocker.patch.object(path_client._connection, 'ping', _mock_ping)
 
         # Send relay message: initiator --> responder (mocked)
         nonce = pack_nonce(i['rcck'], i['id'], 0x02, i['rccsn'])
