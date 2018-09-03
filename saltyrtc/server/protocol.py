@@ -63,20 +63,9 @@ class Path:
     @property
     def empty(self):
         """
-        Return `True` in case the path is empty. A call to this property
-        will also remove clients from the path whose connections are
-        closed but have not been removed from the path. (However, in
-        case that the path is not empty, this property does not ensure
-        that all disconnected clients will be removed.)
+        Return whether the path is empty.
         """
-        for client in self._slots.values():
-            if client is not None:
-                if client.connection_closed.done():
-                    self.remove_client(client)
-                    self.log.notice('Removed dead client {}', client)
-                else:
-                    return False
-        return True
+        return all((client is None for client in self._slots.values()))
 
     def get_initiator(self):
         """
@@ -152,6 +141,10 @@ class Path:
         """
         Remove a client (initiator or responder) from the
         :class:`Path`.
+
+        .. warning:: Shall only be called from the client's
+           own :class:`Protocol` instance. Other client's SHALL NOT
+           be removed.
 
         Arguments:
              - `client`: The :class:`PathClient` instance.
@@ -518,8 +511,8 @@ class PathClient:
         Dequeue and return a coroutine or task from the task queue of
         the client.
 
-        Shall only be called from the client's :class:`Protocol`
-        instance.
+        .. warning:: Shall only be called from the client's
+           :class:`Protocol` instance.
         """
         return (yield from self._task_queue.get())
 
