@@ -23,6 +23,7 @@ class _FakePathClient:
         pass
 
 
+@pytest.mark.usefixtures('evaluate_log')
 class TestProtocol:
     @pytest.mark.asyncio
     def test_no_subprotocols(self, server, ws_client_factory):
@@ -605,9 +606,8 @@ class TestProtocol:
             self, ws_client_factory, server, client_factory
     ):
         """
-        Monkey-patch the the server's keep alive interval and timeout
-        and check that the server sends us a ping and waits for a
-        pong.
+        Monkey-patch the server's keep alive interval and timeout and
+        check that the server sends a ping and waits for a pong.
         """
         # Create client and patch it to not answer pings
         ws_client = yield from ws_client_factory()
@@ -620,13 +620,12 @@ class TestProtocol:
         protocol.client.keep_alive_timeout = 0.001
 
         # Initiator handshake
-        client, i = yield from client_factory(
-            ws_client=ws_client, initiator_handshake=True)
+        yield from client_factory(ws_client=ws_client, initiator_handshake=True)
 
         # Expect protocol error
         yield from server.wait_connections_closed()
-        assert not client.ws_client.open
-        assert client.ws_client.close_code == CloseCode.timeout
+        assert not ws_client.open
+        assert ws_client.close_code == CloseCode.timeout
 
     @pytest.mark.asyncio
     def test_initiator_invalid_source_after_handshake(

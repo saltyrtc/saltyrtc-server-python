@@ -263,7 +263,7 @@ class TestServer(Server):
     def raise_event(self, event: Event, *data):
         super().raise_event(event, *data)
         if event == Event.disconnected:
-            self._most_recent_connection_closed_future.set_result(None)
+            self._most_recent_connection_closed_future.set_result(data)
             self._most_recent_connection_closed_future = asyncio.Future(loop=self._loop)
 
     @asyncio.coroutine
@@ -277,8 +277,8 @@ class TestServer(Server):
         # If there is no future, we simply wait for the 'disconnected' event
         if connection_closed_future is None:
             connection_closed_future = self._most_recent_connection_closed_future
-        yield from asyncio.wait_for(
-            connection_closed_future, timeout=self.timeout, loop=self._loop)
+        return (yield from asyncio.wait_for(
+            connection_closed_future, timeout=self.timeout, loop=self._loop))
 
     def wait_connection_closed_marker(self):
         protocol = self.protocols[-1]
@@ -302,8 +302,8 @@ def server_factory(request, event_loop, server_permanent_keys):
         'websockets': logbook.WARNING,
     })
 
-    # Push handler
-    logging_handler = logbook.StderrHandler()
+    # Push handlers
+    logging_handler = logbook.StderrHandler(bubble=True)
     logging_handler.push_application()
 
     _server_instances = []
@@ -358,6 +358,43 @@ def server_no_key(server_factory):
     key pair.
     """
     return server_factory(permanent_keys=[])
+
+
+@pytest.fixture
+def log_handler(request):
+    """
+    Return a :class:`logbook.TestHandler` instance where log records
+    can be accessed.
+    """
+    log_handler = logbook.TestHandler(level=logbook.TRACE, bubble=True)
+    log_handler._ignore_filter = lambda _: False
+    log_handler._error_level = logbook.ERROR
+    log_handler.push_application()
+
+    def fin():
+        log_handler.pop_application()
+    request.addfinalizer(fin)
+
+    return log_handler
+
+
+@pytest.fixture
+def evaluate_log(log_handler):
+    """
+    Ensure that no test is logging (handled) errors.
+    """
+    yield
+    errors = [record for record in log_handler.records
+              if (record.level >= log_handler._error_level
+                  and not log_handler._ignore_filter(record))]
+    assert(len(errors) == 0)
+
+
+@pytest.fixture
+def log_ignore_filter(log_handler):
+    def _set_filter(callback):
+        log_handler._ignore_filter = callback
+    return _set_filter
 
 
 class _DefaultBox:

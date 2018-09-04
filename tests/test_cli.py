@@ -13,6 +13,7 @@ from saltyrtc.server import (
 )
 
 
+@pytest.mark.usefixtures('evaluate_log')
 class TestCLI:
     @pytest.mark.asyncio
     def test_invalid_command(self, cli):

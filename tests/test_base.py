@@ -6,6 +6,7 @@ import pytest
 import websockets
 
 
+@pytest.mark.usefixtures('evaluate_log')
 class TestPrerequisities:
     @pytest.mark.asyncio
     def test_server_handshake(self, ws_client_factory):

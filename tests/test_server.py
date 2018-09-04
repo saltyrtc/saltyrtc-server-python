@@ -17,6 +17,7 @@ from saltyrtc.server import (
 from saltyrtc.server.events import Event
 
 
+@pytest.mark.usefixtures('evaluate_log')
 class TestServer:
     @pytest.mark.asyncio
     def test_repeated_permanent_keys(self, server_permanent_keys):
@@ -30,12 +31,15 @@ class TestServer:
 
     @pytest.mark.asyncio
     def test_task_returned_connection_open(
-            self, mocker, sleep, cookie_factory, server, client_factory
+            self, mocker, log_ignore_filter, sleep, cookie_factory, server,
+            client_factory,
     ):
         """
         Ensure the server handles a task returning early while the
         connection is still running.
         """
+        log_ignore_filter(lambda record: 'returned unexpectedly' in record.message)
+
         # Mock the initiator receive loop to return after a brief timeout
         class _MockProtocol(ServerProtocol):
             @asyncio.coroutine
@@ -57,12 +61,16 @@ class TestServer:
 
     @pytest.mark.asyncio
     def test_task_cancelled_connection_open(
-            self, mocker, sleep, cookie_factory, server, client_factory
+            self, mocker, log_ignore_filter, sleep, cookie_factory, server,
+            client_factory
     ):
         """
         Ensure the server handles a task being cancelled early while
         the connection is still running.
         """
+        ignore = 'has been cancelled'
+        log_ignore_filter(lambda record: ignore in record.message)
+
         # Mock the initiator receive loop and cancel itself after a brief timeout
         class _MockProtocol(ServerProtocol):
             def initiator_receive_loop(self):
