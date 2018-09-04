@@ -634,9 +634,21 @@ class PathClient:
         """
         self.log.debug('Sending ping')
         try:
-            return (yield from self._connection.ping())
+            pong_future = yield from self._connection.ping()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while pinging')
+            raise Disconnected(exc.code) from exc
+        return self._wait_pong(pong_future)
+
+    @asyncio.coroutine
+    def _wait_pong(self, pong_future):
+        """
+        Disconnected
+        """
+        try:
+            yield from pong_future
+        except websockets.ConnectionClosed as exc:
+            self.log.debug('Connection closed while waiting for pong')
             raise Disconnected(exc.code) from exc
 
     @asyncio.coroutine
