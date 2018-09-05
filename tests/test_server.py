@@ -5,7 +5,6 @@ instance behaves as expected.
 import asyncio
 import collections
 
-import libnacl.public
 import pytest
 
 from saltyrtc.server import (
@@ -31,8 +30,7 @@ class TestServer:
 
     @pytest.mark.asyncio
     def test_task_returned_connection_open(
-            self, mocker, log_ignore_filter, log_handler, sleep, cookie_factory, server,
-            client_factory,
+            self, mocker, log_ignore_filter, log_handler, sleep, server, client_factory,
     ):
         """
         Ensure the server handles a task returning early while the
@@ -50,9 +48,7 @@ class TestServer:
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
         # Initiator handshake
-        initiator, i = yield from client_factory(initiator_handshake=True)
-        i['rccsn'] = 1337
-        i['rcck'] = cookie_factory()
+        initiator, _ = yield from client_factory(initiator_handshake=True)
 
         # Expect internal error
         yield from server.wait_connections_closed()
@@ -63,8 +59,7 @@ class TestServer:
 
     @pytest.mark.asyncio
     def test_task_cancelled_connection_open(
-            self, mocker, log_ignore_filter, log_handler, sleep, cookie_factory, server,
-            client_factory
+            self, mocker, log_ignore_filter, log_handler, sleep, server, client_factory
     ):
         """
         Ensure the server handles a task being cancelled early while
@@ -90,9 +85,7 @@ class TestServer:
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
         # Initiator handshake
-        initiator, i = yield from client_factory(initiator_handshake=True)
-        i['rccsn'] = 1337
-        i['rcck'] = cookie_factory()
+        initiator, _ = yield from client_factory(initiator_handshake=True)
 
         # Expect internal error
         yield from server.wait_connections_closed()
@@ -103,8 +96,7 @@ class TestServer:
 
     @pytest.mark.asyncio
     def test_task_returned_connection_closed(
-            self, mocker, event_loop, log_handler, sleep, cookie_factory, server,
-            client_factory
+            self, mocker, event_loop, log_handler, sleep, server, client_factory
     ):
         """
         Ensure the server does gracefully handle a task returning when
@@ -136,9 +128,7 @@ class TestServer:
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
         # Initiator handshake
-        initiator, i = yield from client_factory(initiator_handshake=True)
-        i['rccsn'] = 1337
-        i['rcck'] = cookie_factory()
+        initiator, _ = yield from client_factory(initiator_handshake=True)
 
         # Wait for the receive loop to return (and the waiter it returns)
         yield from (yield from receive_loop_closed_future)
@@ -251,9 +241,7 @@ class TestServer:
                     if 'closed while waiting for pong' in record.message]) == 1
 
     @pytest.mark.asyncio
-    def test_event_emitted(
-            self, initiator_key, responder_key, cookie_factory, server, client_factory
-    ):
+    def test_event_emitted(self, initiator_key, server, client_factory):
         """
         Ensure the server does emit events as expected.
         """
@@ -269,16 +257,10 @@ class TestServer:
             server.register_event_callback(event, callback)
 
         # Initiator handshake
-        initiator, i = yield from client_factory(initiator_handshake=True)
-        i['rccsn'] = 456987
-        i['rcck'] = cookie_factory()
-        i['rbox'] = libnacl.public.Box(sk=initiator_key, pk=responder_key.pk)
+        initiator, _ = yield from client_factory(initiator_handshake=True)
 
         # Responder handshake
-        responder, r = yield from client_factory(responder_handshake=True)
-        r['iccsn'] = 2 ** 24
-        r['icck'] = cookie_factory()
-        r['ibox'] = libnacl.public.Box(sk=responder_key, pk=initiator_key.pk)
+        responder, _ = yield from client_factory(responder_handshake=True)
 
         yield from initiator.recv()
         assert set(events_fired.keys()) == {
