@@ -31,7 +31,7 @@ class TestServer:
 
     @pytest.mark.asyncio
     def test_task_returned_connection_open(
-            self, mocker, log_ignore_filter, sleep, cookie_factory, server,
+            self, mocker, log_ignore_filter, log_handler, sleep, cookie_factory, server,
             client_factory,
     ):
         """
@@ -58,10 +58,12 @@ class TestServer:
         yield from server.wait_connections_closed()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.internal_error
+        assert len([record for record in log_handler.records
+                    if 'returned unexpectedly' in record.message]) == 2
 
     @pytest.mark.asyncio
     def test_task_cancelled_connection_open(
-            self, mocker, log_ignore_filter, sleep, cookie_factory, server,
+            self, mocker, log_ignore_filter, log_handler, sleep, cookie_factory, server,
             client_factory
     ):
         """
@@ -96,10 +98,13 @@ class TestServer:
         yield from server.wait_connections_closed()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.internal_error
+        assert len([record for record in log_handler.records
+                    if 'has been cancelled' in record.message]) == 2
 
     @pytest.mark.asyncio
     def test_task_returned_connection_closed(
-            self, mocker, event_loop, sleep, cookie_factory, server, client_factory
+            self, mocker, event_loop, log_handler, sleep, cookie_factory, server,
+            client_factory
     ):
         """
         Ensure the server does gracefully handle a task returning when
@@ -141,6 +146,109 @@ class TestServer:
         # Bye
         yield from initiator.ws_client.close()
         yield from server.wait_connections_closed()
+        partials = ('Task done', 'result=None')
+        assert len([record for record in log_handler.records
+                    if all(partial in record.message for partial in partials)]) == 1
+
+    @pytest.mark.asyncio
+    def test_disconnect_keep_alive_ping(
+            self, mocker, event_loop, log_handler, sleep, ws_client_factory,
+            initiator_key, server, client_factory
+    ):
+        """
+        Check that the server handles a disconnect correctly when
+        sending a ping.
+        """
+        # Mock the initiator receive loop to return after a brief timeout
+        class _MockProtocol(ServerProtocol):
+            @asyncio.coroutine
+            def initiator_receive_loop(self):
+                # Wait until closed (and a little further)
+                yield from self.client.connection_closed_future
+                yield from sleep(0.1)
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # Connect client to server
+        ws_client = yield from ws_client_factory()
+
+        # Patch server's keep alive interval and timeout
+        assert len(server.protocols) == 1
+        protocol = next(iter(server.protocols))
+        protocol.client._keep_alive_interval = 0.1
+
+        # Initiator handshake
+        yield from client_factory(ws_client=ws_client, initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
+
+        # Get path instance of server and initiator's PathClient instance
+        path = server.paths.get(initiator_key.pk)
+        path_client = path.get_initiator()
+
+        # Delay sending a ping
+        ping = path_client._connection.ping
+        ready_future = asyncio.Future(loop=event_loop)
+
+        @asyncio.coroutine
+        def _mock_ping(*args):
+            yield from ready_future
+            return (yield from ping(*args))
+
+        mocker.patch.object(path_client._connection, 'ping', _mock_ping)
+
+        # Let the server know we're ready once the connection has been closed.
+        # The server will now try to send a ping.
+        yield from ws_client.close()
+        ready_future.set_result(None)
+
+        # Expect a normal closure (seen on the server side)
+        close_code = yield from connection_closed_future()
+        assert close_code == 1000
+        yield from server.wait_connections_closed()
+        assert len([record for record in log_handler.records
+                    if 'closed while pinging' in record.message]) == 1
+
+    @pytest.mark.asyncio
+    def test_disconnect_keep_alive_pong(
+            self, mocker, sleep, log_handler, ws_client_factory, server, client_factory
+    ):
+        """
+        Check that the server handles a disconnect correctly when
+        waiting for a pong.
+        """
+        # Mock the initiator receive loop to return after a brief timeout
+        class _MockProtocol(ServerProtocol):
+            @asyncio.coroutine
+            def initiator_receive_loop(self):
+                # Wait until closed
+                yield from self.client.connection_closed_future
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # Create client and patch it to not answer pings
+        ws_client = yield from ws_client_factory()
+        ws_client.pong = asyncio.coroutine(lambda *args, **kwargs: None)
+
+        # Patch server's keep alive interval and timeout
+        assert len(server.protocols) == 1
+        protocol = next(iter(server.protocols))
+        protocol.client._keep_alive_interval = 0.1
+        protocol.client.keep_alive_timeout = float('inf')
+
+        # Initiator handshake
+        yield from client_factory(ws_client=ws_client, initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
+
+        # Ensure the server can send a ping before closing
+        yield from sleep(0.25)
+        yield from ws_client.close()
+
+        # Expect a normal closure (seen on the server side)
+        close_code = yield from connection_closed_future()
+        assert close_code == 1000
+        yield from server.wait_connections_closed()
+        assert len([record for record in log_handler.records
+                    if 'closed while waiting for pong' in record.message]) == 1
 
     @pytest.mark.asyncio
     def test_event_emitted(
@@ -197,99 +305,3 @@ class TestServer:
             (initiator_key.hex_pk().decode('ascii'), 1000),
             (initiator_key.hex_pk().decode('ascii'), 1000),
         ]
-
-    @pytest.mark.asyncio
-    def test_disconnect_keep_alive_ping(
-            self, mocker, event_loop, sleep, ws_client_factory, initiator_key, server,
-            client_factory
-    ):
-        """
-        Check that the server handles a disconnect correctly when
-        sending a ping.
-        """
-        # Mock the initiator receive loop to return after a brief timeout
-        class _MockProtocol(ServerProtocol):
-            @asyncio.coroutine
-            def initiator_receive_loop(self):
-                # Wait until closed (and a little further)
-                yield from self.client.connection_closed_future
-                yield from sleep(0.1)
-
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
-
-        # Connect client to server
-        ws_client = yield from ws_client_factory()
-
-        # Patch server's keep alive interval and timeout
-        assert len(server.protocols) == 1
-        protocol = next(iter(server.protocols))
-        protocol.client._keep_alive_interval = 0.1
-
-        # Initiator handshake
-        yield from client_factory(ws_client=ws_client, initiator_handshake=True)
-        connection_closed_future = server.wait_connection_closed_marker()
-
-        # Get path instance of server and initiator's PathClient instance
-        path = server.paths.get(initiator_key.pk)
-        path_client = path.get_initiator()
-
-        # Delay sending a ping
-        ping = path_client._connection.ping
-        ready_future = asyncio.Future(loop=event_loop)
-
-        @asyncio.coroutine
-        def _mock_ping(*args):
-            yield from ready_future
-            return (yield from ping(*args))
-
-        mocker.patch.object(path_client._connection, 'ping', _mock_ping)
-
-        # Let the server know we're ready once the connection has been closed.
-        # The server will now try to send a ping.
-        yield from ws_client.close()
-        ready_future.set_result(None)
-
-        # Expect a normal closure (seen on the server side)
-        close_code = yield from connection_closed_future()
-        assert close_code == 1000
-        yield from server.wait_connections_closed()
-
-    @pytest.mark.asyncio
-    def test_disconnect_keep_alive_pong(
-            self, mocker, sleep, ws_client_factory, server, client_factory
-    ):
-        """
-        Check that the server handles a disconnect correctly when
-        waiting for a pong.
-        """
-        # Mock the initiator receive loop to return after a brief timeout
-        class _MockProtocol(ServerProtocol):
-            @asyncio.coroutine
-            def initiator_receive_loop(self):
-                # Wait until closed
-                yield from self.client.connection_closed_future
-
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
-
-        # Create client and patch it to not answer pings
-        ws_client = yield from ws_client_factory()
-        ws_client.pong = asyncio.coroutine(lambda *args, **kwargs: None)
-
-        # Patch server's keep alive interval and timeout
-        assert len(server.protocols) == 1
-        protocol = next(iter(server.protocols))
-        protocol.client._keep_alive_interval = 0.1
-        protocol.client.keep_alive_timeout = float('inf')
-
-        # Initiator handshake
-        yield from client_factory(ws_client=ws_client, initiator_handshake=True)
-        connection_closed_future = server.wait_connection_closed_marker()
-
-        # Ensure the server can send a ping before closing
-        yield from sleep(0.25)
-        yield from ws_client.close()
-
-        # Expect a normal closure (seen on the server side)
-        close_code = yield from connection_closed_future()
-        assert close_code == 1000
-        yield from server.wait_connections_closed()
