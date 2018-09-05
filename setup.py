@@ -58,7 +58,7 @@ setup(
     install_requires=[
         'libnacl>=1.5.0,<2',
         'click>=6.7',  # doesn't seem to follow semantic versioning (see #57)
-        'websockets>=6.0,<7',
+        'websockets>=7.0,<8',
         'u-msgpack-python>=2.3,<3',
     ],
     tests_require=tests_require,
