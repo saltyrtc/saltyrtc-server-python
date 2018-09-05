@@ -226,7 +226,7 @@ class ServerProtocol(Protocol):
             self._server.raise_event(
                 Event.disconnected, hex_path, CloseCode.invalid_key.value)
         except InternalError as exc:
-            client.log.error('Closing due to an internal error: {}', exc)
+            client.log.exception('Closing due to an internal error: {}', exc)
             close_future = client.close(code=CloseCode.internal_error.value)
             self._server.raise_event(
                 Event.disconnected, hex_path, CloseCode.internal_error.value)
@@ -294,7 +294,7 @@ class ServerProtocol(Protocol):
                     initiator.log.debug('Enqueueing disconnected message')
                     yield from initiator.enqueue_task(initiator.send(message))
             else:
-                client.log.error('Invalid address type: {}'.format(client.type))
+                client.log.error('Invalid address type: {}', client.type)
 
         # Wait for the connection to be closed
         yield from close_future
