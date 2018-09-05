@@ -554,7 +554,7 @@ class ServerProtocol(Protocol):
                 if isinstance(exc, asyncio.CancelledError):
                     client.log.debug('Cancelling active task {}', task)
                 else:
-                    client.log.debug('Exception raised in task {}, ', task)
+                    client.log.debug('Stopping active task {}, ', task)
                 if asyncio.iscoroutine(task):
                     task.close()
                     client.task_done(task)

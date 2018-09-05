@@ -8,7 +8,9 @@ import collections
 import pytest
 
 from saltyrtc.server import (
+    AddressType,
     CloseCode,
+    RawMessage,
     ServerProtocol,
     exception,
     serve,
@@ -139,6 +141,102 @@ class TestServer:
         partials = ('Task done', 'result=None')
         assert len([record for record in log_handler.records
                     if all(partial in record.message for partial in partials)]) == 1
+
+    @pytest.mark.asyncio
+    def test_disconnect_during_receive(
+            self, mocker, log_handler, sleep, server, client_factory
+    ):
+        """
+        Check that the server handles a disconnect correctly when the
+        receive loop returns.
+        """
+        # Mock the initiator keep alive loop to stay quiet
+        class _MockProtocol(ServerProtocol):
+            @asyncio.coroutine
+            def keep_alive_loop(self):
+                yield from sleep(float('inf'))
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # Initiator handshake & disconnect immediately
+        initiator, _ = yield from client_factory(initiator_handshake=True)
+        yield from initiator.ws_client.close()
+
+        # Expect disconnect during receive in the log
+        yield from server.wait_connections_closed()
+        assert len([record for record in log_handler.records
+                    if 'closed while receiving' in record.message]) == 1
+
+    @pytest.mark.asyncio
+    def test_disconnect_during_send(
+            self, mocker, event_loop, log_handler, ws_client_factory, server
+    ):
+        """
+        Check that the server handles a disconnect correctly when the
+        server tries to send something while the client is already gone.
+        """
+        close_future = asyncio.Future(loop=event_loop)
+
+        # Mock the handshake to wait until the client has been closed
+        class _MockProtocol(ServerProtocol):
+            @asyncio.coroutine
+            def handshake(self):
+                yield from close_future
+                return (yield from super().handshake())
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # Connect & disconnect immediately
+        ws_client = yield from ws_client_factory()
+        yield from ws_client.close()
+        close_future.set_result(None)
+
+        # Expect disconnect during send in the log
+        yield from server.wait_connections_closed()
+        assert len([record for record in log_handler.records
+                    if 'closed while sending' in record.message]) == 1
+
+    @pytest.mark.asyncio
+    def test_disconnect_during_task(
+            self, mocker, event_loop, log_handler, sleep, server, client_factory
+    ):
+        """
+        Check that the server handles a disconnect correctly when a
+        task (that awaits a send operation) is awaited.
+        """
+        close_future = asyncio.Future(loop=event_loop)
+
+        # Mock the loops to stay quiet and enqueue a relay task
+        class _MockProtocol(ServerProtocol):
+            @asyncio.coroutine
+            def initiator_receive_loop(self):
+                yield from close_future
+
+                @asyncio.coroutine
+                def _send_task():
+                    message = RawMessage(AddressType.server, self.client.id, b'\x00')
+                    message._nonce = b'\x00' * 24
+                    yield from self.client.send(message)
+
+                yield from self.client.enqueue_task(_send_task())
+                yield from sleep(float('inf'))
+
+            @asyncio.coroutine
+            def keep_alive_loop(self):
+                yield from sleep(float('inf'))
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # Initiator handshake & disconnect immediately
+        initiator, _ = yield from client_factory(initiator_handshake=True)
+        yield from initiator.ws_client.close()
+        close_future.set_result(None)
+
+        # Expect disconnect during send in the log
+        yield from server.wait_connections_closed()
+        partials = ['closed while sending', 'Stopping active task', 'Task done']
+        assert len([record for record in log_handler.records
+                    if any(partial in record.message for partial in partials)]) == 3
 
     @pytest.mark.asyncio
     def test_disconnect_keep_alive_ping(
