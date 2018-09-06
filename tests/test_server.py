@@ -154,7 +154,7 @@ class TestServer:
         class _MockProtocol(ServerProtocol):
             @asyncio.coroutine
             def keep_alive_loop(self):
-                yield from sleep(float('inf'))
+                yield from sleep(60.0)
 
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
@@ -219,11 +219,11 @@ class TestServer:
                     yield from self.client.send(message)
 
                 yield from self.client.enqueue_task(_send_task())
-                yield from sleep(float('inf'))
+                yield from sleep(60.0)
 
             @asyncio.coroutine
             def keep_alive_loop(self):
-                yield from sleep(float('inf'))
+                yield from sleep(60.0)
 
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
@@ -321,7 +321,7 @@ class TestServer:
         assert len(server.protocols) == 1
         protocol = next(iter(server.protocols))
         protocol.client._keep_alive_interval = 0.1
-        protocol.client.keep_alive_timeout = float('inf')
+        protocol.client.keep_alive_timeout = 60.0
 
         # Initiator handshake
         yield from client_factory(ws_client=ws_client, initiator_handshake=True)
@@ -362,9 +362,9 @@ class TestServer:
         @asyncio.coroutine
         def bad_task():
             try:
-                yield from sleep(float('inf'))
+                yield from sleep(60.0)
             except asyncio.CancelledError:
-                yield from sleep(float('inf'))
+                yield from sleep(60.0)
 
         yield from path_client.enqueue_task(bad_task())
 
