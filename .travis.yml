@@ -84,7 +84,7 @@ script:
 - >
   py.test \
     --ignore=$IGNORE \
-    --cov-config .coveragerc \
+    --cov-config=.coveragerc \
     --cov=saltyrtc.server \
     --loop=$EVENT_LOOP \
     --timeout=$TIMEOUT
