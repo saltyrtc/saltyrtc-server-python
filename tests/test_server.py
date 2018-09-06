@@ -339,6 +339,46 @@ class TestServer:
                     if 'closed while waiting for pong' in record.message]) == 1
 
     @pytest.mark.asyncio
+    def test_misbehaving_task(
+            self, mocker, sleep, log_ignore_filter, log_handler, initiator_key, server,
+            client_factory
+    ):
+        """
+        Check that the server handles a misbehaving task correctly.
+        """
+        log_ignore_filter(lambda record: 'queue did not close' in record.message)
+
+        # Initiator handshake
+        initiator, _ = yield from client_factory(initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
+
+        # Mock the task queue join timeout
+        mocker.patch('saltyrtc.server.server._TASK_QUEUE_JOIN_TIMEOUT', 0.1)
+
+        # Get path instance of server and initiator's PathClient instance
+        path = server.paths.get(initiator_key.pk)
+        path_client = path.get_initiator()
+
+        @asyncio.coroutine
+        def bad_task():
+            try:
+                yield from sleep(float('inf'))
+            except asyncio.CancelledError:
+                yield from sleep(float('inf'))
+
+        yield from path_client.enqueue_task(bad_task())
+
+        # Close and wait
+        yield from initiator.ws_client.close()
+
+        # Expect a normal closure (seen on the server side)
+        close_code = yield from connection_closed_future()
+        assert close_code == 1000
+        yield from server.wait_connections_closed()
+        assert len([record for record in log_handler.records
+                    if 'queue did not close' in record.message]) == 1
+
+    @pytest.mark.asyncio
     def test_event_emitted(self, initiator_key, server, client_factory):
         """
         Ensure the server does emit events as expected.
