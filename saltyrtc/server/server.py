@@ -246,10 +246,6 @@ class ServerProtocol(Protocol):
             client.log.error('Client closed without exception')
             close_future.set_result(None)
 
-        # Remove client from path
-        path.remove_client(client)
-        self._server.paths.clean(path)
-
         # Schedule closing of the client
         # Note: This ensures the client is closed soon even if the task queue is holding
         #       us up.
@@ -420,8 +416,15 @@ class ServerProtocol(Protocol):
                 client.log.debug('Cancelling task {}', pending_task)
                 pending_task.cancel()
 
-            # Cancel the task queue
+            # Cancel the task queue and remove client from path
+            # Note: Removing the client needs to be done here since the re-raise hands
+            #       the task back into the event loop allowing other tasks to get the
+            #       client's path instance from the path while it is already effectively
+            #       disconnected.
             client.cancel_task_queue()
+            path = self.path
+            path.remove_client(client)
+            self._server.paths.clean(path)
 
             # Finally, raise the exception
             raise exc
