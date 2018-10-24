@@ -501,18 +501,18 @@ class PathClient:
         Enqueue a coroutine or task into the task queue of the
         client.
 
+        .. note:: Coroutines will be closed and :class:`asyncio.Task`s
+                  will be cancelled when the task queue is being
+                  cancelled. The coroutine or task must be prepared
+                  for that.
+
         Arguments:
             - `coroutine_or_task`: A coroutine or a
               :class:`asyncio.Task`.
-
-        Raises :exc:`InternalError` in case the task queue has been
-        cancelled.
         """
         if not self._task_queue_state.can_enqueue:
-            description = 'Unable to enqueue task, task queue is already {}'
-            self.log.error(description, self._task_queue_state.name)
-            raise InternalError('Task queue is already {}'.format(
-                self._task_queue_state.name))
+            self._cancel_coroutine_or_task(coroutine_or_task, mark_as_done=False)
+            return
         yield from self._task_queue.put(coroutine_or_task)
 
     @asyncio.coroutine
@@ -566,24 +566,40 @@ class PathClient:
         self.log.debug('Cancelling {} queued tasks', self._task_queue.qsize())
         while True:
             try:
-                task = self._task_queue.get_nowait()
+                coroutine_or_task = self._task_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            if asyncio.iscoroutine(task):
-                task.close()
-                self.task_done(task)
-            else:
-                task.add_done_callback(self.task_done)
-                if not task.cancelled():
-                    exc = task.exception()
-                    if exc is not None:
-                        message = 'Ignoring exception of queued task {}: {}'
-                        self.log.debug(message, task, repr(exc))
-                    else:
-                        self.log.debug('Ignoring completion of queued task {}', task)
+            self._cancel_coroutine_or_task(coroutine_or_task, mark_as_done=True)
+
+    def _cancel_coroutine_or_task(self, coroutine_or_task, mark_as_done=False):
+        """
+        Cancel a coroutine or a :class:`asyncio.Task`.
+
+        Arguments:
+            - `coroutine_or_task`: The coroutine or
+              :class:`asyncio.Task` to be cancelled.
+            - `mark_as_done`: Whether to mark the task as *processed*
+              on the task queue. Defaults to `False`.
+        """
+        if asyncio.iscoroutine(coroutine_or_task):
+            self.log.debug('Closing queued coroutine {}', coroutine_or_task)
+            coroutine_or_task.close()
+            if mark_as_done:
+                self.task_done(coroutine_or_task)
+        else:
+            if mark_as_done:
+                coroutine_or_task.add_done_callback(self.task_done)
+            if not coroutine_or_task.cancelled():
+                exc = coroutine_or_task.exception()
+                if exc is not None:
+                    message = 'Ignoring exception of queued task {}: {}'
+                    self.log.debug(message, coroutine_or_task, repr(exc))
                 else:
-                    self.log.debug('Cancelling queued task {}', task)
-                    task.cancel()
+                    message = 'Ignoring completion of queued task {}'
+                    self.log.debug(message, coroutine_or_task)
+            else:
+                self.log.debug('Cancelling queued task {}', coroutine_or_task)
+                coroutine_or_task.cancel()
 
     @asyncio.coroutine
     def join_task_queue(self):
