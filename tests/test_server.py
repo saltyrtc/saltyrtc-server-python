@@ -425,3 +425,43 @@ class TestServer:
             (initiator_key.hex_pk().decode('ascii'), 1000),
             (initiator_key.hex_pk().decode('ascii'), 1000),
         ]
+
+    @pytest.mark.asyncio
+    def test_error_after_disconnect(
+            self, mocker, server, client_factory
+    ):
+        """
+        Ensure the server does not error after the client's disconnect
+        procedure has been started.
+
+        This test exists to prevent a regression. Previously it was
+        possible to enqueue tasks on a client whose task queue has
+        already been closed.
+        """
+        # Initiator handshake
+        initiator, _ = yield from client_factory(initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
+
+        # Mock the responder's client handler to wait before raising an exception
+        class _MockProtocol(ServerProtocol):
+            @asyncio.coroutine
+            def handle_client(self):
+                try:
+                    yield from super().handle_client()
+                except Exception:
+                    # Hold back the exception until the initiator has closed its
+                    # connection to provoke a race condition
+                    yield from connection_closed_future()
+                    raise
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # Responder handshake
+        responder, _ = yield from client_factory(responder_handshake=True)
+
+        # Disconnect the responder first, then the initiator.
+        # The initiator may trigger some behaviour on the responder resulting in an
+        # exception being logged. Thus, we don't have to assert anything here.
+        yield from responder.close()
+        yield from initiator.close()
+        yield from server.wait_connections_closed()

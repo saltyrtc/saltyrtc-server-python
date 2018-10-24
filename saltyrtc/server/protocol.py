@@ -509,6 +509,8 @@ class PathClient:
         cancelled.
         """
         if not self._task_queue_state.can_enqueue:
+            description = 'Unable to enqueue task, task queue is already {}'
+            self.log.error(description, self._task_queue_state.name)
             raise InternalError('Task queue is already {}'.format(
                 self._task_queue_state.name))
         yield from self._task_queue.put(coroutine_or_task)
@@ -546,6 +548,8 @@ class PathClient:
         cancelled.
         """
         if not self._task_queue_state.can_enqueue:
+            description = 'Unable to cancel task queue, it is already {}'
+            self.log.warning(description, self._task_queue_state.name)
             raise InternalError('Task queue is already {}'.format(
                 self._task_queue_state.name))
 

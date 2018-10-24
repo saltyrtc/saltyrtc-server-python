@@ -226,7 +226,7 @@ class ServerProtocol(Protocol):
             self._server.raise_event(
                 Event.disconnected, hex_path, CloseCode.invalid_key.value)
         except InternalError as exc:
-            client.log.exception('Closing due to an internal error: {}', exc)
+            client.log.exception('Closing due to an internal error:', exc)
             close_future = client.close(code=CloseCode.internal_error.value)
             self._server.raise_event(
                 Event.disconnected, hex_path, CloseCode.internal_error.value)
@@ -282,7 +282,12 @@ class ServerProtocol(Protocol):
                         AddressType.server, responder_id, client.id)
                     responder.log.debug('Enqueueing disconnected message')
                     coroutines.append(responder.enqueue_task(responder.send(message)))
-                yield from asyncio.gather(*coroutines, loop=self._loop)
+                try:
+                    yield from asyncio.gather(*coroutines, loop=self._loop)
+                except Exception as exc:
+                    description = 'Error while dispatching disconnected messages to ' \
+                                  'responders:'
+                    client.log.exception(description, exc)
             # Responder: Send to initiator (if present)
             elif client.type == AddressType.responder:
                 initiator = path.get_initiator()
@@ -292,7 +297,12 @@ class ServerProtocol(Protocol):
                     message = DisconnectedMessage.create(
                         AddressType.server, initiator.id, client.id)
                     initiator.log.debug('Enqueueing disconnected message')
-                    yield from initiator.enqueue_task(initiator.send(message))
+                    try:
+                        yield from initiator.enqueue_task(initiator.send(message))
+                    except Exception as exc:
+                        description = 'Error while dispatching disconnected message to ' \
+                                      'initiator:'
+                        client.log.exception(description, exc)
             else:
                 client.log.error('Invalid address type: {}', client.type)
 
