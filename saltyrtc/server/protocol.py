@@ -102,10 +102,10 @@ class Path:
 
     def get_responder_ids(self):
         """
-        Return a list of responder's identifiers (slots).
+        Return an iterable of responder's identifiers (slots).
         """
-        return [id_ for id_, responder in self._slots.items()
-                if is_responder_id(id_) and responder is not None]
+        return (id_ for id_, responder in self._slots.items()
+                if is_responder_id(id_) and responder is not None)
 
     def add_responder(self, responder):
         """
