@@ -286,9 +286,11 @@ class ServerProtocol(Protocol):
                     client.log.exception(description, exc)
             # Responder: Send to initiator (if present)
             elif client.type == AddressType.responder:
-                initiator = path.get_initiator()
-                initiator_connected = initiator is not None
-                if initiator_connected:
+                try:
+                    initiator = path.get_initiator()
+                except KeyError:
+                    pass  # No initiator present
+                else:
                     # Create message and add send coroutine to task queue of the initiator
                     message = DisconnectedMessage.create(
                         AddressType.server, initiator.id, client.id)
@@ -536,9 +538,11 @@ class ServerProtocol(Protocol):
         id_ = path.add_responder(responder)
 
         # Send new-responder message if initiator is present
-        initiator = path.get_initiator()
-        initiator_connected = initiator is not None
-        if initiator_connected:
+        try:
+            initiator = path.get_initiator()
+        except KeyError:
+            initiator = None
+        else:
             # Create message and add send coroutine to task queue of the initiator
             message = NewResponderMessage.create(AddressType.server, initiator.id, id_)
             initiator.log.debug('Enqueueing new-responder message')
@@ -548,7 +552,7 @@ class ServerProtocol(Protocol):
         message = ServerAuthMessage.create(
             AddressType.server, responder.id, responder.cookie_in,
             sign_keys=len(self._server.keys) > 0,
-            initiator_connected=initiator_connected)
+            initiator_connected=initiator is not None)
         responder.log.debug('Sending server-auth without responder ids')
         yield from responder.send(message)
 
@@ -586,14 +590,21 @@ class ServerProtocol(Protocol):
             # Relay
             if isinstance(message, RawMessage):
                 # Lookup responder
-                responder = path.get_responder(message.destination)
+                try:
+                    responder = path.get_responder(message.destination)
+                except KeyError:
+                    responder = None
                 # Send to responder
                 yield from self.relay_message(responder, message.destination, message)
             # Drop-responder
             elif message.type == MessageType.drop_responder:
                 # Lookup responder
-                responder = path.get_responder(message.responder_id)
-                if responder is not None:
+                try:
+                    responder = path.get_responder(message.responder_id)
+                except KeyError:
+                    log_message = 'Responder {} already dropped, nothing to do'
+                    path.log.debug(log_message, message.responder_id)
+                else:
                     # Drop responder using its task queue
                     path.log.debug(
                         'Dropping responder {}, reason: {}', responder, message.reason)
@@ -602,9 +613,6 @@ class ServerProtocol(Protocol):
                     coroutine = responder.enqueue_task(
                         responder.close(code=message.reason.value))
                     asyncio.ensure_future(coroutine, loop=self._loop)
-                else:
-                    log_message = 'Responder {} already dropped, nothing to do'
-                    path.log.debug(log_message, message.responder_id)
             else:
                 error = "Expected relay message or 'drop-responder', got '{}'"
                 raise MessageFlowError(error.format(message.type))
@@ -619,7 +627,10 @@ class ServerProtocol(Protocol):
             # Relay
             if isinstance(message, RawMessage):
                 # Lookup initiator
-                initiator = path.get_initiator()
+                try:
+                    initiator = path.get_initiator()
+                except KeyError:
+                    initiator = None
                 # Send to initiator
                 yield from self.relay_message(initiator, AddressType.initiator, message)
             else:

@@ -69,9 +69,14 @@ class Path:
 
     def get_initiator(self):
         """
-        Return the initiator's :class:`PathClient` instance or `None`.
+        Return the initiator's :class:`PathClient` instance.
+
+        Raises :exc:`KeyError` if there is no initiator.
         """
-        return self._slots.get(AddressType.initiator)
+        client = self._slots[AddressType.initiator]
+        if client is None:
+            raise KeyError('No initiator found')
+        return client
 
     def set_initiator(self, initiator):
         """
@@ -95,17 +100,23 @@ class Path:
 
     def get_responder(self, id_):
         """
-        Return a responder's :class:`PathClient` instance or `None`.
+        Return a responder's :class:`PathClient` instance.
 
         Arguments:
             - `id_`: The identifier of the responder.
 
-        Raises :exc:`ValueError` if `id_` is not a valid responder
-        identifier.
+        Raises:
+            - :exc:`ValueError`: If `id_` is not a valid responder
+              identifier.
+            - :exc:`KeyError`: If `id_` cannot be associated to a
+              :class:`PathClient` instance.
         """
         if not is_responder_id(id_):
             raise ValueError('Invalid responder identifier')
-        return self._slots.get(id_)
+        client = self._slots[id_]
+        if client is None:
+            raise KeyError('No responder found')
+        return client
 
     def get_responder_ids(self):
         """
