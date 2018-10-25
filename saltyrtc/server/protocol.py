@@ -39,7 +39,8 @@ __all__ = (
 @enum.unique
 class _TaskQueueState(enum.IntEnum):
     open = 1
-    cancelled = 2
+    closed = 2
+    cancelled = 3
 
     @property
     def can_enqueue(self):
@@ -502,8 +503,8 @@ class PathClient:
         client.
 
         .. note:: Coroutines will be closed and :class:`asyncio.Task`s
-                  will be cancelled when the task queue is being
-                  cancelled. The coroutine or task must be prepared
+                  will be cancelled when the task queue has been closed
+                  or cancelled. The coroutine or task must be prepared
                   for that.
 
         Arguments:
@@ -539,19 +540,31 @@ class PathClient:
         except ValueError:
             raise InternalError('More tasks marked as done as were enqueued')
 
+    def close_task_queue(self):
+        """
+        Close the task queue to prevent further enqueues. Will do
+        nothing in case the task queue has already been closed or
+        cancelled.
+
+        .. note:: Unlike :func:`~PathClient.cancel_task_queue`, this does
+                  not cancel any pending tasks.
+        """
+        # Ignore if already closed or cancelled
+        if self._task_queue_state >= _TaskQueueState.closed:
+            return
+
+        # Update state
+        self._task_queue_state = _TaskQueueState.closed
+
     def cancel_task_queue(self):
         """
         Cancel all pending tasks of the task queue and prevent further
-        enqueues.
-
-        Raises :exc:`InternalError` in case the task queue is already
-        cancelled.
+        enqueues. Will do nothing in case the task queue has already
+        been cancelled.
         """
-        if not self._task_queue_state.can_enqueue:
-            description = 'Unable to cancel task queue, it is already {}'
-            self.log.warning(description, self._task_queue_state.name)
-            raise InternalError('Task queue is already {}'.format(
-                self._task_queue_state.name))
+        # Ignore if already cancelled
+        if self._task_queue_state >= _TaskQueueState.cancelled:
+            return
 
         # Cancel all pending tasks
         #
@@ -626,6 +639,7 @@ class PathClient:
             yield from self._connection.send(data)
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while sending')
+            self.close_task_queue()
             raise Disconnected(exc.code) from exc
 
     @asyncio.coroutine
@@ -638,6 +652,7 @@ class PathClient:
             data = yield from self._connection.recv()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while receiving')
+            self.close_task_queue()
             raise Disconnected(exc.code) from exc
         self.log.debug('Received message')
 
@@ -657,6 +672,7 @@ class PathClient:
             pong_future = yield from self._connection.ping()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while pinging')
+            self.close_task_queue()
             raise Disconnected(exc.code) from exc
         return self._wait_pong(pong_future)
 
@@ -669,10 +685,15 @@ class PathClient:
             yield from pong_future
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while waiting for pong')
+            self.close_task_queue()
             raise Disconnected(exc.code) from exc
 
     @asyncio.coroutine
     def close(self, code=1000):
+        # Close the task queue to ensure no further tasks can be
+        # enqueued while the client is in the closing process.
+        self.close_task_queue()
+
         # Note: We are not sending a reason for security reasons.
         yield from self._connection.close(code=code)
 

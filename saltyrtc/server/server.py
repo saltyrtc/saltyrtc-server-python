@@ -484,8 +484,8 @@ class ServerProtocol(Protocol):
             # Drop previous initiator using the task queue of the previous initiator
             path.log.debug('Dropping previous initiator {}', previous_initiator)
             previous_initiator.log.debug('Dropping (another initiator connected)')
-            # TODO: Mark previous initiator as dropped
-            coroutine = previous_initiator.close(code=CloseCode.drop_by_initiator.value)
+            coroutine = previous_initiator.enqueue_task(
+                previous_initiator.close(code=CloseCode.drop_by_initiator.value))
             asyncio.ensure_future(coroutine, loop=self._loop)
 
         # Send new-initiator message if any responder is present
@@ -599,8 +599,8 @@ class ServerProtocol(Protocol):
                         'Dropping responder {}, reason: {}', responder, message.reason)
                     responder.log.debug(
                         'Dropping (requested by initiator), reason: {}', message.reason)
-                    # TODO: Mark responder as dropped and don't send relay messages
-                    coroutine = responder.close(code=message.reason.value)
+                    coroutine = responder.enqueue_task(
+                        responder.close(code=message.reason.value))
                     asyncio.ensure_future(coroutine, loop=self._loop)
                 else:
                     log_message = 'Responder {} already dropped, nothing to do'
