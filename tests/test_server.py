@@ -38,7 +38,11 @@ class TestServer:
         Ensure the server handles a task returning early while the
         connection is still running.
         """
-        log_ignore_filter(lambda record: 'returned unexpectedly' in record.message)
+        def _filter(record):
+            return 'returned unexpectedly' in record.message \
+                   or (record.exception_message is not None
+                       and 'returned unexpectedly' in record.exception_message)
+        log_ignore_filter(_filter)
 
         # Mock the initiator receive loop to return after a brief timeout
         class _MockProtocol(ServerProtocol):
@@ -56,8 +60,7 @@ class TestServer:
         yield from server.wait_connections_closed()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.internal_error
-        assert len([record for record in log_handler.records
-                    if 'returned unexpectedly' in record.message]) == 2
+        assert len([record for record in log_handler.records if _filter(record)]) == 2
 
     @pytest.mark.asyncio
     def test_task_cancelled_connection_open(
@@ -67,8 +70,11 @@ class TestServer:
         Ensure the server handles a task being cancelled early while
         the connection is still running.
         """
-        ignore = 'has been cancelled'
-        log_ignore_filter(lambda record: ignore in record.message)
+        def _filter(record):
+            return 'has been cancelled' in record.message \
+                   or (record.exception_message is not None
+                       and 'has been cancelled' in record.exception_message)
+        log_ignore_filter(_filter)
 
         # Mock the initiator receive loop and cancel itself after a brief timeout
         class _MockProtocol(ServerProtocol):
@@ -93,8 +99,7 @@ class TestServer:
         yield from server.wait_connections_closed()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.internal_error
-        assert len([record for record in log_handler.records
-                    if 'has been cancelled' in record.message]) == 2
+        assert len([record for record in log_handler.records if _filter(record)]) == 2
 
     @pytest.mark.asyncio
     def test_task_returned_connection_closed(
