@@ -501,7 +501,7 @@ class ServerProtocol(Protocol):
         yield from asyncio.gather(*coroutines, loop=self._loop)
 
         # Send server-auth
-        responder_ids = path.get_responder_ids()
+        responder_ids = list(path.get_responder_ids())
         message = ServerAuthMessage.create(
             AddressType.server, initiator.id, initiator.cookie_in,
             sign_keys=len(self._server.keys) > 0, responder_ids=responder_ids)
