@@ -129,6 +129,7 @@ def serve(
     ws_kwargs['host'] = host
     ws_kwargs['port'] = port
     ws_kwargs.setdefault('compression', None)
+    ws_kwargs['ping_interval'] = None  # Disable the keep-alive of the transport library
     ws_kwargs['subprotocols'] = server.subprotocols
 
     # Start WS server

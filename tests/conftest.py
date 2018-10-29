@@ -431,7 +431,17 @@ class Client:
 
 
 @pytest.fixture(scope='module')
-def ws_client_factory(initiator_key, event_loop, server):
+def client_kwargs(event_loop):
+    return {
+        'compression': None,
+        'subprotocols': pytest.saltyrtc.subprotocols,
+        'ping_interval': None,
+        'loop': event_loop,
+    }
+
+
+@pytest.fixture(scope='module')
+def ws_client_factory(initiator_key, event_loop, client_kwargs, server):
     """
     Return a simplified :class:`websockets.client.connect` wrapper
     where no parameters are required.
@@ -449,21 +459,16 @@ def ws_client_factory(initiator_key, event_loop, server):
             server = server_
         if path is None:
             path = '{}/{}'.format(url(*server.address), key_path(initiator_key))
-        _kwargs = {
-            'compression': None,
-            'subprotocols': pytest.saltyrtc.subprotocols,
-            'ssl': ssl_context,
-            'loop': event_loop,
-        }
+        _kwargs = client_kwargs.copy()
         _kwargs.update(kwargs)
-        return websockets.connect(path, **_kwargs)
+        return websockets.connect(path, ssl=ssl_context, **_kwargs)
     return _ws_client_factory
 
 
 @pytest.fixture(scope='module')
 def client_factory(
-        request, initiator_key, event_loop, server, server_permanent_keys, responder_key,
-        pack_nonce, pack_message, unpack_message
+        request, initiator_key, event_loop, client_kwargs, server, server_permanent_keys,
+        responder_key, pack_nonce, pack_message, unpack_message
 ):
     """
     Return a simplified :class:`websockets.client.connect` wrapper
@@ -491,17 +496,12 @@ def client_factory(
             cookie = random_cookie()
         if permanent_key is None:
             permanent_key = server_permanent_keys[0].pk
-        _kwargs = {
-            'compression': None,
-            'subprotocols': pytest.saltyrtc.subprotocols,
-            'ssl': ssl_context,
-            'loop': event_loop,
-        }
+        _kwargs = client_kwargs.copy()
         _kwargs.update(kwargs)
         if ws_client is None:
             ws_client = yield from websockets.connect(
                 '{}/{}'.format(url(*server.address), key_path(path)),
-                **_kwargs
+                ssl=ssl_context, **_kwargs
             )
         client = Client(
             ws_client, pack_message, unpack_message,
