@@ -1241,6 +1241,110 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
+    def test_relay_send_before_close_responder(
+            self, pack_nonce, cookie_factory, server, client_factory
+    ):
+        """
+        Ensure relay messages are being dispatched in case the receiver
+        is being closed (drop responder) after the sender has sent the
+        relay messages.
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        responder_closed_future = server.wait_connection_closed_marker()
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        # new-responder
+        yield from initiator.recv()
+
+        # Send 6 relay messages: initiator --> responder
+        expected_data = b'\xfe' * 2**15  # 32 KiB
+        for _ in range(6):
+            nonce = pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn'])
+            yield from initiator.send(nonce, expected_data, box=None)
+            i['rccsn'] += 1
+
+        # Drop responder
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': r['id'],
+        })
+        i['ccsn'] += 1
+
+        # Receive 6 relay messages: initiator --> responder
+        for _ in range(6):
+            actual_data, *_ = yield from responder.recv(box=None)
+            assert actual_data == expected_data
+
+        # Responder: Expect drop by initiator
+        yield from responder_closed_future()
+        assert not responder.ws_client.open
+        assert responder.ws_client.close_code == CloseCode.drop_by_initiator
+
+        # Bye
+        yield from initiator.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    def test_relay_send_before_close_initiator(
+            self, pack_nonce, cookie_factory, server, client_factory
+    ):
+        """
+        Ensure relay messages are being dispatched in case the receiver
+        is being closed (drop initiator) after the sender has sent the
+        relay messages.
+        """
+        # Initiator handshake
+        first_initiator, i = yield from client_factory(initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        # new-responder
+        yield from first_initiator.recv()
+
+        # Send 6 relay messages: initiator <-- responder
+        expected_data = b'\xfe' * 2**15  # 32 KiB
+        for _ in range(6):
+            nonce = pack_nonce(r['icck'], r['id'], i['id'], r['iccsn'])
+            yield from responder.send(nonce, expected_data, box=None)
+            r['iccsn'] += 1
+
+        # Second initiator handshake
+        second_initiator, i = yield from client_factory(initiator_handshake=True)
+        # Responder is connected
+        assert i['responders'] == [r['id']]
+
+        # new-initiator
+        yield from responder.recv()
+
+        # Receive 6 relay messages: initiator <-- responder
+        for _ in range(6):
+            actual_data, *_ = yield from first_initiator.recv(box=None)
+            assert actual_data == expected_data
+
+        # First initiator: Expect drop by initiator
+        yield from connection_closed_future()
+        assert not first_initiator.ws_client.open
+        assert first_initiator.ws_client.close_code == CloseCode.drop_by_initiator
+
+        # Bye
+        yield from responder.close()
+        yield from second_initiator.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
     def test_relay_receiver_connection_lost(
             self, mocker, event_loop, ws_client_factory, initiator_key, pack_nonce,
             cookie_factory, server, client_factory
