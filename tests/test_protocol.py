@@ -1205,8 +1205,8 @@ class TestProtocol:
             self, pack_nonce, cookie_factory, server, client_factory
     ):
         """
-        Ensure a relay message is being dispatched in case the client
-        immediately closes after having sent a relay message.
+        Ensure a relay messages are being dispatched in case the client
+        closes after having sent a couple of relay messages.
         """
         # Initiator handshake
         initiator, i = yield from client_factory(initiator_handshake=True)
@@ -1221,17 +1221,20 @@ class TestProtocol:
         # new-responder
         yield from initiator.recv()
 
-        # Send relay message: initiator --> responder
-        yield from initiator.send(pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn']), {
-            'type': 'meow',
-        }, box=None)
-        i['rccsn'] += 1
+        # Send 3 relay messages: initiator --> responder
+        expected_data = b'\xfe' * 2**16  # 64 KiB
+        for _ in range(3):
+            nonce = pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn'])
+            yield from initiator.send(nonce, expected_data, box=None)
+            i['rccsn'] += 1
 
-        # Immediately close initiator
+        # Close initiator
         yield from initiator.close()
 
-        # Receive relay message: initiator --> responder
-        message, _, ck, s, d, csn = yield from responder.recv(box=None)
+        # Receive 3 relay messages: initiator --> responder
+        for _ in range(3):
+            actual_data, *_ = yield from responder.recv(box=None)
+            assert actual_data == expected_data
 
         # Bye
         yield from responder.close()
