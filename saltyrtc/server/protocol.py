@@ -602,7 +602,11 @@ class PathClient:
         else:
             if mark_as_done:
                 coroutine_or_task.add_done_callback(self.task_done)
-            if not coroutine_or_task.cancelled():
+            # Note: We need to check for .cancelled first since a task is also marked
+            #       .done when it is cancelled.
+            if coroutine_or_task.cancelled():
+                self.log.debug('Already cancelled task {}', coroutine_or_task)
+            elif coroutine_or_task.done():
                 exc = coroutine_or_task.exception()
                 if exc is not None:
                     message = 'Ignoring exception of queued task {}: {}'
