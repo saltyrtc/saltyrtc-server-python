@@ -297,7 +297,7 @@ def server_factory(request, event_loop, server_permanent_keys):
     os.environ['PYTHONASYNCIODEBUG'] = '1'
 
     # Enable logging
-    util.enable_logging(level=logbook.TRACE, redirect_loggers={
+    util.enable_logging(level=logbook.DEBUG, redirect_loggers={
         'asyncio': logbook.WARNING,
         'websockets': logbook.WARNING,
     })
@@ -366,7 +366,7 @@ def log_handler(request):
     Return a :class:`logbook.TestHandler` instance where log records
     can be accessed.
     """
-    log_handler = logbook.TestHandler(level=logbook.TRACE, bubble=True)
+    log_handler = logbook.TestHandler(level=logbook.DEBUG, bubble=True)
     log_handler._ignore_filter = lambda _: False
     log_handler._error_level = logbook.ERROR
     log_handler.push_application()
