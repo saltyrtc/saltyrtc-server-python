@@ -424,7 +424,12 @@ class ServerProtocol(Protocol):
             #       disconnected.
             client.cancel_task_queue()
             path = self.path
-            path.remove_client(client)
+            try:
+                path.remove_client(client)
+            except KeyError:
+                # We can safely ignore this since clients will be removed immediately
+                # from the path in case they are being dropped by another client.
+                pass
             self._server.paths.clean(path)
 
             # Finally, raise the exception
@@ -485,9 +490,7 @@ class ServerProtocol(Protocol):
             # Drop previous initiator using the task queue of the previous initiator
             path.log.debug('Dropping previous initiator {}', previous_initiator)
             previous_initiator.log.debug('Dropping (another initiator connected)')
-            coroutine = previous_initiator.enqueue_task(
-                previous_initiator.close(code=CloseCode.drop_by_initiator.value))
-            asyncio.ensure_future(coroutine, loop=self._loop)
+            self._drop_client(previous_initiator, code=CloseCode.drop_by_initiator)
 
         # Send new-initiator message if any responder is present
         responder_ids = path.get_responder_ids()
@@ -600,9 +603,7 @@ class ServerProtocol(Protocol):
                         'Dropping responder {}, reason: {}', responder, message.reason)
                     responder.log.debug(
                         'Dropping (requested by initiator), reason: {}', message.reason)
-                    coroutine = responder.enqueue_task(
-                        responder.close(code=message.reason.value))
-                    asyncio.ensure_future(coroutine, loop=self._loop)
+                    self._drop_client(responder, code=message.reason.value)
                 else:
                     log_message = 'Responder {} already dropped, nothing to do'
                     path.log.debug(log_message, message.responder_id)
@@ -757,6 +758,45 @@ class ServerProtocol(Protocol):
             client_subprotocols, self._server.subprotocols)
         if chosen != self.subprotocol.value:
             raise DowngradeError('Subprotocol downgrade detected')
+
+    def _drop_client(self, client, code=1000):
+        """
+        Mark the client as closed, schedule the closing procedure on
+        the client's task queue, remove it from the path and return the
+        enqueue operation in form of a :class:`Task`.
+
+        .. note:: This should only be called by clients dropping
+                  another client.
+
+        Arguments:
+            - `client`: The client to be dropped.
+            - `close`: The close code.
+        """
+        # Enqueue the close procedure on our own task queue
+        # Note: The closing procedure would interrupt further send operations, thus we
+        #       MUST enqueue it as a coroutine and NOT wrap in a Future. That way, it
+        #       will not initiate the closing procedure before the client has executed
+        #       all other pending tasks.
+        close_coroutine = client.close(code=code)
+        enqueue_task = asyncio.ensure_future(
+            client.enqueue_task(close_coroutine, ignore_closed=True), loop=self._loop)
+
+        # Close the task queue to ensure no further tasks can be
+        # enqueued while the client is in the closing process.
+        client.close_task_queue()
+
+        # Remove the client from the path
+        path = self.path
+        path.remove_client(client)
+
+        # TODO: Mark the client as dropped!
+        # TODO: Cancel the keepalive loop
+        #       (feasible if websockets doesn't panic on cancellation and closes the
+        #       connection)
+        # TODO: Cancel the receiving loop
+        #       (same note as for keepalive loop)
+
+        return enqueue_task
 
 
 class Paths:

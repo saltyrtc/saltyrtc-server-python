@@ -392,6 +392,9 @@ def evaluate_log(log_handler):
 
 @pytest.fixture
 def log_ignore_filter(log_handler):
+    """
+    Ignore specific log entries with a filter callback.
+    """
     def _set_filter(callback):
         log_handler._ignore_filter = callback
     return _set_filter

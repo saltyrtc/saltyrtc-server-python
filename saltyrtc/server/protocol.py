@@ -42,13 +42,6 @@ class _TaskQueueState(enum.IntEnum):
     closed = 2
     cancelled = 3
 
-    @property
-    def can_enqueue(self):
-        """
-        Return whether the task queue state allows to enqueue tasks.
-        """
-        return self == _TaskQueueState.open
-
 
 class Path:
     __slots__ = ('_slots', 'log', 'initiator_key', 'number', 'attached')
@@ -149,23 +142,16 @@ class Path:
         Arguments:
              - `client`: The :class:`PathClient` instance.
 
-        Raises :exc:`ValueError` in case the client provided an
+        Raises :exc:`KeyError` in case the client provided an
         invalid slot identifier.
         """
-
         if not client.authenticated:
             # Client has not been authenticated. Nothing to do.
             return
         id_ = client.id
 
-        # Get client instance
-        try:
-            slot_client = self._slots[id_]
-        except KeyError:
-            raise ValueError('Invalid slot identifier: {}'.format(id_))
-
         # Compare client instances
-        if client != slot_client:
+        if client != self._slots[id_]:
             # Note: This is absolutely fine and happens when another initiator
             #        takes the place of a previous initiator.
             return
@@ -497,24 +483,29 @@ class PathClient:
         return self.authenticated and self.type != destination_type
 
     @asyncio.coroutine
-    def enqueue_task(self, coroutine_or_task):
+    def enqueue_task(self, coroutine_or_task, ignore_closed=False):
         """
         Enqueue a coroutine or task into the task queue of the
         client.
 
         .. note:: Coroutines will be closed and :class:`asyncio.Task`s
                   will be cancelled when the task queue has been closed
-                  or cancelled. The coroutine or task must be prepared
-                  for that.
+                  (unless `ignore_closed` has been set to `True`) or
+                  cancelled. The coroutine or task must be prepared for
+                  that.
 
         Arguments:
             - `coroutine_or_task`: A coroutine or a
               :class:`asyncio.Task`.
+            - `ignore_closed`: Whether the coroutine or
+              :class:`asyncio.Task` should be enqueued even if the task
+              queue has been closed.
         """
-        if not self._task_queue_state.can_enqueue:
+        if (self._task_queue_state == _TaskQueueState.open
+                or (ignore_closed and self._task_queue_state == _TaskQueueState.closed)):
+            yield from self._task_queue.put(coroutine_or_task)
+        else:
             self._cancel_coroutine_or_task(coroutine_or_task, mark_as_done=False)
-            return
-        yield from self._task_queue.put(coroutine_or_task)
 
     @asyncio.coroutine
     def dequeue_task(self):
@@ -694,6 +685,13 @@ class PathClient:
 
     @asyncio.coroutine
     def close(self, code=1000):
+        """
+        Initiate the closing procedure and wait for the connection to
+        be closed.
+
+        Arguments:
+            - `close`: The close code.
+        """
         # Close the task queue to ensure no further tasks can be
         # enqueued while the client is in the closing process.
         self.close_task_queue()

@@ -8,6 +8,7 @@ import libnacl.public
 import pytest
 import websockets
 
+from saltyrtc.server import ServerProtocol
 from saltyrtc.server.common import (
     SIGNED_KEYS_CIPHERTEXT_LENGTH,
     CloseCode,
@@ -1342,6 +1343,74 @@ class TestProtocol:
         # Bye
         yield from responder.close()
         yield from second_initiator.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    def test_relay_send_after_close(
+            self, mocker, event_loop, pack_nonce, cookie_factory, server, client_factory,
+            initiator_key
+    ):
+        """
+        When the responder is being dropped by the initiator, the
+        responder's task loop may await a long-blocking task before it
+        is being closed. Ensure that the initiator is not able to
+        enqueue further messages to the responder at that point.
+        """
+        # Mock the protocol to release the 'done_future' once the closing procedure has
+        # been initiated
+        class _MockProtocol(ServerProtocol):
+            def _drop_client(self, *args, **kwargs):
+                result = super()._drop_client(*args, **kwargs)
+                done_future.set_result(None)
+                return result
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        # new-responder
+        yield from initiator.recv()
+
+        # Get responder's PathClient instance
+        path = server.paths.get(initiator_key.pk)
+        path_client = path.get_responder(r['id'])
+        done_future = asyncio.Future(loop=event_loop)
+
+        # Create long-blocking task
+        @asyncio.coroutine
+        def blocking_task():
+            yield from done_future
+
+        # Enqueue long-blocking task
+        yield from path_client.enqueue_task(blocking_task())
+
+        # Drop responder
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': r['id'],
+        })
+        i['ccsn'] += 1
+
+        # Send relay message: initiator --> responder
+        nonce = pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn'])
+        yield from initiator.send(nonce, b'\xfe' * 2**15, box=None)
+        i['rccsn'] += 1
+
+        # Responder: Expect drop by initiator
+        with pytest.raises(websockets.ConnectionClosed):
+            yield from responder.recv(box=None)
+        assert responder.ws_client.close_code == CloseCode.drop_by_initiator
+
+        # Bye
+        yield from initiator.close()
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
