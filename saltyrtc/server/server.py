@@ -46,6 +46,7 @@ from .message import (
 from .protocol import (
     Path,
     PathClient,
+    PathClientTasks,
     Protocol,
 )
 
@@ -96,8 +97,10 @@ def serve(
           an instance from.
         - `ws_kwargs`: Additional keyword arguments passed to
           :func:`websockets.server.serve`. Note that the fields `ssl`,
-          `host`, `port`, `loop`, and `subprotocols` will be
-          overridden. If the `compression` field is not explicitly set,
+          `host`, `port`, `loop`, `subprotocols` and `ping_interval`
+          will be overridden.
+
+          If the `compression` field is not explicitly set,
           compression will be disabled (since the data to be compressed
           is already encrypted, compression will have little to no
           positive effect).
@@ -348,55 +351,81 @@ class ServerProtocol(Protocol):
         ServerKeyError
         InternalError
         """
-        client = self.client
+        path, client = self.path, self.client
 
         # Do handshake
         client.log.debug('Starting handshake')
         yield from self.handshake()
         client.log.info('Handshake completed')
 
-        # Prepare tasks
-        coroutines = []
-
         # Task: Execute enqueued tasks
         client.log.debug('Starting to poll for enqueued tasks')
-        coroutines.append(self.task_loop())
+        task_loop = self.task_loop()
+
+        # Check if the client is still connected to the path or has already been dropped.
+        # Note: This can happen when the client is being picked up and dropped by another
+        #       client while running the handshake. To prevent other race conditions, we
+        #       have to add the client instance to the path early during the handshake.
+        is_connected = path.has_client(client)
 
         # Task: Poll for messages
-        hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
+        hex_path = binascii.hexlify(path.initiator_key).decode('ascii')
+        receive_loop = None
         if client.type == AddressType.initiator:
-            client.log.debug('Starting runner for initiator')
             self._server.raise_event(Event.initiator_connected, hex_path)
-            coroutines.append(self.initiator_receive_loop())
+            if is_connected:
+                client.log.debug('Starting runner for initiator')
+                receive_loop = self.initiator_receive_loop()
         elif client.type == AddressType.responder:
-            client.log.debug('Starting runner for responder')
             self._server.raise_event(Event.responder_connected, hex_path)
-            coroutines.append(self.responder_receive_loop())
+            if is_connected:
+                client.log.debug('Starting runner for responder')
+                receive_loop = self.responder_receive_loop()
         else:
             raise ValueError('Invalid address type: {}'.format(client.type))
 
         # Task: Keep alive
-        client.log.debug('Starting keep-alive task')
-        coroutines.append(self.keep_alive_loop())
+        if is_connected:
+            client.log.debug('Starting keep-alive task')
+            keep_alive_loop = self.keep_alive_loop()
+        else:
+            keep_alive_loop = None
+
+        # Move the tasks into a context and store it on the path
+        client.tasks = PathClientTasks(
+            task_loop=task_loop,
+            receive_loop=receive_loop,
+            keep_alive_loop=keep_alive_loop,
+            loop=self._loop
+        )
 
         # Wait until complete
-        # Note: We also add the task loop into this list to catch any
-        #       errors that bubble up in tasks of this client.
-        tasks = [asyncio.ensure_future(coroutine, loop=self._loop)
-                 for coroutine in coroutines]
+        #
+        # Note: We also add the task loop into this list to catch any errors that bubble
+        #       up in tasks of this client.
+        #
+        # Warning: This is probably the most complicated piece of code in the server.
+        #          Avoid touching this!
+        tasks = set(client.tasks.valid)
         while True:
             done, pending = yield from asyncio.wait(
                 tasks, loop=self._loop, return_when=asyncio.FIRST_COMPLETED)
+            is_connected = path.has_client(client)
             exc = None
             for task in done:
-                client.log.debug('Task done {}', task)
+                client.log.debug('Task done {}, connected={}', task, is_connected)
 
                 # Determine the exception to be raised
                 # Note: The first task will set the exception that will be raised.
                 if task.cancelled():
-                    client.log.error('Task {} has been cancelled', task)
+                    if task != client.tasks.task_loop and not is_connected:
+                        # If the client has been dropped, we need to wait for the task
+                        # loop to return. So, remove the task from the list and continue.
+                        tasks.remove(task)
+                        break
                     if exc is None:
                         exc = InternalError('A vital task has been cancelled')
+                    client.log.error('Task {} has been cancelled', task)
                     continue
 
                 task_exc = task.exception()
@@ -413,6 +442,12 @@ class ServerProtocol(Protocol):
 
                 if exc is None:
                     exc = task_exc
+
+            # Continue if we have no exception
+            # Note: This may only happen in case the client has been dropped and we need
+            #       to wait for the task loop to return.
+            if exc is None:
+                continue
 
             # Cancel pending tasks
             for pending_task in pending:
@@ -492,7 +527,7 @@ class ServerProtocol(Protocol):
             # Drop previous initiator using the task queue of the previous initiator
             path.log.debug('Dropping previous initiator {}', previous_initiator)
             previous_initiator.log.debug('Dropping (another initiator connected)')
-            self._drop_client(previous_initiator, code=CloseCode.drop_by_initiator)
+            self._drop_client(previous_initiator, CloseCode.drop_by_initiator)
 
         # Send new-initiator message if any responder is present
         responder_ids = path.get_responder_ids()
@@ -614,7 +649,7 @@ class ServerProtocol(Protocol):
                         'Dropping responder {}, reason: {}', responder, message.reason)
                     responder.log.debug(
                         'Dropping (requested by initiator), reason: {}', message.reason)
-                    self._drop_client(responder, code=message.reason.value)
+                    self._drop_client(responder, message.reason.value)
             else:
                 error = "Expected relay message or 'drop-responder', got '{}'"
                 raise MessageFlowError(error.format(message.type))
@@ -770,44 +805,27 @@ class ServerProtocol(Protocol):
         if chosen != self.subprotocol.value:
             raise DowngradeError('Subprotocol downgrade detected')
 
-    def _drop_client(self, client, code=1000):
+    def _drop_client(self, client, code):
         """
         Mark the client as closed, schedule the closing procedure on
         the client's task queue, remove it from the path and return the
-        enqueue operation in form of a :class:`Task`.
+        drop operation in form of a :class:`asyncio.Task`.
 
-        .. note:: This should only be called by clients dropping
-                  another client.
+        .. important:: This should only be called by clients dropping
+                       another client.
 
         Arguments:
             - `client`: The client to be dropped.
             - `close`: The close code.
         """
-        # Enqueue the close procedure on our own task queue
-        # Note: The closing procedure would interrupt further send operations, thus we
-        #       MUST enqueue it as a coroutine and NOT wrap in a Future. That way, it
-        #       will not initiate the closing procedure before the client has executed
-        #       all other pending tasks.
-        close_coroutine = client.close(code=code)
-        enqueue_task = asyncio.ensure_future(
-            client.enqueue_task(close_coroutine, ignore_closed=True), loop=self._loop)
-
-        # Close the task queue to ensure no further tasks can be
-        # enqueued while the client is in the closing process.
-        client.close_task_queue()
+        # Drop the client
+        drop_task = client.drop(code)
 
         # Remove the client from the path
         path = self.path
         path.remove_client(client)
 
-        # TODO: Mark the client as dropped!
-        # TODO: Cancel the keepalive loop
-        #       (feasible if websockets doesn't panic on cancellation and closes the
-        #       connection)
-        # TODO: Cancel the receiving loop
-        #       (same note as for keepalive loop)
-
-        return enqueue_task
+        return drop_task
 
 
 class Paths:
