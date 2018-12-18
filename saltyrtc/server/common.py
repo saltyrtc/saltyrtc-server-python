@@ -21,6 +21,7 @@ __all__ = (
     'OverflowSentinel',
     'SubProtocol',
     'CloseCode',
+    'ClientState',
     'AddressType',
     'MessageType',
     'available_slot_range',
@@ -87,6 +88,37 @@ class CloseCode(enum.IntEnum):
     @property
     def is_valid_drop_reason(self):
         return self.value in _drop_reasons
+
+
+@enum.unique
+class ClientState(enum.IntEnum):
+    """
+    The state of a :class:`PathClient`.
+
+    .. important:: States MUST follow the exact order as enumerated
+                   below. A client cannot go back a state or skip
+                   a state in between. For example, a *dropped* client
+                   MUST have been formerly *authenticated*.
+    """
+    # The client is connected but is not allowed to communicate
+    # with another client.
+    restricted = 1
+
+    # The client has been authenticated and may communicate with
+    # other clients (of different type).
+    authenticated = 2
+
+    # The client has been dropped by another client.
+    dropped = 3
+
+    @property
+    def next(self):
+        """
+        Return the subsequent state.
+
+        Raises :exc:`ValueError` in case there is no subsequent state.
+        """
+        return ClientState(self + 1)
 
 
 @enum.unique

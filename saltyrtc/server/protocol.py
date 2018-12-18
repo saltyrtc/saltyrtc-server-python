@@ -15,6 +15,7 @@ from .common import (
     KEEP_ALIVE_TIMEOUT,
     KEY_LENGTH,
     AddressType,
+    ClientState,
     OverflowSentinel,
     available_slot_range,
     is_initiator_id,
@@ -94,6 +95,9 @@ class Path:
         Arguments:
             - `initiator`: A :class:`PathClient` instance.
 
+        Raises :exc:`ValueError` in case of a state violation on the
+        :class:`PathClient`.
+
         Return the previously set initiator or `None`.
         """
         previous_initiator = self._slots.get(AddressType.initiator)
@@ -102,8 +106,7 @@ class Path:
         # Update initiator's log name
         initiator.update_log_name(AddressType.initiator)
         # Authenticated, assign id
-        initiator.authenticated = True
-        initiator.id = AddressType.initiator
+        initiator.authenticate(AddressType.initiator)
         # Return previous initiator
         return previous_initiator
 
@@ -141,7 +144,10 @@ class Path:
         Arguments:
             - `client`: A :class:`PathClient` instance.
 
-        Raises :exc:`SlotsFullError` if no free slot exists on the path.
+        Raises:
+            - :exc:`SlotsFullError` if no free slot exists on the path.
+            - :exc:`ValueError` in case of a state violation on the
+              :class:`PathClient`.
 
         Return the assigned slot identifier.
         """
@@ -152,8 +158,7 @@ class Path:
                 # Update responder's log name
                 responder.update_log_name(id_)
                 # Authenticated, set and return assigned slot id
-                responder.authenticated = True
-                responder.id = id_
+                responder.authenticate(id_)
                 return id_
         raise SlotsFullError('No free slots on path')
 
@@ -172,8 +177,8 @@ class Path:
         Raises :exc:`KeyError` in case the client provided an
         invalid slot identifier.
         """
-        if not client.authenticated:
-            # Client has not been authenticated. Nothing to do.
+        if client.state == ClientState.restricted:
+            # Client has never been authenticated. Nothing to do.
             return
         id_ = client.id
 
@@ -245,6 +250,7 @@ class PathClientTasks:
 class PathClient:
     __slots__ = (
         '_loop',
+        '_state',
         '_connection',
         '_connection_closed_future',
         '_client_key',
@@ -262,7 +268,6 @@ class PathClient:
         '_keep_alive_interval',
         'log',
         'type',
-        'authenticated',
         'keep_alive_timeout',
         'keep_alive_pings',
         'tasks',
@@ -275,6 +280,7 @@ class PathClient:
             server_session_key=None, loop=None
     ):
         self._loop = asyncio.get_event_loop() if loop is None else loop
+        self._state = ClientState.restricted
         self._connection = connection
         connection_closed_future = asyncio.Future(loop=self._loop)
         self._connection_closed_future = connection_closed_future
@@ -291,7 +297,6 @@ class PathClient:
         self._keep_alive_interval = KEEP_ALIVE_INTERVAL_DEFAULT
         self.log = util.get_logger('path.{}.client.{:x}'.format(path_number, id(self)))
         self.type = None
-        self.authenticated = False
         self.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
         self.keep_alive_pings = 0
         self.tasks = None
@@ -313,6 +318,26 @@ class PathClient:
             type_, self._id, hex(id(self)))
 
     @property
+    def state(self):
+        """
+        Return the current :class:`ClientState` of the client.
+        """
+        return self._state
+
+    @state.setter
+    def state(self, state):
+        """
+        Update the :class:`ClientState` of the client.
+
+        Raises :exc:`ValueError` in case the state is not following
+        the strict state order as defined by :class`ClientState`.
+        """
+        if state != self.state.next:
+            raise ValueError('State {} cannot be updated to {}'.format(self.state, state))
+        self.log.debug('State {} -> {}', self._state.name, state.name)
+        self._state = state
+
+    @property
     def connection_closed_future(self):
         """
         Resolves once the connection has been closed.
@@ -327,14 +352,6 @@ class PathClient:
         Return the assigned id on the :class:`Path`.
         """
         return self._id
-
-    @id.setter
-    def id(self, id_):
-        """
-        Assign the id. Only :class:`Path` may set the id!
-        """
-        self._id = id_
-        self.log.debug('Assigned id: {}', id_)
 
     @property
     def keep_alive_interval(self):
@@ -495,6 +512,19 @@ class PathClient:
         self._box = libnacl.public.Box(self.server_key, public_key)
         self.log.debug('Client key updated')
 
+    def authenticate(self, id_):
+        """
+        Authenticate the client and assign it an id.
+
+        .. important:: Only :class:`Path` may call this!
+
+        Raises :exc:`ValueError` in case the previous state was not
+        :attr:`ClientState.restricted`.
+        """
+        self.state = ClientState.authenticated
+        self._id = id_
+        self.log.debug('Assigned id: {}', id_)
+
     def update_log_name(self, slot_id):
         """
         Update the logger's name by the assigned slot identifier.
@@ -563,7 +593,7 @@ class PathClient:
         Return `True` if :class:`RawMessage` instances are allowed and
         can be sent to the requested :class:`AddressType`.
         """
-        return self.authenticated and self.type != destination_type
+        return self.state == ClientState.authenticated and self.type != destination_type
 
     @asyncio.coroutine
     def enqueue_task(self, coroutine_or_task, ignore_closed=False):
@@ -732,6 +762,11 @@ class PathClient:
         """
         Disconnected
         """
+        # Safeguard
+        # Note: This should never happen since the receive queue will
+        #       be stopped when a client is being dropped.
+        assert self.state < ClientState.dropped
+
         # Receive data
         try:
             data = yield from self._connection.recv()
@@ -825,7 +860,8 @@ class PathClient:
         self.log.debug('Cancelling all running tasks but the task loop')
         self.tasks.cancel_all_but_task_loop()
 
-        # Dropped
+        # Mark as dropped
+        self.state = ClientState.dropped
         self.log.debug('Client dropped, close code: {}', code)
         return enqueue_task
 

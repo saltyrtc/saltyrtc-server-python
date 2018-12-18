@@ -14,6 +14,7 @@ from .common import (
     NONCE_LENGTH,
     RELAY_TIMEOUT,
     AddressType,
+    ClientState,
     CloseCode,
     MessageType,
     SubProtocol,
@@ -156,7 +157,7 @@ class ServerProtocol(Protocol):
         'handler_task'
     )
 
-    def __init__(self, server, subprotocol, loop=None):
+    def __init__(self, server, subprotocol, connection, ws_path, loop=None):
         self._log = util.get_logger('server.protocol')
         self._loop = asyncio.get_event_loop() if loop is None else loop
 
@@ -167,25 +168,6 @@ class ServerProtocol(Protocol):
         # Path and client instance
         self.path = None
         self.client = None
-
-        # Handler task that is set after 'connection_made' has been called
-        self.handler_task = None
-
-    def connection_made(self, connection, ws_path):
-        self.handler_task = asyncio.ensure_future(
-            self.handler(connection, ws_path), loop=self._loop)
-
-    @asyncio.coroutine
-    def close(self, code=1000):
-        # Note: The client will be set as early as possible without any yielding.
-        #       Thus, self.client is either set and can be closed or the connection
-        #       is already closing (see the corresponding lines in 'handler' and
-        #       'get_path_client')
-        if self.client is not None:
-            yield from self.client.close(code=code)
-
-    @asyncio.coroutine
-    def handler(self, connection, ws_path):
         self._log.debug('New connection on WS path {}', ws_path)
 
         # Get path and client instance as early as possible
@@ -193,21 +175,34 @@ class ServerProtocol(Protocol):
             path, client = self.get_path_client(connection, ws_path)
         except PathError as exc:
             self._log.notice('Closing due to path error: {}', exc)
-            yield from connection.close(code=CloseCode.protocol_error.value)
-            self._server.raise_event(
-                Event.disconnected, None, CloseCode.protocol_error.value)
-            return
-        client.log.info('Connection established')
-        client.log.debug('Worker started')
 
-        # Store path and client
-        self.path = path
-        self.client = client
-        self._server.register(self)
+            @asyncio.coroutine
+            def close_with_protocol_error():
+                yield from connection.close(code=CloseCode.protocol_error.value)
+                self._server.raise_event(
+                    Event.disconnected, None, CloseCode.protocol_error.value)
+            handler_coroutine = close_with_protocol_error()
+        else:
+            handler_coroutine = self.handler()
+            client.log.info('Connection established')
+            client.log.debug('Worker started')
+
+            # Store path and client
+            self.path = path
+            self.client = client
+            self._server.register(self)
+
+        # Start handler task
+        self.handler_task = asyncio.ensure_future(handler_coroutine, loop=self._loop)
+
+    @asyncio.coroutine
+    def handler(self):
+        client, path = self.client, self.path
 
         # Handle client until disconnected or an exception occurred
         hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
         close_future = asyncio.Future(loop=self._loop)
+
         try:
             yield from self.handle_client()
         except Disconnected as exc:
@@ -269,7 +264,7 @@ class ServerProtocol(Protocol):
             client.log.debug('Task queue closed')
 
         # Send disconnected message if client was authenticated
-        if client.authenticated:
+        if client.state == ClientState.authenticated:
             # Initiator: Send to all responders
             if client.type == AddressType.initiator:
                 responder_ids = path.get_responder_ids()
@@ -295,18 +290,22 @@ class ServerProtocol(Protocol):
                 except KeyError:
                     pass  # No initiator present
                 else:
-                    # Create message and add send coroutine to task queue of the initiator
+                    # Create message and add send coroutine to task queue of the
+                    # initiator
                     message = DisconnectedMessage.create(
                         AddressType.server, initiator.id, client.id)
                     initiator.log.debug('Enqueueing disconnected message')
                     try:
                         yield from initiator.enqueue_task(initiator.send(message))
                     except Exception as exc:
-                        description = 'Error while dispatching disconnected message to ' \
-                                      'initiator:'
+                        description = 'Error while dispatching disconnected message' \
+                                      'to initiator:'
                         client.log.exception(description, exc)
             else:
                 client.log.error('Invalid address type: {}', client.type)
+        else:
+            client.log.debug(
+                'Skipping disconnected message due to {} state', client.state.name)
 
         # Wait for the connection to be closed
         yield from close_future
@@ -315,6 +314,22 @@ class ServerProtocol(Protocol):
         # Remove protocol from server and stop
         self._server.unregister(self)
         client.log.debug('Worker stopped')
+
+    @asyncio.coroutine
+    def close(self, code):
+        """
+        Close the underlying connection and stop the protocol.
+
+        Arguments:
+            - `code`: The close code.
+        """
+        # Note: The client will be set as early as possible without any yielding.
+        #       Thus, self.client is either set and can be closed or the connection
+        #       is already closing (see the constructor and 'get_path_client')
+        if self.client is not None:
+            # We need to use 'drop' in order to prevent the server from sending a
+            # 'disconnect' message for each client.
+            yield from self.client.drop(code)
 
     def get_path_client(self, connection, ws_path):
         # Extract public key from path
@@ -524,7 +539,7 @@ class ServerProtocol(Protocol):
         # Authenticated
         previous_initiator = path.set_initiator(initiator)
         if previous_initiator is not None:
-            # Drop previous initiator using the task queue of the previous initiator
+            # Drop previous initiator using its task queue
             path.log.debug('Dropping previous initiator {}', previous_initiator)
             previous_initiator.log.debug('Dropping (another initiator connected)')
             self._drop_client(previous_initiator, CloseCode.drop_by_initiator)
@@ -910,8 +925,8 @@ class Server(asyncio.AbstractServer):
             yield from connection.close(code=CloseCode.subprotocol_error.value)
             self.raise_event(Event.disconnected, None, CloseCode.subprotocol_error.value)
         else:
-            protocol = self._protocol_class(self, subprotocol, loop=self._loop)
-            protocol.connection_made(connection, ws_path)
+            protocol = self._protocol_class(
+                self, subprotocol, connection, ws_path, loop=self._loop)
             yield from protocol.handler_task
 
     def register(self, protocol):
@@ -952,7 +967,7 @@ class Server(asyncio.AbstractServer):
     @asyncio.coroutine
     def _wait_connections_closed(self):
         """
-        Wait until all connections to the server have been closed.
+        Wait until all connections of the server have been closed.
         """
         if len(self.protocols) > 0:
             tasks = [protocol.handler_task for protocol in self.protocols]
@@ -963,11 +978,10 @@ class Server(asyncio.AbstractServer):
         # Schedule closing all protocols
         self._log.debug('Closing protocols')
         if len(self.protocols) > 0:
-            tasks = [protocol.close(code=CloseCode.going_away.value)
+            tasks = [protocol.close(CloseCode.going_away.value)
                      for protocol in self.protocols]
 
-            # Wait until all protocols are closed (we need the server to be active for the
-            # WebSocket close protocol)
+            # Wait until all connections have been scheduled to be closed
             yield from asyncio.wait(tasks, loop=self._loop, timeout=timeout)
 
         # Now we can close the server

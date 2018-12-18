@@ -11,6 +11,7 @@ import websockets
 from saltyrtc.server import ServerProtocol
 from saltyrtc.server.common import (
     SIGNED_KEYS_CIPHERTEXT_LENGTH,
+    ClientState,
     CloseCode,
 )
 
@@ -19,9 +20,15 @@ class _FakePathClient:
     def __init__(self):
         self.connection_closed_future = asyncio.Future()
         self.connection_closed_future.set_result(None)
+        self.state = ClientState.restricted
+        self.id = None
 
     def update_log_name(self, id_):
         pass
+
+    def authenticate(self, id_):
+        self.id = id_
+        self.state = ClientState.authenticated
 
 
 @pytest.mark.usefixtures('evaluate_log')
@@ -931,7 +938,7 @@ class TestProtocol:
             'reason': CloseCode.internal_error.value,
         })
 
-        # Responder: Expect reason 'handover'
+        # Responder: Expect reason 'internal error'
         yield from connection_closed_future()
         assert not responder.ws_client.open
         assert responder.ws_client.close_code == CloseCode.internal_error
@@ -1705,6 +1712,8 @@ class TestProtocol:
         and check that the correct error code (Path Full) is being
         returned.
         """
+        assert len(server.protocols) == 0
+
         tasks = [client_factory(responder_handshake=True, timeout=20.0)
                  for _ in range(0x02, 0x100)]
         clients = yield from asyncio.gather(*tasks, loop=event_loop)
@@ -1795,8 +1804,8 @@ class TestProtocol:
         """
         # Client handshakes
         initiator, i = yield from client_factory(initiator_handshake=True)
-        responder1, r = yield from client_factory(responder_handshake=True)
-        responder2, r = yield from client_factory(responder_handshake=True)
+        responder1, _ = yield from client_factory(responder_handshake=True)
+        responder2, _ = yield from client_factory(responder_handshake=True)
 
         # Disconnect initiator
         yield from initiator.close()
@@ -1827,5 +1836,35 @@ class TestProtocol:
         msg, *_ = yield from initiator.recv()
         assert msg == {'type': 'disconnected', 'id': r['id']}
 
+        yield from initiator.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    def test_drop_responder_no_disconnect(
+            self, pack_nonce, server, client_factory
+    ):
+        """
+        Ensure that dropping a responder explicitly does not trigger a
+        'disconnected' message being sent to the initiator.
+        """
+        # Client handshakes
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        responder, r = yield from client_factory(responder_handshake=True)
+
+        # Ignore 'new-responder' message
+        message, *_ = yield from initiator.recv()
+        assert message['type'] == 'new-responder'
+
+        # Drop responder
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': r['id'],
+        })
+
+        # Ensure no further message is being received
+        with pytest.raises(asyncio.TimeoutError):
+            yield from initiator.recv(timeout=1.0)
+
+        # Bye
         yield from initiator.close()
         yield from server.wait_connections_closed()

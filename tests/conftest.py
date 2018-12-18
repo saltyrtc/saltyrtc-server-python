@@ -413,6 +413,7 @@ class Client:
         self.session_key = None
         self.box = None
 
+    @asyncio.coroutine
     def send(self, nonce, message, box=_DefaultBox, timeout=None, pack=True):
         if timeout is None:
             timeout = self.timeout
@@ -421,6 +422,7 @@ class Client:
             box=self.box if box == _DefaultBox else box, timeout=timeout, pack=pack
         ))
 
+    @asyncio.coroutine
     def recv(self, box=_DefaultBox, timeout=None):
         if timeout is None:
             timeout = self.timeout
