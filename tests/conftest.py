@@ -269,8 +269,15 @@ class TestServer(Server):
     @asyncio.coroutine
     def wait_connections_closed(self):
         self._log.debug('#protocols remaining: {}', len(self.protocols))
+
+        @asyncio.coroutine
+        def _wait_connections_closed():
+            if len(self.protocols) > 0:
+                tasks = [protocol.handler_task for protocol in self.protocols]
+                yield from asyncio.gather(*tasks, loop=self._loop)
+
         yield from asyncio.wait_for(
-            self._wait_connections_closed(), timeout=self.timeout, loop=self._loop)
+            _wait_connections_closed(), timeout=self.timeout, loop=self._loop)
 
     @asyncio.coroutine
     def wait_most_recent_connection_closed(self, connection_closed_future=None):

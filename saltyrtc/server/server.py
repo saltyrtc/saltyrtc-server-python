@@ -329,7 +329,7 @@ class ServerProtocol(Protocol):
         if self.client is not None:
             # We need to use 'drop' in order to prevent the server from sending a
             # 'disconnect' message for each client.
-            yield from self.client.drop(code)
+            yield from self._drop_client(self.client, code)
 
     def get_path_client(self, connection, ws_path):
         # Extract public key from path
@@ -827,7 +827,7 @@ class ServerProtocol(Protocol):
         drop operation in form of a :class:`asyncio.Task`.
 
         .. important:: This should only be called by clients dropping
-                       another client.
+                       another client or when the server is closing.
 
         Arguments:
             - `client`: The client to be dropped.
@@ -894,8 +894,9 @@ class Server(asyncio.AbstractServer):
         # Store paths
         self.paths = paths
 
-        # Store server protocols
+        # Store server protocols and closing task
         self.protocols = set()
+        self._close_task = None
 
         # Event Registry
         self._events = EventRegistry()
@@ -911,6 +912,11 @@ class Server(asyncio.AbstractServer):
 
     @asyncio.coroutine
     def handler(self, connection, ws_path):
+        # Closing? Drop immediately
+        if self._close_task is not None:
+            yield from connection.close(CloseCode.going_away.value)
+            return
+
         # Convert sub-protocol
         try:
             subprotocol = SubProtocol(connection.subprotocol)
@@ -954,36 +960,36 @@ class Server(asyncio.AbstractServer):
         """
         Close open connections and the server.
         """
-        asyncio.ensure_future(self._close_after_all_protocols_closed(), loop=self._loop)
+        if self._close_task is None:
+            self._close_task = asyncio.ensure_future(
+                self._close_after_all_protocols_closed(), loop=self._loop)
 
     @asyncio.coroutine
     def wait_closed(self):
         """
-        Wait until all connections and the server itself is closed.
+        Wait until all connections and the server itself has been
+        closed.
         """
-        yield from self._wait_connections_closed()
         yield from self.server.wait_closed()
-
-    @asyncio.coroutine
-    def _wait_connections_closed(self):
-        """
-        Wait until all connections of the server have been closed.
-        """
-        if len(self.protocols) > 0:
-            tasks = [protocol.handler_task for protocol in self.protocols]
-            yield from asyncio.gather(*tasks, loop=self._loop)
 
     @asyncio.coroutine
     def _close_after_all_protocols_closed(self, timeout=None):
         # Schedule closing all protocols
-        self._log.debug('Closing protocols')
+        self._log.info('Closing protocols')
         if len(self.protocols) > 0:
-            tasks = [protocol.close(CloseCode.going_away.value)
-                     for protocol in self.protocols]
+            @asyncio.coroutine
+            def _close_and_wait():
+                # Wait until all connections have been scheduled to be closed
+                tasks = [protocol.close(CloseCode.going_away.value)
+                         for protocol in self.protocols]
+                yield from asyncio.gather(*tasks, loop=self._loop)
 
-            # Wait until all connections have been scheduled to be closed
-            yield from asyncio.wait(tasks, loop=self._loop, timeout=timeout)
+                # Wait until all protocols have returned
+                tasks = [protocol.handler_task for protocol in self.protocols]
+                yield from asyncio.gather(*tasks, loop=self._loop)
+
+            yield from asyncio.wait_for(_close_and_wait(), timeout, loop=self._loop)
 
         # Now we can close the server
-        self._log.debug('Closing server')
+        self._log.info('Closing server')
         self.server.close()

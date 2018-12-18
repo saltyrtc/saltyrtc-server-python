@@ -832,8 +832,8 @@ class PathClient:
         Return the enqueue operation in form of a
         :class:`asyncio.Task`.
 
-        .. important:: This should only be called by other client's
-                       protocols dropping this client.
+        .. important:: This should only be called by clients dropping
+                       another client or when the server is closing.
 
         Arguments:
             - `close`: The close code.
