@@ -1,6 +1,19 @@
 Changelog
 *********
 
+`3.0.0`_ (2018-12-18)
+---------------------
+
+- Use the `timeout` close code (`3008`) when a client does not respond to a
+  *ping* message (major)
+- Add support for Python 3.7
+- Various task queue improvements resulting in more robust client handling
+- Fix to not send a 'disconnected' message when a responder has been dropped
+  via 'drop-responder'
+- Fix to prevent the initiator from relaying messages to a responder client
+  which is in the process of being dropped
+- Fix to not accept new incoming connections when closing the server
+
 `2.0.1`_ (2018-08-20)
 ---------------------
 
@@ -10,8 +23,8 @@ Changelog
 `2.0.0`_ (2018-07-16)
 ---------------------
 
-**Important:** Make sure you're using Python >= 3.4.4 and that your clients support the
-`disconnected` message before upgrading.
+**Important:** Make sure you're using Python >= 3.4.4 and that your clients
+support the `disconnected` message before upgrading.
 
 - Add support for the `disconnected` message (major)
 - Fix potential invalid order of messages when dispatching a `send-error`
@@ -37,6 +50,7 @@ Changelog
 
 .. _SaltyRTC 1.0 Protocol: https://github.com/saltyrtc/saltyrtc-meta/blob/protocol-1.0/Protocol.md
 
+.. _3.0.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v2.0.1...v3.0.0
 .. _2.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v2.0.0...v2.0.1
 .. _2.0.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v1.0.2...v2.0.0
 .. _1.0.2: https://github.com/saltyrtc/saltyrtc-server-python/compare/v1.0.1...v1.0.2
