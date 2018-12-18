@@ -3,28 +3,35 @@ The tests provided in this module make sure that the server is
 compliant to the SaltyRTC protocol.
 """
 import asyncio
-import collections
 
 import libnacl.public
 import pytest
 import websockets
 
+from saltyrtc.server import ServerProtocol
 from saltyrtc.server.common import (
     SIGNED_KEYS_CIPHERTEXT_LENGTH,
+    ClientState,
     CloseCode,
 )
-from saltyrtc.server.events import Event
 
 
 class _FakePathClient:
     def __init__(self):
-        self.connection_closed = asyncio.Future()
-        self.connection_closed.set_result(None)
+        self.connection_closed_future = asyncio.Future()
+        self.connection_closed_future.set_result(None)
+        self.state = ClientState.restricted
+        self.id = None
 
     def update_log_name(self, id_):
         pass
 
+    def authenticate(self, id_):
+        self.id = id_
+        self.state = ClientState.authenticated
 
+
+@pytest.mark.usefixtures('evaluate_log')
 class TestProtocol:
     @pytest.mark.asyncio
     def test_no_subprotocols(self, server, ws_client_factory):
@@ -532,7 +539,7 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_keep_alive_pings_initiator(self, server, client_factory):
+    def test_keep_alive_pings_initiator(self, sleep, server, client_factory):
         """
         Check that the server sends ping messages in the requested
         interval.
@@ -544,7 +551,7 @@ class TestProtocol:
         )
 
         # Wait for two pings (including pongs)
-        yield from asyncio.sleep(2.1)
+        yield from sleep(2.1)
 
         # Check ping counter
         assert len(server.protocols) == 1
@@ -556,7 +563,7 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_keep_alive_pings_responder(self, server, client_factory):
+    def test_keep_alive_pings_responder(self, sleep, server, client_factory):
         """
         Check that the server sends ping messages in the requested
         interval.
@@ -568,7 +575,7 @@ class TestProtocol:
         )
 
         # Wait for two pings (including pongs)
-        yield from asyncio.sleep(1.1)
+        yield from sleep(1.1)
 
         # Check ping counter
         assert len(server.protocols) == 1
@@ -580,7 +587,7 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_keep_alive_ignore_invalid(self, server, client_factory):
+    def test_keep_alive_ignore_invalid(self, sleep, server, client_factory):
         """
         Check that the server ignores invalid keep alive intervals.
         """
@@ -591,7 +598,7 @@ class TestProtocol:
         )
 
         # Wait for a second
-        yield from asyncio.sleep(1.1)
+        yield from sleep(1.1)
 
         # Check ping counter
         assert len(server.protocols) == 1
@@ -607,9 +614,8 @@ class TestProtocol:
             self, ws_client_factory, server, client_factory
     ):
         """
-        Monkey-patch the the server's keep alive interval and timeout
-        and check that the server sends us a ping and waits for a
-        pong.
+        Monkey-patch the server's keep alive interval and timeout and
+        check that the server sends a ping and waits for a pong.
         """
         # Create client and patch it to not answer pings
         ws_client = yield from ws_client_factory()
@@ -622,13 +628,12 @@ class TestProtocol:
         protocol.client.keep_alive_timeout = 0.001
 
         # Initiator handshake
-        client, i = yield from client_factory(
-            ws_client=ws_client, initiator_handshake=True)
+        yield from client_factory(ws_client=ws_client, initiator_handshake=True)
 
         # Expect protocol error
         yield from server.wait_connections_closed()
-        assert not client.ws_client.open
-        assert client.ws_client.close_code == CloseCode.protocol_error
+        assert not ws_client.open
+        assert ws_client.close_code == CloseCode.timeout
 
     @pytest.mark.asyncio
     def test_initiator_invalid_source_after_handshake(
@@ -933,7 +938,7 @@ class TestProtocol:
             'reason': CloseCode.internal_error.value,
         })
 
-        # Responder: Expect reason 'handover'
+        # Responder: Expect reason 'internal error'
         yield from connection_closed_future()
         assert not responder.ws_client.open
         assert responder.ws_client.close_code == CloseCode.internal_error
@@ -1204,8 +1209,220 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
+    def test_relay_send_and_close(
+            self, pack_nonce, cookie_factory, server, client_factory
+    ):
+        """
+        Ensure a relay messages are being dispatched in case the client
+        closes after having sent a couple of relay messages.
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        # new-responder
+        yield from initiator.recv()
+
+        # Send 3 relay messages: initiator --> responder
+        expected_data = b'\xfe' * 2**16  # 64 KiB
+        for _ in range(3):
+            nonce = pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn'])
+            yield from initiator.send(nonce, expected_data, box=None)
+            i['rccsn'] += 1
+
+        # Close initiator
+        yield from initiator.close()
+
+        # Receive 3 relay messages: initiator --> responder
+        for _ in range(3):
+            actual_data, *_ = yield from responder.recv(box=None)
+            assert actual_data == expected_data
+
+        # Bye
+        yield from responder.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    def test_relay_send_before_close_responder(
+            self, pack_nonce, cookie_factory, server, client_factory
+    ):
+        """
+        Ensure relay messages are being dispatched in case the receiver
+        is being closed (drop responder) after the sender has sent the
+        relay messages.
+        """
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        responder_closed_future = server.wait_connection_closed_marker()
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        # new-responder
+        yield from initiator.recv()
+
+        # Send 6 relay messages: initiator --> responder
+        expected_data = b'\xfe' * 2**15  # 32 KiB
+        for _ in range(6):
+            nonce = pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn'])
+            yield from initiator.send(nonce, expected_data, box=None)
+            i['rccsn'] += 1
+
+        # Drop responder
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': r['id'],
+        })
+        i['ccsn'] += 1
+
+        # Receive 6 relay messages: initiator --> responder
+        for _ in range(6):
+            actual_data, *_ = yield from responder.recv(box=None)
+            assert actual_data == expected_data
+
+        # Responder: Expect drop by initiator
+        yield from responder_closed_future()
+        assert not responder.ws_client.open
+        assert responder.ws_client.close_code == CloseCode.drop_by_initiator
+
+        # Bye
+        yield from initiator.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    def test_relay_send_before_close_initiator(
+            self, pack_nonce, cookie_factory, server, client_factory
+    ):
+        """
+        Ensure relay messages are being dispatched in case the receiver
+        is being closed (drop initiator) after the sender has sent the
+        relay messages.
+        """
+        # Initiator handshake
+        first_initiator, i = yield from client_factory(initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        # new-responder
+        yield from first_initiator.recv()
+
+        # Send 6 relay messages: initiator <-- responder
+        expected_data = b'\xfe' * 2**15  # 32 KiB
+        for _ in range(6):
+            nonce = pack_nonce(r['icck'], r['id'], i['id'], r['iccsn'])
+            yield from responder.send(nonce, expected_data, box=None)
+            r['iccsn'] += 1
+
+        # Second initiator handshake
+        second_initiator, i = yield from client_factory(initiator_handshake=True)
+        # Responder is connected
+        assert i['responders'] == [r['id']]
+
+        # new-initiator
+        yield from responder.recv()
+
+        # Receive 6 relay messages: initiator <-- responder
+        for _ in range(6):
+            actual_data, *_ = yield from first_initiator.recv(box=None)
+            assert actual_data == expected_data
+
+        # First initiator: Expect drop by initiator
+        yield from connection_closed_future()
+        assert not first_initiator.ws_client.open
+        assert first_initiator.ws_client.close_code == CloseCode.drop_by_initiator
+
+        # Bye
+        yield from responder.close()
+        yield from second_initiator.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    def test_relay_send_after_close(
+            self, mocker, event_loop, pack_nonce, cookie_factory, server, client_factory,
+            initiator_key
+    ):
+        """
+        When the responder is being dropped by the initiator, the
+        responder's task loop may await a long-blocking task before it
+        is being closed. Ensure that the initiator is not able to
+        enqueue further messages to the responder at that point.
+        """
+        # Mock the protocol to release the 'done_future' once the closing procedure has
+        # been initiated
+        class _MockProtocol(ServerProtocol):
+            def _drop_client(self, *args, **kwargs):
+                result = super()._drop_client(*args, **kwargs)
+                done_future.set_result(None)
+                return result
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # Initiator handshake
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Responder handshake
+        responder, r = yield from client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        # new-responder
+        yield from initiator.recv()
+
+        # Get responder's PathClient instance
+        path = server.paths.get(initiator_key.pk)
+        path_client = path.get_responder(r['id'])
+        done_future = asyncio.Future(loop=event_loop)
+
+        # Create long-blocking task
+        @asyncio.coroutine
+        def blocking_task():
+            yield from done_future
+
+        # Enqueue long-blocking task
+        yield from path_client.enqueue_task(blocking_task())
+
+        # Drop responder
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': r['id'],
+        })
+        i['ccsn'] += 1
+
+        # Send relay message: initiator --> responder
+        nonce = pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn'])
+        yield from initiator.send(nonce, b'\xfe' * 2**15, box=None)
+        i['rccsn'] += 1
+
+        # Responder: Expect drop by initiator
+        with pytest.raises(websockets.ConnectionClosed):
+            yield from responder.recv(box=None)
+        assert responder.ws_client.close_code == CloseCode.drop_by_initiator
+
+        # Bye
+        yield from initiator.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
     def test_relay_receiver_connection_lost(
-            self, event_loop, ws_client_factory, initiator_key, pack_nonce,
+            self, mocker, event_loop, ws_client_factory, initiator_key, pack_nonce,
             cookie_factory, server, client_factory
     ):
         """
@@ -1242,12 +1459,10 @@ class TestProtocol:
         path_client = path.get_responder(0x02)
 
         # Mock responder instance: Block sending and let the next ping time out
-        forever_blocking_future = asyncio.Future(loop=event_loop)
-
         @asyncio.coroutine
         def _mock_send(*_):
             path_client.log.notice('... NOT')
-            yield from forever_blocking_future
+            yield from asyncio.Future(loop=event_loop)
 
         @asyncio.coroutine
         def _mock_ping(*_):
@@ -1255,11 +1470,11 @@ class TestProtocol:
             # Dunno why asyncio treats this as a non-coroutine but it does,
             # so this workaround is required
             future = asyncio.Future(loop=event_loop)
-            future.set_result(forever_blocking_future)
+            future.set_result(asyncio.Future(loop=event_loop))
             return future
 
-        path_client._connection.send = _mock_send
-        path_client._connection.ping = _mock_ping
+        mocker.patch.object(path_client._connection, 'send', _mock_send)
+        mocker.patch.object(path_client._connection, 'ping', _mock_ping)
 
         # Send relay message: initiator --> responder (mocked)
         nonce = pack_nonce(i['rcck'], i['id'], 0x02, i['rccsn'])
@@ -1269,7 +1484,7 @@ class TestProtocol:
         }, box=None)
         i['rccsn'] += 1
 
-        # Receive send-error message: initiator <-- initiator
+        # Receive send-error message: initiator <-- initiator (mocked)
         message, _, sck, s, d, scsn = yield from initiator.recv(timeout=10.0)
         assert s == 0x00
         assert d == i['id']
@@ -1497,6 +1712,8 @@ class TestProtocol:
         and check that the correct error code (Path Full) is being
         returned.
         """
+        assert len(server.protocols) == 0
+
         tasks = [client_factory(responder_handshake=True, timeout=20.0)
                  for _ in range(0x02, 0x100)]
         clients = yield from asyncio.gather(*tasks, loop=event_loop)
@@ -1513,59 +1730,6 @@ class TestProtocol:
         tasks = [client.close() for client, _ in clients]
         yield from asyncio.gather(*tasks, loop=event_loop)
         yield from server.wait_connections_closed()
-
-    @pytest.mark.asyncio
-    def test_event_emitted(
-            self, initiator_key, responder_key, cookie_factory, server, client_factory
-    ):
-        # Dictionary where fired events are added
-        events_fired = collections.defaultdict(list)
-
-        @asyncio.coroutine
-        def callback(event: Event, *data):
-            events_fired[event].append(data)
-
-        # Register event callback for all events
-        for event in Event:
-            server.register_event_callback(event, callback)
-
-        # Initiator handshake
-        initiator, i = yield from client_factory(initiator_handshake=True)
-        i['rccsn'] = 456987
-        i['rcck'] = cookie_factory()
-        i['rbox'] = libnacl.public.Box(sk=initiator_key, pk=responder_key.pk)
-
-        # Responder handshake
-        responder, r = yield from client_factory(responder_handshake=True)
-        r['iccsn'] = 2 ** 24
-        r['icck'] = cookie_factory()
-        r['ibox'] = libnacl.public.Box(sk=responder_key, pk=initiator_key.pk)
-
-        yield from initiator.recv()
-        assert set(events_fired.keys()) == {
-            Event.initiator_connected,
-            Event.responder_connected,
-        }
-        assert events_fired[Event.initiator_connected] == [
-            (initiator_key.hex_pk().decode('ascii'),)
-        ]
-        assert events_fired[Event.responder_connected] == [
-            (initiator_key.hex_pk().decode('ascii'),)
-        ]
-
-        yield from initiator.close()
-        yield from responder.close()
-        yield from server.wait_connections_closed()
-
-        assert set(events_fired.keys()) == {
-            Event.initiator_connected,
-            Event.responder_connected,
-            Event.disconnected,
-        }
-        assert events_fired[Event.disconnected] == [
-            (initiator_key.hex_pk().decode('ascii'), 1000),
-            (initiator_key.hex_pk().decode('ascii'), 1000),
-        ]
 
     @pytest.mark.asyncio
     def test_explicit_permanent_key_unavailable(
@@ -1632,18 +1796,21 @@ class TestProtocol:
             yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_initiator_disconnected(
-            self, server, client_factory,
-    ):
+    def test_initiator_disconnected(self, server, client_factory):
+        """
+        Check that the server sends a 'disconnected' message to all
+        responders of the associated path when the initiator
+        disconnects.
+        """
         # Client handshakes
         initiator, i = yield from client_factory(initiator_handshake=True)
-        responder1, r = yield from client_factory(responder_handshake=True)
-        responder2, r = yield from client_factory(responder_handshake=True)
+        responder1, _ = yield from client_factory(responder_handshake=True)
+        responder2, _ = yield from client_factory(responder_handshake=True)
 
         # Disconnect initiator
         yield from initiator.close()
 
-        # Expect 'disconnected' msgs sent to all responders
+        # Expect 'disconnected' messages sent to all responders
         msg1, *_ = yield from responder1.recv()
         msg2, *_ = yield from responder2.recv()
         assert msg1 == msg2 == {'type': 'disconnected', 'id': i['id']}
@@ -1653,9 +1820,11 @@ class TestProtocol:
         yield from server.wait_connections_closed()
 
     @pytest.mark.asyncio
-    def test_responder_disconnected(
-            self, server, client_factory,
-    ):
+    def test_responder_disconnected(self, server, client_factory):
+        """
+        Check that the server sends 'disconnected' message to the
+        initiator when a responder disconnects.
+        """
         # Client handshakes
         responder, r = yield from client_factory(responder_handshake=True)
         initiator, i = yield from client_factory(initiator_handshake=True)
@@ -1663,9 +1832,39 @@ class TestProtocol:
         # Disconnect initiator
         yield from responder.close()
 
-        # Expect 'disconnected' msg sent to initiator
+        # Expect 'disconnected' message sent to initiator
         msg, *_ = yield from initiator.recv()
         assert msg == {'type': 'disconnected', 'id': r['id']}
 
+        yield from initiator.close()
+        yield from server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    def test_drop_responder_no_disconnect(
+            self, pack_nonce, server, client_factory
+    ):
+        """
+        Ensure that dropping a responder explicitly does not trigger a
+        'disconnected' message being sent to the initiator.
+        """
+        # Client handshakes
+        initiator, i = yield from client_factory(initiator_handshake=True)
+        responder, r = yield from client_factory(responder_handshake=True)
+
+        # Ignore 'new-responder' message
+        message, *_ = yield from initiator.recv()
+        assert message['type'] == 'new-responder'
+
+        # Drop responder
+        yield from initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
+            'type': 'drop-responder',
+            'id': r['id'],
+        })
+
+        # Ensure no further message is being received
+        with pytest.raises(asyncio.TimeoutError):
+            yield from initiator.recv(timeout=1.0)
+
+        # Bye
         yield from initiator.close()
         yield from server.wait_connections_closed()

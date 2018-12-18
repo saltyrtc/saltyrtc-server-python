@@ -61,9 +61,11 @@ def pytest_namespace():
         'have_uvloop': pytest.mark.skipif(not have_uvloop, reason='requires uvloop'),
         'no_uvloop': pytest.mark.skipif(
             have_uvloop, reason='requires uvloop to be not installed'),
-        'ip': '127.0.0.1',
+        'host': 'localhost',
         'port': 8766,
         'cli_path': os.path.join(sys.exec_prefix, 'bin', 'saltyrtc-server'),
+        'key': os.path.normpath(
+            os.path.join(os.path.abspath(__file__), os.pardir, 'key.pem')),
         'cert': os.path.normpath(
             os.path.join(os.path.abspath(__file__), os.pardir, 'cert.pem')),
         'dh_params': os.path.normpath(
@@ -101,7 +103,7 @@ def unused_tcp_port():
     Find an unused localhost TCP port from 1024-65535 and return it.
     """
     with closing(socket.socket()) as sock:
-        sock.bind((pytest.saltyrtc.ip, 0))
+        sock.bind((pytest.saltyrtc.host, 0))
         return sock.getsockname()[1]
 
 
@@ -150,17 +152,6 @@ def _get_timeout(timeout=None, request=None, config=None):
         return max(timeout, float(option_timeout))
     else:
         return timeout
-
-
-def _sleep(**kwargs):
-    """
-    Sleep *timeout* seconds.
-    """
-    @asyncio.coroutine
-    def __sleep(timeout=None):
-        yield from asyncio.sleep(_get_timeout(timeout=timeout, **kwargs))
-
-    return __sleep
 
 
 @pytest.fixture(scope='module')
@@ -222,11 +213,16 @@ def responder_key():
 
 
 @pytest.fixture(scope='module')
-def sleep(request):
+def sleep(event_loop):
     """
     Sleep *timeout* seconds.
     """
-    return _sleep(request=request)
+    @asyncio.coroutine
+    def _sleep(delay, **kwargs):
+        kwargs.setdefault('loop', event_loop)
+        yield from asyncio.sleep(delay, **kwargs)
+
+    return _sleep
 
 
 @pytest.fixture(scope='module')
@@ -267,26 +263,33 @@ class TestServer(Server):
     def raise_event(self, event: Event, *data):
         super().raise_event(event, *data)
         if event == Event.disconnected:
-            self._most_recent_connection_closed_future.set_result(None)
+            self._most_recent_connection_closed_future.set_result(data)
             self._most_recent_connection_closed_future = asyncio.Future(loop=self._loop)
 
     @asyncio.coroutine
     def wait_connections_closed(self):
         self._log.debug('#protocols remaining: {}', len(self.protocols))
+
+        @asyncio.coroutine
+        def _wait_connections_closed():
+            if len(self.protocols) > 0:
+                tasks = [protocol.handler_task for protocol in self.protocols]
+                yield from asyncio.gather(*tasks, loop=self._loop)
+
         yield from asyncio.wait_for(
-            self._wait_connections_closed(), timeout=self.timeout, loop=self._loop)
+            _wait_connections_closed(), timeout=self.timeout, loop=self._loop)
 
     @asyncio.coroutine
     def wait_most_recent_connection_closed(self, connection_closed_future=None):
         # If there is no future, we simply wait for the 'disconnected' event
         if connection_closed_future is None:
             connection_closed_future = self._most_recent_connection_closed_future
-        yield from asyncio.wait_for(
-            connection_closed_future, timeout=self.timeout, loop=self._loop)
+        return (yield from asyncio.wait_for(
+            connection_closed_future, timeout=self.timeout, loop=self._loop))
 
     def wait_connection_closed_marker(self):
         protocol = self.protocols[-1]
-        connection_closed_future = protocol.client.connection_closed
+        connection_closed_future = protocol.client.connection_closed_future
         return functools.partial(
             self.wait_most_recent_connection_closed,
             connection_closed_future=connection_closed_future)
@@ -301,13 +304,13 @@ def server_factory(request, event_loop, server_permanent_keys):
     os.environ['PYTHONASYNCIODEBUG'] = '1'
 
     # Enable logging
-    util.enable_logging(level=logbook.TRACE, redirect_loggers={
+    util.enable_logging(level=logbook.DEBUG, redirect_loggers={
         'asyncio': logbook.WARNING,
         'websockets': logbook.WARNING,
     })
 
-    # Push handler
-    logging_handler = logbook.StderrHandler()
+    # Push handlers
+    logging_handler = logbook.StderrHandler(bubble=True)
     logging_handler.push_application()
 
     _server_instances = []
@@ -320,9 +323,10 @@ def server_factory(request, event_loop, server_permanent_keys):
         port = unused_tcp_port()
         coroutine = serve(
             util.create_ssl_context(
-                pytest.saltyrtc.cert, dh_params_file=pytest.saltyrtc.dh_params),
+                pytest.saltyrtc.cert, keyfile=pytest.saltyrtc.key,
+                dh_params_file=pytest.saltyrtc.dh_params),
             permanent_keys,
-            host=pytest.saltyrtc.ip,
+            host=pytest.saltyrtc.host,
             port=port,
             loop=event_loop,
             server_class=TestServer,
@@ -330,7 +334,7 @@ def server_factory(request, event_loop, server_permanent_keys):
         server_ = event_loop.run_until_complete(coroutine)
         # Inject timeout and address (little bit of a hack but meh...)
         server_.timeout = _get_timeout(request=request)
-        server_.address = (pytest.saltyrtc.ip, port)
+        server_.address = (pytest.saltyrtc.host, port)
 
         _server_instances.append(server_)
 
@@ -363,6 +367,46 @@ def server_no_key(server_factory):
     return server_factory(permanent_keys=[])
 
 
+@pytest.fixture
+def log_handler(request):
+    """
+    Return a :class:`logbook.TestHandler` instance where log records
+    can be accessed.
+    """
+    log_handler = logbook.TestHandler(level=logbook.DEBUG, bubble=True)
+    log_handler._ignore_filter = lambda _: False
+    log_handler._error_level = logbook.ERROR
+    log_handler.push_application()
+
+    def fin():
+        log_handler.pop_application()
+    request.addfinalizer(fin)
+
+    return log_handler
+
+
+@pytest.fixture
+def evaluate_log(log_handler):
+    """
+    Ensure that no test is logging (handled) errors.
+    """
+    yield
+    errors = [record for record in log_handler.records
+              if (record.level >= log_handler._error_level
+                  and not log_handler._ignore_filter(record))]
+    assert(len(errors) == 0)
+
+
+@pytest.fixture
+def log_ignore_filter(log_handler):
+    """
+    Ignore specific log entries with a filter callback.
+    """
+    def _set_filter(callback):
+        log_handler._ignore_filter = callback
+    return _set_filter
+
+
 class _DefaultBox:
     pass
 
@@ -376,6 +420,7 @@ class Client:
         self.session_key = None
         self.box = None
 
+    @asyncio.coroutine
     def send(self, nonce, message, box=_DefaultBox, timeout=None, pack=True):
         if timeout is None:
             timeout = self.timeout
@@ -384,6 +429,7 @@ class Client:
             box=self.box if box == _DefaultBox else box, timeout=timeout, pack=pack
         ))
 
+    @asyncio.coroutine
     def recv(self, box=_DefaultBox, timeout=None):
         if timeout is None:
             timeout = self.timeout
@@ -397,7 +443,17 @@ class Client:
 
 
 @pytest.fixture(scope='module')
-def ws_client_factory(initiator_key, event_loop, server):
+def client_kwargs(event_loop):
+    return {
+        'compression': None,
+        'subprotocols': pytest.saltyrtc.subprotocols,
+        'ping_interval': None,
+        'loop': event_loop,
+    }
+
+
+@pytest.fixture(scope='module')
+def ws_client_factory(initiator_key, event_loop, client_kwargs, server):
     """
     Return a simplified :class:`websockets.client.connect` wrapper
     where no parameters are required.
@@ -415,20 +471,16 @@ def ws_client_factory(initiator_key, event_loop, server):
             server = server_
         if path is None:
             path = '{}/{}'.format(url(*server.address), key_path(initiator_key))
-        _kwargs = {
-            'subprotocols': pytest.saltyrtc.subprotocols,
-            'ssl': ssl_context,
-            'loop': event_loop,
-        }
+        _kwargs = client_kwargs.copy()
         _kwargs.update(kwargs)
-        return websockets.connect(path, **_kwargs)
+        return websockets.connect(path, ssl=ssl_context, **_kwargs)
     return _ws_client_factory
 
 
 @pytest.fixture(scope='module')
 def client_factory(
-        request, initiator_key, event_loop, server, server_permanent_keys, responder_key,
-        pack_nonce, pack_message, unpack_message
+        request, initiator_key, event_loop, client_kwargs, server, server_permanent_keys,
+        responder_key, pack_nonce, pack_message, unpack_message
 ):
     """
     Return a simplified :class:`websockets.client.connect` wrapper
@@ -456,16 +508,12 @@ def client_factory(
             cookie = random_cookie()
         if permanent_key is None:
             permanent_key = server_permanent_keys[0].pk
-        _kwargs = {
-            'subprotocols': pytest.saltyrtc.subprotocols,
-            'ssl': ssl_context,
-            'loop': event_loop,
-        }
+        _kwargs = client_kwargs.copy()
         _kwargs.update(kwargs)
         if ws_client is None:
             ws_client = yield from websockets.connect(
                 '{}/{}'.format(url(*server.address), key_path(path)),
-                **_kwargs
+                ssl=ssl_context, **_kwargs
             )
         client = Client(
             ws_client, pack_message, unpack_message,

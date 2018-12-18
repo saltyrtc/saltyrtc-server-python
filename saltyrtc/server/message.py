@@ -14,6 +14,7 @@ from .common import (
     NONCE_FORMATTER,
     NONCE_LENGTH,
     AddressType,
+    ClientState,
     CloseCode,
     MessageType,
     OverflowSentinel,
@@ -192,8 +193,8 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
 
         # Encrypt payload if required
         if self.encrypted:
-            if not client.authenticated:
-                raise MessageFlowError('Cannot encrypt payload, no box available')
+            if client.state != ClientState.authenticated:
+                raise MessageFlowError('Cannot encrypt payload, not authenticated')
             payload = self._encrypt_payload(client, nonce, payload)
 
         # Append payload and return as bytes
@@ -224,7 +225,7 @@ class AbstractBaseMessage(AbstractMessage, metaclass=abc.ABCMeta):
         expect_type = None
         if destination_type == AddressType.server:
             data = data[NONCE_LENGTH:]
-            if not client.authenticated and client.type is None:
+            if client.state == ClientState.restricted and client.type is None:
                 payload = None
 
                 # Try client-auth (encrypted)

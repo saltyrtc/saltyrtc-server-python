@@ -1,6 +1,6 @@
 [run]
 branch = True
-source = saltyrtc
+source = saltyrtc.server
 
 [report]
 exclude_lines =

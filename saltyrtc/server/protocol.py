@@ -1,4 +1,5 @@
 import asyncio
+import enum
 import os
 import struct
 
@@ -14,6 +15,7 @@ from .common import (
     KEEP_ALIVE_TIMEOUT,
     KEY_LENGTH,
     AddressType,
+    ClientState,
     OverflowSentinel,
     available_slot_range,
     is_initiator_id,
@@ -24,16 +26,23 @@ from .exception import (
     InternalError,
     MessageError,
     MessageFlowError,
-    SignalingError,
     SlotsFullError,
 )
 from .message import unpack
 
 __all__ = (
     'Path',
+    'PathClientTasks',
     'PathClient',
     'Protocol',
 )
+
+
+@enum.unique
+class _TaskQueueState(enum.IntEnum):
+    open = 1
+    closed = 2
+    cancelled = 3
 
 
 class Path:
@@ -49,26 +58,35 @@ class Path:
     @property
     def empty(self):
         """
-        Return `True` in case the path is empty. A call to this property
-        will also remove clients from the path whose connections are
-        closed but have not been removed from the path. (However, in
-        case that the path is not empty, this property does not ensure
-        that all disconnected clients will be removed.)
+        Return whether the path is empty.
         """
-        for client in self._slots.values():
-            if client is not None:
-                if client.connection_closed.done():
-                    self.remove_client(client)
-                    self.log.notice('Removed dead client {}', client)
-                else:
-                    return False
-        return True
+        return all((client is None for client in self._slots.values()))
+
+    def has_client(self, client):
+        """
+        Return whether a client's :class:`PathClient` instance is still
+        available on the path.
+
+        Arguments:
+            - `client`: The :class:`PathClient` instance to look for.
+
+        Raises :exc:`KeyError` in case the client has not been assigned
+        an ID yet.
+        """
+        # Note: No need to check for an unassigned ID since the server's ID will never
+        #       be available in the slots.
+        return self._slots[client.id] == client
 
     def get_initiator(self):
         """
-        Return the initiator's :class:`PathClient` instance or `None`.
+        Return the initiator's :class:`PathClient` instance.
+
+        Raises :exc:`KeyError` if there is no initiator.
         """
-        return self._slots.get(AddressType.initiator)
+        client = self._slots[AddressType.initiator]
+        if client is None:
+            raise KeyError('No initiator found')
+        return client
 
     def set_initiator(self, initiator):
         """
@@ -76,6 +94,9 @@ class Path:
 
         Arguments:
             - `initiator`: A :class:`PathClient` instance.
+
+        Raises :exc:`ValueError` in case of a state violation on the
+        :class:`PathClient`.
 
         Return the previously set initiator or `None`.
         """
@@ -85,31 +106,36 @@ class Path:
         # Update initiator's log name
         initiator.update_log_name(AddressType.initiator)
         # Authenticated, assign id
-        initiator.authenticated = True
-        initiator.id = AddressType.initiator
+        initiator.authenticate(AddressType.initiator)
         # Return previous initiator
         return previous_initiator
 
     def get_responder(self, id_):
         """
-        Return a responder's :class:`PathClient` instance or `None`.
+        Return a responder's :class:`PathClient` instance.
 
         Arguments:
             - `id_`: The identifier of the responder.
 
-        Raises :exc:`ValueError` if `id_` is not a valid responder
-        identifier.
+        Raises:
+            - :exc:`ValueError`: If `id_` is not a valid responder
+              identifier.
+            - :exc:`KeyError`: If `id_` cannot be associated to a
+              :class:`PathClient` instance.
         """
         if not is_responder_id(id_):
             raise ValueError('Invalid responder identifier')
-        return self._slots.get(id_)
+        client = self._slots[id_]
+        if client is None:
+            raise KeyError('No responder found')
+        return client
 
     def get_responder_ids(self):
         """
-        Return a list of responder's identifiers (slots).
+        Return an iterable of responder's identifiers (slots).
         """
-        return [id_ for id_, responder in self._slots.items()
-                if is_responder_id(id_) and responder is not None]
+        return (id_ for id_, responder in self._slots.items()
+                if is_responder_id(id_) and responder is not None)
 
     def add_responder(self, responder):
         """
@@ -118,7 +144,10 @@ class Path:
         Arguments:
             - `client`: A :class:`PathClient` instance.
 
-        Raises :exc:`SlotsFullError` if no free slot exists on the path.
+        Raises:
+            - :exc:`SlotsFullError` if no free slot exists on the path.
+            - :exc:`ValueError` in case of a state violation on the
+              :class:`PathClient`.
 
         Return the assigned slot identifier.
         """
@@ -129,8 +158,7 @@ class Path:
                 # Update responder's log name
                 responder.update_log_name(id_)
                 # Authenticated, set and return assigned slot id
-                responder.authenticated = True
-                responder.id = id_
+                responder.authenticate(id_)
                 return id_
         raise SlotsFullError('No free slots on path')
 
@@ -139,26 +167,23 @@ class Path:
         Remove a client (initiator or responder) from the
         :class:`Path`.
 
+        .. important:: Shall only be called from the client's
+           own :class:`Protocol` instance or from another client's
+           :class.`Protocol` instance in case it is dropping a client.
+
         Arguments:
              - `client`: The :class:`PathClient` instance.
 
-        Raises :exc:`ValueError` in case the client provided an
+        Raises :exc:`KeyError` in case the client provided an
         invalid slot identifier.
         """
-
-        if not client.authenticated:
-            # Client has not been authenticated. Nothing to do.
+        if client.state == ClientState.restricted:
+            # Client has never been authenticated. Nothing to do.
             return
         id_ = client.id
 
-        # Get client instance
-        try:
-            slot_client = self._slots[id_]
-        except KeyError:
-            raise ValueError('Invalid slot identifier: {}'.format(id_))
-
         # Compare client instances
-        if client != slot_client:
+        if client != self._slots[id_]:
             # Note: This is absolutely fine and happens when another initiator
             #        takes the place of a previous initiator.
             return
@@ -168,10 +193,66 @@ class Path:
         self.log.debug('Removed {}', 'initiator' if is_initiator_id(id_) else 'responder')
 
 
+# TODO: We should be able to use a NamedTuple for this once we drop Python 3.4 support
+class PathClientTasks:
+    __slots__ = (
+        'task_loop',
+        'receive_loop',
+        'keep_alive_loop',
+    )
+
+    def __init__(
+            self,
+            task_loop=None, receive_loop=None, keep_alive_loop=None,
+            loop=None
+    ):
+        if loop is None:
+            asyncio.get_event_loop()
+        self.task_loop = self._ensure_future_or_none(task_loop, loop)
+        self.receive_loop = self._ensure_future_or_none(receive_loop, loop=loop)
+        self.keep_alive_loop = self._ensure_future_or_none(keep_alive_loop, loop=loop)
+
+    @property
+    def tasks(self):
+        """
+        Return all tasks (including those who are set to `None`) as a
+        tuple.
+        """
+        return (
+            self.task_loop,
+            self.receive_loop,
+            self.keep_alive_loop,
+        )
+
+    @property
+    def valid(self):
+        """
+        Return all valid tasks (i.e. those who are not set to `None`)
+        as an iterable.
+        """
+        return (task for task in self.tasks if task is not None)
+
+    def cancel_all_but_task_loop(self):
+        """
+        Cancel all valid tasks but the task queue.
+        """
+        for task in self.valid:
+            if task != self.task_loop:
+                task.cancel()
+
+    @staticmethod
+    def _ensure_future_or_none(coroutine_or_task, loop):
+        if coroutine_or_task is None:
+            return None
+        return asyncio.ensure_future(coroutine_or_task, loop=loop)
+
+
 class PathClient:
     __slots__ = (
         '_loop',
+        '_state',
         '_connection',
+        '_connection_closed_future',
         '_client_key',
         '_server_permanent_key',
         '_server_session_key',
@@ -187,11 +268,11 @@ class PathClient:
         '_keep_alive_interval',
         'log',
         'type',
-        'authenticated',
         'keep_alive_timeout',
         'keep_alive_pings',
+        'tasks',
         '_task_queue',
-        '_task_queue_closed',
+        '_task_queue_state',
     )
 
     def __init__(
@@ -199,7 +280,10 @@ class PathClient:
             server_session_key=None, loop=None
     ):
         self._loop = asyncio.get_event_loop() if loop is None else loop
+        self._state = ClientState.restricted
         self._connection = connection
+        connection_closed_future = asyncio.Future(loop=self._loop)
+        self._connection_closed_future = connection_closed_future
         self._client_key = initiator_key
         self._server_permanent_key = None
         self._server_session_key = server_session_key
@@ -213,13 +297,18 @@ class PathClient:
         self._keep_alive_interval = KEEP_ALIVE_INTERVAL_DEFAULT
         self.log = util.get_logger('path.{}.client.{:x}'.format(path_number, id(self)))
         self.type = None
-        self.authenticated = False
         self.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
         self.keep_alive_pings = 0
+        self.tasks = None
+
+        # Schedule connection closed future
+        def _connection_closed(_):
+            connection_closed_future.set_result(connection.close_code)
+        self._connection.connection_lost_waiter.add_done_callback(_connection_closed)
 
         # Queue for tasks to be run on the client (relay messages, closing, ...)
         self._task_queue = asyncio.Queue(loop=self._loop)
-        self._task_queue_closed = False
+        self._task_queue_state = _TaskQueueState.open
 
     def __str__(self):
         type_ = self.type
@@ -229,20 +318,33 @@ class PathClient:
             type_, self._id, hex(id(self)))
 
     @property
-    def connection_closed(self):
+    def state(self):
         """
-        Return the 'connection_closed' future of the underlying
-        WebSocket connection.
+        Return the current :class:`ClientState` of the client.
         """
-        return self._connection.connection_closed
+        return self._state
+
+    @state.setter
+    def state(self, state):
+        """
+        Update the :class:`ClientState` of the client.
+
+        Raises :exc:`ValueError` in case the state is not following
+        the strict state order as defined by :class`ClientState`.
+        """
+        if state != self.state.next:
+            raise ValueError('State {} cannot be updated to {}'.format(self.state, state))
+        self.log.debug('State {} -> {}', self._state.name, state.name)
+        self._state = state
 
     @property
-    def tasks_complete(self):
+    def connection_closed_future(self):
         """
-        Return whether the underlying task queue is complete (empty).
-        Will also return `True` in case the task queue has been closed.
+        Resolves once the connection has been closed.
+
+        Return the close code.
         """
-        return self._task_queue.empty() or self._task_queue_closed
+        return self._connection_closed_future
 
     @property
     def id(self):
@@ -250,14 +352,6 @@ class PathClient:
         Return the assigned id on the :class:`Path`.
         """
         return self._id
-
-    @id.setter
-    def id(self, id_):
-        """
-        Assign the id. Only :class:`Path` may set the id!
-        """
-        self._id = id_
-        self.log.debug('Assigned id: {}', id_)
 
     @property
     def keep_alive_interval(self):
@@ -418,6 +512,19 @@ class PathClient:
         self._box = libnacl.public.Box(self.server_key, public_key)
         self.log.debug('Client key updated')
 
+    def authenticate(self, id_):
+        """
+        Authenticate the client and assign it an id.
+
+        .. important:: Only :class:`Path` may call this!
+
+        Raises :exc:`ValueError` in case the previous state was not
+        :attr:`ClientState.restricted`.
+        """
+        self.state = ClientState.authenticated
+        self._id = id_
+        self.log.debug('Assigned id: {}', id_)
+
     def update_log_name(self, slot_id):
         """
         Update the logger's name by the assigned slot identifier.
@@ -486,23 +593,38 @@ class PathClient:
         Return `True` if :class:`RawMessage` instances are allowed and
         can be sent to the requested :class:`AddressType`.
         """
-        return self.authenticated and self.type != destination_type
+        return self.state == ClientState.authenticated and self.type != destination_type
 
     @asyncio.coroutine
-    def enqueue_task(self, coroutine_or_task):
+    def enqueue_task(self, coroutine_or_task, ignore_closed=False):
         """
         Enqueue a coroutine or task into the task queue of the
         client.
 
+        .. important:: Only the following tasks shall be enqueued:
+                       - Messages from the server towards this client.
+                       - Messages from other clients **towards** this
+                         client (i.e. relayed messages).
+                       - Delayed close operations towards this client.
+
+        .. note:: Coroutines will be closed and :class:`asyncio.Task`s
+                  will be cancelled when the task queue has been closed
+                  (unless `ignore_closed` has been set to `True`) or
+                  cancelled. The coroutine or task must be prepared for
+                  that.
+
         Arguments:
             - `coroutine_or_task`: A coroutine or a
               :class:`asyncio.Task`.
-
-        Raises :exc:`SignalingError` in case the task queue is closed.
+            - `ignore_closed`: Whether the coroutine or
+              :class:`asyncio.Task` should be enqueued even if the task
+              queue has been closed.
         """
-        if self._task_queue_closed:
-            raise SignalingError('Task queue is already closed')
-        yield from self._task_queue.put(coroutine_or_task)
+        if (self._task_queue_state == _TaskQueueState.open
+                or (ignore_closed and self._task_queue_state == _TaskQueueState.closed)):
+            yield from self._task_queue.put(coroutine_or_task)
+        else:
+            self._cancel_coroutine_or_task(coroutine_or_task, mark_as_done=False)
 
     @asyncio.coroutine
     def dequeue_task(self):
@@ -510,25 +632,109 @@ class PathClient:
         Dequeue and return a coroutine or task from the task queue of
         the client.
 
-        Shall only be called from the client's :class:`Protocol`
-        instance.
-
-        Raises :exc:`SignalingError` in case the task queue is closed.
+        .. warning:: Shall only be called from the client's
+           :class:`Protocol` instance.
         """
-        if self._task_queue_closed:
-            raise SignalingError('Task queue is already closed')
         return (yield from self._task_queue.get())
+
+    def task_done(self, task):
+        """
+        Mark a previously dequeued task as processed.
+
+        Raises :exc:`InternalError` if called more times than there
+        were tasks placed in the queue.
+        """
+        self.log.debug('Done task {}', task)
+        try:
+            self._task_queue.task_done()
+        except ValueError:
+            raise InternalError('More tasks marked as done as were enqueued')
 
     def close_task_queue(self):
         """
-        Close the task queue, so no further tasks can be enqueued.
+        Close the task queue to prevent further enqueues. Will do
+        nothing in case the task queue has already been closed or
+        cancelled.
 
-        Raises :exc:`SignalingError` in case the task queue was already
-        closed.
+        .. note:: Unlike :func:`~PathClient.cancel_task_queue`, this does
+                  not cancel any pending tasks.
         """
-        if self._task_queue_closed:
-            raise SignalingError('Task queue is already closed')
-        self._task_queue_closed = True
+        # Ignore if already closed or cancelled
+        if self._task_queue_state >= _TaskQueueState.closed:
+            return
+
+        # Update state
+        self._task_queue_state = _TaskQueueState.closed
+        self.log.debug('Closed task queue')
+
+    def cancel_task_queue(self):
+        """
+        Cancel all pending tasks of the task queue and prevent further
+        enqueues. Will do nothing in case the task queue has already
+        been cancelled.
+        """
+        # Ignore if already cancelled
+        if self._task_queue_state >= _TaskQueueState.cancelled:
+            return
+
+        # Cancel all pending tasks
+        #
+        # Add a 'done' callback to each task in order to mark the task queue as 'closed'
+        # after all functions, which may want to handle the cancellation, have handled
+        # that cancellation.
+        #
+        # This for example prevents a 'disconnect' message from being sent before a
+        # 'send-error' message has been sent, see:
+        # https://github.com/saltyrtc/saltyrtc-server-python/issues/77
+        self._task_queue_state = _TaskQueueState.cancelled
+        self.log.debug('Cancelling {} queued tasks', self._task_queue.qsize())
+        while True:
+            try:
+                coroutine_or_task = self._task_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self._cancel_coroutine_or_task(coroutine_or_task, mark_as_done=True)
+
+    def _cancel_coroutine_or_task(self, coroutine_or_task, mark_as_done=False):
+        """
+        Cancel a coroutine or a :class:`asyncio.Task`.
+
+        Arguments:
+            - `coroutine_or_task`: The coroutine or
+              :class:`asyncio.Task` to be cancelled.
+            - `mark_as_done`: Whether to mark the task as *processed*
+              on the task queue. Defaults to `False`.
+        """
+        if asyncio.iscoroutine(coroutine_or_task):
+            self.log.debug('Closing queued coroutine {}', coroutine_or_task)
+            coroutine_or_task.close()
+            if mark_as_done:
+                self.task_done(coroutine_or_task)
+        else:
+            if mark_as_done:
+                coroutine_or_task.add_done_callback(self.task_done)
+            # Note: We need to check for .cancelled first since a task is also marked
+            #       .done when it is cancelled.
+            if coroutine_or_task.cancelled():
+                self.log.debug('Already cancelled task {}', coroutine_or_task)
+            elif coroutine_or_task.done():
+                exc = coroutine_or_task.exception()
+                if exc is not None:
+                    message = 'Ignoring exception of queued task {}: {}'
+                    self.log.debug(message, coroutine_or_task, repr(exc))
+                else:
+                    message = 'Ignoring completion of queued task {}'
+                    self.log.debug(message, coroutine_or_task)
+            else:
+                self.log.debug('Cancelling queued task {}', coroutine_or_task)
+                coroutine_or_task.cancel()
+
+    @asyncio.coroutine
+    def join_task_queue(self):
+        """
+        Block until all tasks of the task queue have been processed.
+        """
+        yield from self._task_queue.join()
 
     @asyncio.coroutine
     def send(self, message):
@@ -548,6 +754,7 @@ class PathClient:
             yield from self._connection.send(data)
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while sending')
+            self.close_task_queue()
             raise Disconnected(exc.code) from exc
 
     @asyncio.coroutine
@@ -555,11 +762,17 @@ class PathClient:
         """
         Disconnected
         """
+        # Safeguard
+        # Note: This should never happen since the receive queue will
+        #       be stopped when a client is being dropped.
+        assert self.state < ClientState.dropped
+
         # Receive data
         try:
             data = yield from self._connection.recv()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while receiving')
+            self.close_task_queue()
             raise Disconnected(exc.code) from exc
         self.log.debug('Received message')
 
@@ -576,15 +789,81 @@ class PathClient:
         """
         self.log.debug('Sending ping')
         try:
-            return (yield from self._connection.ping())
+            pong_future = yield from self._connection.ping()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while pinging')
+            self.close_task_queue()
+            raise Disconnected(exc.code) from exc
+        return self._wait_pong(pong_future)
+
+    @asyncio.coroutine
+    def _wait_pong(self, pong_future):
+        """
+        Disconnected
+        """
+        try:
+            yield from pong_future
+        except websockets.ConnectionClosed as exc:
+            self.log.debug('Connection closed while waiting for pong')
+            self.close_task_queue()
             raise Disconnected(exc.code) from exc
 
     @asyncio.coroutine
     def close(self, code=1000):
+        """
+        Initiate the closing procedure and wait for the connection to
+        become closed.
+
+        Arguments:
+            - `close`: The close code.
+        """
+        # Close the task queue to ensure no further tasks can be
+        # enqueued while the client is in the closing process.
+        self.close_task_queue()
+
         # Note: We are not sending a reason for security reasons.
         yield from self._connection.close(code=code)
+
+    def drop(self, code):
+        """
+        Drop this client. Will enqueue the closing procedure and cancel
+        the receive loop as well as the keep alive loop of the client.
+
+        Return the enqueue operation in form of a
+        :class:`asyncio.Task`.
+
+        .. important:: This should only be called by clients dropping
+                       another client or when the server is closing.
+
+        Arguments:
+            - `close`: The close code.
+        """
+        # Enqueue the close procedure on our own task queue.
+        # Note: The closing procedure would interrupt further send operations, thus we
+        #       MUST enqueue it as a coroutine and NOT wrap in a Future. That way, it
+        #       will not initiate the closing procedure before this client has executed
+        #       all other pending tasks.
+        self.log.debug('Scheduling delayed closing procedure', code)
+        close_coroutine = self.close(code=code)
+        enqueue_task = asyncio.ensure_future(
+            self.enqueue_task(close_coroutine, ignore_closed=True), loop=self._loop)
+
+        # Close the task queue to ensure no further tasks can be
+        # enqueued while the client is in the closing process.
+        self.close_task_queue()
+
+        # Cancel all loops for the client but the task queue.
+        # Note: This will ensure that all messages forwarded towards the client to be
+        #       dropped will still be forwarded. But the to be dropped client will not be
+        #       able to send any more messages towards the server or relay messages
+        #       towards other clients.
+        self.log.debug('Cancelling all running tasks but the task loop')
+        self.tasks.cancel_all_but_task_loop()
+
+        # Mark as dropped
+        self.state = ClientState.dropped
+        self.log.debug('Client dropped, close code: {}', code)
+        return enqueue_task
 
 
 class Protocol:
