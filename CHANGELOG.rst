@@ -1,10 +1,15 @@
 Changelog
 *********
 
+`Unreleased`_ (YYYY-MM-DD)
+--------------------------
+
+- Event callback arguments now always need to provide a `data` argument (major)
+
 `3.0.1`_ (2019-01-02)
 ---------------------
 
-- Fix forward the `timeout` close code as an `int` to event callbacks.
+- Fix forward the `timeout` close code as an `int` to event callbacks
 
 `3.0.0`_ (2018-12-18)
 ---------------------
@@ -39,13 +44,13 @@ support the `disconnected` message before upgrading.
 `1.0.2`_ (2017-11-15)
 ---------------------
 
-- Fix do not accept unencrypted 'client-auth' messages from the initiator.
+- Fix do not accept unencrypted 'client-auth' messages from the initiator
 
 `1.0.1`_ (2017-07-25)
 ---------------------
 
 - Fix to handle new `libnacl <https://github.com/saltstack/libnacl/pull/91>`_
-  exceptions.
+  exceptions
 
 `1.0.0`_ (2017-03-24)
 ---------------------

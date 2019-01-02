@@ -1,27 +1,67 @@
 import collections
 import enum
-from typing import List
+from typing import (
+    Callable,
+    Coroutine,
+    Dict,
+    List,
+    Optional,
+)
 
-try:
-    from collections.abc import Coroutine
-except ImportError:  # python 3.4
-    from backports_abc import Coroutine
+__all__ = (
+    'DisconnectedData',
+    'EventData',
+    'EventCallback',
+    'Event',
+    'EventRegistry',
+)
 
-__all__ = ('Event',)
+
+# Types
+DisconnectedData = int
+EventData = Optional[DisconnectedData]
+EventCallback = Callable[[Optional[str], EventData], Coroutine],
 
 
 @enum.unique
 class Event(enum.Enum):
+    """
+    Available event types that will be raised by the server and can be
+    registered by the application.
+    """
     initiator_connected = 'initiator-connected'
     responder_connected = 'responder-connected'
     disconnected = 'disconnected'
 
 
 class EventRegistry:
-    events = collections.defaultdict(list)  # type: Dict[Event, List[Coroutine]]
+    """
+    Allows to register callbacks to be invoked in case a specific event
+    has been raised by the server.
 
-    def register(self, event: Event, handler: Coroutine):
+    A callback must be an `async` function. When it is being invoked,
+    the following parameters need to be provided:
+        - `path`: A `str` instance containing the path in hexadecimal
+          representation an event is associated to or `None` if
+          unavailable.
+        - `data`: Additional data associated to the event as
+          described below.
+
+    Additional data :class:`Event` to :class`EventData` mapping:
+        - `initiator-connected`: `None`
+        - `responder-connected`: `None`
+        - `disconnected`: :class:`DisconnectedData`
+    """
+    events = collections.defaultdict(list)  # type: Dict[Event, List[EventCallback]]
+
+    def register(self, event: Event, handler: EventCallback):
+        """
+        Register an event callback.
+        """
         self.events[event].append(handler)
 
-    def get_callbacks(self, event: Event) -> List[Coroutine]:
+    def get_callbacks(self, event: Event) -> List[EventCallback]:
+        """
+        Return callbacks associated to a specific event.
+        """
         return self.events[event]

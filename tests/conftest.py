@@ -260,10 +260,10 @@ class TestServer(Server):
         # Most recent connection closed future
         self._most_recent_connection_closed_future = asyncio.Future(loop=self._loop)
 
-    def raise_event(self, event: Event, *data):
-        super().raise_event(event, *data)
+    def _raise_event(self, event: Event, *args):
+        super()._raise_event(event, *args)
         if event == Event.disconnected:
-            self._most_recent_connection_closed_future.set_result(data)
+            self._most_recent_connection_closed_future.set_result(args)
             self._most_recent_connection_closed_future = asyncio.Future(loop=self._loop)
 
     @asyncio.coroutine
