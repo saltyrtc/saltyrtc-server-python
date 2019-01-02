@@ -940,10 +940,10 @@ class Server(asyncio.AbstractServer):
         """
         self._events.register(event, callback)
 
-    def notify_initiator_connected(self, path: Optional[str]):
+    def notify_initiator_connected(self, path: str):
         self._raise_event(Event.initiator_connected, path, None)
 
-    def notify_responder_connected(self, path: Optional[str]):
+    def notify_responder_connected(self, path: str):
         self._raise_event(Event.responder_connected, path, None)
 
     def notify_disconnected(self, path: Optional[str], data: DisconnectedData):

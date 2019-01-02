@@ -6,6 +6,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Union,
 )
 
 __all__ = (
@@ -19,8 +20,11 @@ __all__ = (
 
 # Types
 DisconnectedData = int
-EventData = Optional[DisconnectedData]
-EventCallback = Callable[[Optional[str], EventData], Coroutine],
+EventData = Union[
+    None,  # `initiator-connected` / `responder-connected`
+    DisconnectedData,
+]
+EventCallback = Callable[[str, Optional[str], EventData], Coroutine],
 
 
 @enum.unique
@@ -43,7 +47,8 @@ class EventRegistry:
     the following parameters need to be provided:
         - `path`: A `str` instance containing the path in hexadecimal
           representation an event is associated to or `None` if
-          unavailable.
+          unavailable (which can only happen in case of a `disconnected`
+          event).
         - `data`: Additional data associated to the event as
           described below.
 
