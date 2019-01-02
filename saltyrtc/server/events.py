@@ -1,6 +1,6 @@
 import collections
 import enum
-from typing import (
+from typing import (  # noqa
     Callable,
     Coroutine,
     Dict,
