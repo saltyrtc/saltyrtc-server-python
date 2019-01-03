@@ -66,6 +66,7 @@ setup(
         ':python_version<="3.4"': [
             'asyncio>=3.4.3',
             'typing>=3,<4',
+            'backports_abc==0.5',
             'pytest-asyncio==0.5.0',
         ],
         'dev': tests_require,

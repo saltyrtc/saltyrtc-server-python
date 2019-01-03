@@ -2,12 +2,17 @@ import collections
 import enum
 from typing import (  # noqa
     Callable,
-    Coroutine,
     Dict,
     List,
     Optional,
     Union,
 )
+
+try:
+    from typing import Coroutine
+except ImportError:
+    # noinspection PyUnresolvedReferences,PyPackageRequirements
+    from backports_abc import Coroutine
 
 __all__ = (
     'DisconnectedData',
