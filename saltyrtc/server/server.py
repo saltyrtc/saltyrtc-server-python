@@ -4,6 +4,7 @@ from collections import OrderedDict
 from typing import (
     Dict,
     List,
+    Optional,
 )
 
 import websockets
@@ -20,7 +21,10 @@ from .common import (
     SubProtocol,
 )
 from .events import (
+    DisconnectedData,
     Event,
+    EventCallback,
+    EventData,
     EventRegistry,
 )
 from .exception import (
@@ -51,12 +55,6 @@ from .protocol import (
     Protocol,
 )
 
-try:
-    from collections.abc import Coroutine
-except ImportError:  # python 3.4
-    # noinspection PyPackageRequirements
-    from backports_abc import Coroutine
-
 __all__ = (
     'serve',
     'ServerProtocol',
@@ -70,7 +68,7 @@ _TASK_QUEUE_JOIN_TIMEOUT = 10.0
 @asyncio.coroutine
 def serve(
         ssl_context, keys, paths=None, host=None, port=8765, loop=None,
-        event_callbacks: Dict[Event, List[Coroutine]] = None, server_class=None,
+        event_callbacks: Dict[Event, List[EventCallback]] = None, server_class=None,
         ws_kwargs=None,
 ):
     """
@@ -162,7 +160,7 @@ class ServerProtocol(Protocol):
         self._loop = asyncio.get_event_loop() if loop is None else loop
 
         # Server instance and subprotocol
-        self._server = server
+        self._server = server  # type: Server
         self.subprotocol = subprotocol
 
         # Path and client instance
@@ -179,8 +177,7 @@ class ServerProtocol(Protocol):
             @asyncio.coroutine
             def close_with_protocol_error():
                 yield from connection.close(code=CloseCode.protocol_error.value)
-                self._server.raise_event(
-                    Event.disconnected, None, CloseCode.protocol_error.value)
+                self._server.notify_disconnected(None, CloseCode.protocol_error.value)
             handler_coroutine = close_with_protocol_error()
         else:
             handler_coroutine = self.handler()
@@ -208,37 +205,31 @@ class ServerProtocol(Protocol):
         except Disconnected as exc:
             client.log.info('Connection closed (code: {})', exc.reason)
             close_future.set_result(None)
-            self._server.raise_event(Event.disconnected, hex_path, exc.reason)
+            self._server.notify_disconnected(hex_path, exc.reason)
         except PingTimeoutError:
             client.log.info('Closing because of a ping timeout')
             close_future = client.close(CloseCode.timeout)
-            self._server.raise_event(
-                Event.disconnected, hex_path, CloseCode.timeout.value)
+            self._server.notify_disconnected(hex_path, CloseCode.timeout.value)
         except SlotsFullError as exc:
             client.log.notice('Closing because all path slots are full: {}', exc)
             close_future = client.close(code=CloseCode.path_full_error.value)
-            self._server.raise_event(
-                Event.disconnected, hex_path, CloseCode.path_full_error.value)
+            self._server.notify_disconnected(hex_path, CloseCode.path_full_error.value)
         except ServerKeyError as exc:
             client.log.notice('Closing due to server key error: {}', exc)
             close_future = client.close(code=CloseCode.invalid_key.value)
-            self._server.raise_event(
-                Event.disconnected, hex_path, CloseCode.invalid_key.value)
+            self._server.notify_disconnected(hex_path, CloseCode.invalid_key.value)
         except InternalError as exc:
             client.log.exception('Closing due to an internal error:', exc)
             close_future = client.close(code=CloseCode.internal_error.value)
-            self._server.raise_event(
-                Event.disconnected, hex_path, CloseCode.internal_error.value)
+            self._server.notify_disconnected(hex_path, CloseCode.internal_error.value)
         except SignalingError as exc:
             client.log.notice('Closing due to protocol error: {}', exc)
             close_future = client.close(code=CloseCode.protocol_error.value)
-            self._server.raise_event(
-                Event.disconnected, hex_path, CloseCode.protocol_error.value)
+            self._server.notify_disconnected(hex_path, CloseCode.protocol_error.value)
         except Exception as exc:
             client.log.exception('Closing due to exception:', exc)
             close_future = client.close(code=CloseCode.internal_error.value)
-            self._server.raise_event(
-                Event.disconnected, hex_path, CloseCode.internal_error.value)
+            self._server.notify_disconnected(hex_path, CloseCode.internal_error.value)
         else:
             # Note: This should not ever happen since 'handle_client'
             #       contains an infinite loop that only stops due to an exception.
@@ -387,12 +378,12 @@ class ServerProtocol(Protocol):
         hex_path = binascii.hexlify(path.initiator_key).decode('ascii')
         receive_loop = None
         if client.type == AddressType.initiator:
-            self._server.raise_event(Event.initiator_connected, hex_path)
+            self._server.notify_initiator_connected(hex_path)
             if is_connected:
                 client.log.debug('Starting runner for initiator')
                 receive_loop = self.initiator_receive_loop()
         elif client.type == AddressType.responder:
-            self._server.raise_event(Event.responder_connected, hex_path)
+            self._server.notify_responder_connected(hex_path)
             if is_connected:
                 client.log.debug('Starting runner for responder')
                 receive_loop = self.responder_receive_loop()
@@ -929,7 +920,7 @@ class Server(asyncio.AbstractServer):
             # We need to close the connection manually as the client may choose
             # to ignore
             yield from connection.close(code=CloseCode.subprotocol_error.value)
-            self.raise_event(Event.disconnected, None, CloseCode.subprotocol_error.value)
+            self.notify_disconnected(None, CloseCode.subprotocol_error.value)
         else:
             protocol = self._protocol_class(
                 self, subprotocol, connection, ws_path, loop=self._loop)
@@ -943,18 +934,35 @@ class Server(asyncio.AbstractServer):
         self.protocols.remove(protocol)
         self._log.debug('Protocol unregistered: {}', protocol)
 
-    def register_event_callback(self, event: Event, callback: Coroutine):
+    def register_event_callback(self, event: Event, callback: EventCallback):
         """
         Register a new event callback.
         """
         self._events.register(event, callback)
 
-    def raise_event(self, event: Event, *data):
+    def notify_initiator_connected(self, path: str):
+        self._raise_event(Event.initiator_connected, path, None)
+
+    def notify_responder_connected(self, path: str):
+        self._raise_event(Event.responder_connected, path, None)
+
+    def notify_disconnected(self, path: Optional[str], data: DisconnectedData):
+        self._raise_event(Event.disconnected, path, data)
+
+    def _raise_event(self, event: Event, path: Optional[str], data: EventData):
         """
-        Raise an event and call all registered event callbacks.
+        Raise an event and invoke all registered event callbacks.
+
+        Arguments:
+            - `event`: Event to be raised.
+            - `path`: Associated path in hexadecimal representation or
+              `None` if not available.
+            - `data`: Additional data for the event as explained for
+              :class:`EventRegistry`.
         """
         for callback in self._events.get_callbacks(event):
-            asyncio.ensure_future(callback(event, *data), loop=self._loop)
+            coroutine = callback(event, path, data)
+            asyncio.ensure_future(coroutine, loop=self._loop)
 
     def close(self):
         """

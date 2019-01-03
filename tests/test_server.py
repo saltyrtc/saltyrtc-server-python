@@ -517,10 +517,10 @@ class TestServer:
             Event.responder_connected,
         }
         assert events_fired[Event.initiator_connected] == [
-            (initiator_key.hex_pk().decode('ascii'),)
+            (initiator_key.hex_pk().decode('ascii'), None)
         ]
         assert events_fired[Event.responder_connected] == [
-            (initiator_key.hex_pk().decode('ascii'),)
+            (initiator_key.hex_pk().decode('ascii'), None)
         ]
 
         yield from initiator.close()
