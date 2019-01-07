@@ -7,7 +7,6 @@ import struct
 import libnacl
 import umsgpack
 
-from .common import sign_keys as sign_keys_
 from .common import (
     COOKIE_LENGTH,
     DATA_LENGTH_MIN,
@@ -18,6 +17,7 @@ from .common import (
     CloseCode,
     MessageType,
     OverflowSentinel,
+    sign_keys as sign_keys_,
     validate_client_id,
     validate_cookie,
     validate_drop_reason,

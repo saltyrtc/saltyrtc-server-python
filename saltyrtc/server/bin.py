@@ -10,8 +10,8 @@ import stat
 import click
 import libnacl.public
 
-from . import __version__ as _version
 from . import (
+    __version__ as _version,
     server,
     util,
 )

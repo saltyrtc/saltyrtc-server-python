@@ -6,9 +6,9 @@ import subprocess
 
 import pytest
 
-from saltyrtc.server import __version__ as _version
 from saltyrtc.server import (
     Server,
+    __version__ as _version,
     util,
 )
 
