@@ -1,10 +1,10 @@
 Changelog
 *********
 
-`Unreleased`_ (YYYY-MM-DD)
+`3.1.0`_ (2019-01-07)
 --------------------------
 
-- Event callback arguments now always need to provide a `data` argument (major)
+- Event callback arguments now always need to provide a `data` argument
 
 `3.0.1`_ (2019-01-02)
 ---------------------
@@ -60,7 +60,7 @@ support the `disconnected` message before upgrading.
 
 .. _SaltyRTC 1.0 Protocol: https://github.com/saltyrtc/saltyrtc-meta/blob/protocol-1.0/Protocol.md
 
-.. _Unreleased: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.0.1...HEAD
+.. _4.0.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.0.1...v3.1.0
 .. _3.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.0.0...v3.0.1
 .. _3.0.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v2.0.1...v3.0.0
 .. _2.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v2.0.0...v2.0.1
