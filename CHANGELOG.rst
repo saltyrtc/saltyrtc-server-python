@@ -1,7 +1,12 @@
 Changelog
 *********
 
-`3.1.1`_ (2019-01-07)
+`3.1.2`_ (2019-01-08)
+---------------------
+
+- Fix imports for earlier Python 3.5 versions
+
+`3.1.1`_ (2019-01-08)
 ---------------------
 
 - Disable deprecation warning in py.test for now (see `#90`_)
@@ -66,6 +71,7 @@ support the `disconnected` message before upgrading.
 .. _#90: https://github.com/saltyrtc/saltyrtc-server-python/issues/90
 .. _SaltyRTC 1.0 Protocol: https://github.com/saltyrtc/saltyrtc-meta/blob/protocol-1.0/Protocol.md
 
+.. _3.1.2: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.1.1...v3.1.2
 .. _3.1.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.1.0...v3.1.1
 .. _3.1.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.0.1...v3.1.0
 .. _3.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.0.0...v3.0.1
