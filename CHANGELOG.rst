@@ -1,8 +1,13 @@
 Changelog
 *********
 
+`3.1.1`_ (2019-01-07)
+---------------------
+
+- Disable deprecation warning in py.test for now (see `#90`_)
+
 `3.1.0`_ (2019-01-07)
---------------------------
+---------------------
 
 - Event callback arguments now always need to provide a `data` argument
 
@@ -58,9 +63,11 @@ support the `disconnected` message before upgrading.
 - Add server implementation of the `SaltyRTC 1.0 Protocol`_
 - Initial publication on PyPI
 
+.. _#90: https://github.com/saltyrtc/saltyrtc-server-python/issues/90
 .. _SaltyRTC 1.0 Protocol: https://github.com/saltyrtc/saltyrtc-meta/blob/protocol-1.0/Protocol.md
 
-.. _4.0.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.0.1...v3.1.0
+.. _3.1.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.1.0...v3.1.1
+.. _3.1.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.0.1...v3.1.0
 .. _3.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.0.0...v3.0.1
 .. _3.0.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v2.0.1...v3.0.0
 .. _2.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v2.0.0...v2.0.1
