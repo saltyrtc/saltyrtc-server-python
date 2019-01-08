@@ -11,8 +11,11 @@ from typing import (  # noqa
 try:
     from typing import Coroutine
 except ImportError:
-    # noinspection PyUnresolvedReferences,PyPackageRequirements
-    from backports_abc import Coroutine
+    try:
+        from collections.abc import Coroutine  # Python 3.5
+    except ImportError:
+        # noinspection PyUnresolvedReferences,PyPackageRequirements
+        from backports_abc import Coroutine  # Python 3.4
 
 __all__ = (
     'DisconnectedData',
