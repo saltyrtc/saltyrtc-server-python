@@ -3,7 +3,7 @@ SaltyRTC Signalling Server
 
 |Travis| |codecov| |PyPI| |Gitter|
 
-This is a SaltyRTC server implementation for Python 3.4+ using
+This is a SaltyRTC server implementation for Python 3.5+ using
 `asyncio`_.
 
 Note

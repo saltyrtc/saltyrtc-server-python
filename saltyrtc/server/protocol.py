@@ -193,7 +193,6 @@ class Path:
         self.log.debug('Removed {}', 'initiator' if is_initiator_id(id_) else 'responder')
 
 
-# TODO: We should be able to use a NamedTuple for this once we drop Python 3.4 support
 class PathClientTasks:
     __slots__ = (
         'task_loop',
@@ -595,8 +594,7 @@ class PathClient:
         """
         return self.state == ClientState.authenticated and self.type != destination_type
 
-    @asyncio.coroutine
-    def enqueue_task(self, coroutine_or_task, ignore_closed=False):
+    async def enqueue_task(self, coroutine_or_task, ignore_closed=False):
         """
         Enqueue a coroutine or task into the task queue of the
         client.
@@ -622,12 +620,11 @@ class PathClient:
         """
         if (self._task_queue_state == _TaskQueueState.open
                 or (ignore_closed and self._task_queue_state == _TaskQueueState.closed)):
-            yield from self._task_queue.put(coroutine_or_task)
+            await self._task_queue.put(coroutine_or_task)
         else:
             self._cancel_coroutine_or_task(coroutine_or_task, mark_as_done=False)
 
-    @asyncio.coroutine
-    def dequeue_task(self):
+    async def dequeue_task(self):
         """
         Dequeue and return a coroutine or task from the task queue of
         the client.
@@ -635,7 +632,7 @@ class PathClient:
         .. warning:: Shall only be called from the client's
            :class:`Protocol` instance.
         """
-        return (yield from self._task_queue.get())
+        return await self._task_queue.get()
 
     def task_done(self, task):
         """
@@ -729,15 +726,13 @@ class PathClient:
                 self.log.debug('Cancelling queued task {}', coroutine_or_task)
                 coroutine_or_task.cancel()
 
-    @asyncio.coroutine
-    def join_task_queue(self):
+    async def join_task_queue(self):
         """
         Block until all tasks of the task queue have been processed.
         """
-        yield from self._task_queue.join()
+        await self._task_queue.join()
 
-    @asyncio.coroutine
-    def send(self, message):
+    async def send(self, message):
         """
         Disconnected
         MessageError
@@ -751,14 +746,13 @@ class PathClient:
         # Send data
         self.log.debug('Sending message')
         try:
-            yield from self._connection.send(data)
+            await self._connection.send(data)
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while sending')
             self.close_task_queue()
             raise Disconnected(exc.code) from exc
 
-    @asyncio.coroutine
-    def receive(self):
+    async def receive(self):
         """
         Disconnected
         """
@@ -769,7 +763,7 @@ class PathClient:
 
         # Receive data
         try:
-            data = yield from self._connection.recv()
+            data = await self._connection.recv()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while receiving')
             self.close_task_queue()
@@ -782,34 +776,31 @@ class PathClient:
         self.log.trace('server << {}', message)
         return message
 
-    @asyncio.coroutine
-    def ping(self):
+    async def ping(self):
         """
         Disconnected
         """
         self.log.debug('Sending ping')
         try:
-            pong_future = yield from self._connection.ping()
+            pong_future = await self._connection.ping()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while pinging')
             self.close_task_queue()
             raise Disconnected(exc.code) from exc
         return self._wait_pong(pong_future)
 
-    @asyncio.coroutine
-    def _wait_pong(self, pong_future):
+    async def _wait_pong(self, pong_future):
         """
         Disconnected
         """
         try:
-            yield from pong_future
+            await pong_future
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while waiting for pong')
             self.close_task_queue()
             raise Disconnected(exc.code) from exc
 
-    @asyncio.coroutine
-    def close(self, code=1000):
+    async def close(self, code=1000):
         """
         Initiate the closing procedure and wait for the connection to
         become closed.
@@ -822,7 +813,7 @@ class PathClient:
         self.close_task_queue()
 
         # Note: We are not sending a reason for security reasons.
-        yield from self._connection.close(code=code)
+        await self._connection.close(code=code)
 
     def drop(self, code):
         """

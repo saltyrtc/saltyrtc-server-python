@@ -9,26 +9,26 @@ import websockets
 @pytest.mark.usefixtures('evaluate_log')
 class TestPrerequisities:
     @pytest.mark.asyncio
-    def test_server_handshake(self, ws_client_factory):
+    async def test_server_handshake(self, ws_client_factory):
         """
         Make sure the server is reachable and we can do a simple
         WebSocket handshake using the correct sub-protocol.
         """
-        client = yield from ws_client_factory()
+        client = await ws_client_factory()
         assert isinstance(client, websockets.client.WebSocketClientProtocol)
         assert client.subprotocol in pytest.saltyrtc.subprotocols
-        yield from client.close()
+        await client.close()
 
     @pytest.mark.asyncio
-    def test_server_ping(self, ws_client_factory):
+    async def test_server_ping(self, ws_client_factory):
         """
         Make sure that we can *ping* the server and the server sends a
         *pong* response.
         """
-        client = yield from ws_client_factory()
-        pong = yield from client.ping()
-        yield from pong
-        yield from client.close()
+        client = await ws_client_factory()
+        pong = await client.ping()
+        await pong
+        await client.close()
 
     def test_packet_min_length(self):
         """

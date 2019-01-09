@@ -22,11 +22,6 @@ before_cache:
 language: python
 matrix:
   include:
-  - python: "3.4"
-    env:
-    - EVENT_LOOP=asyncio
-    - TIMEOUT=2.0
-    - IGNORE=tests/test_cli.py
   - python: "3.5"
     env:
     - EVENT_LOOP=asyncio
