@@ -1,6 +1,13 @@
 Changelog
 *********
 
+`Unreleased`_ (YYYY-MM-DD)
+--------------------------
+
+**Important:** Make sure you're using Python >= 3.5 before upgrading.
+
+- Drop Python 3.4 support (major)
+
 `3.1.2`_ (2019-01-08)
 ---------------------
 
@@ -71,6 +78,7 @@ support the `disconnected` message before upgrading.
 .. _#90: https://github.com/saltyrtc/saltyrtc-server-python/issues/90
 .. _SaltyRTC 1.0 Protocol: https://github.com/saltyrtc/saltyrtc-meta/blob/protocol-1.0/Protocol.md
 
+.. _Unreleased: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.1.1...HEAD
 .. _3.1.2: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.1.1...v3.1.2
 .. _3.1.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.1.0...v3.1.1
 .. _3.1.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.0.1...v3.1.0
