@@ -6,6 +6,10 @@ import enum
 import os
 import signal
 import stat
+from typing import Any  # noqa
+from typing import List  # noqa
+from typing import Optional  # noqa
+from typing import Sequence  # noqa
 
 import click
 import libnacl.public
@@ -15,6 +19,9 @@ from . import (
     server,
     util,
 )
+from .typing import Coroutine  # noqa
+from .typing import ServerSecretPermanentKey  # noqa
+from .typing import LogbookLevel
 
 __all__ = (
     'cli',
@@ -25,7 +32,7 @@ __all__ = (
 )
 
 
-def _h(text):
+def _h(text: str) -> str:
     """
     For some reason, :mod:`click` does not strip new line characters
     from helps in :func:`click.option` (although it does strip them
@@ -35,10 +42,9 @@ def _h(text):
     return text.replace('\n', ' ')
 
 
-def _get_logging_level(verbosity):
-    # noinspection PyPackageRequirements
+def _get_logging_level(verbosity: int) -> LogbookLevel:
     import logbook
-    return {
+    return LogbookLevel({
         1: logbook.CRITICAL,
         2: logbook.ERROR,
         3: logbook.WARNING,
@@ -46,7 +52,7 @@ def _get_logging_level(verbosity):
         5: logbook.INFO,
         6: logbook.DEBUG,
         7: logbook.TRACE,
-    }[verbosity]
+    }[verbosity])
 
 
 class _ErrorCode(enum.IntEnum):
@@ -63,15 +69,13 @@ _logging_levels = 7
               default=0, help="Logging verbosity.")
 @click.option('-c', '--colored', is_flag=True, help='Colourise logging output.')
 @click.pass_context
-def cli(ctx, verbosity, colored):
+def cli(ctx: click.Context, verbosity: int, colored: bool) -> None:
     """
     Command Line Interface. Use --help for details.
     """
     if verbosity > 0:
         try:
-            # noinspection PyPackageRequirements,PyUnresolvedReferences
-            import logbook
-            # noinspection PyUnresolvedReferences,PyPackageRequirements
+            # noinspection PyUnresolvedReferences
             import logbook.more
         except ImportError:
             click.echo('Please install saltyrtc.server[logging] for logging support.',
@@ -108,7 +112,7 @@ def cli(ctx, verbosity, colored):
 Show the current version of the SaltyRTC signalling server and the
 implemented protocol versions.
 """)
-def version():
+def version() -> None:
     click.echo('Version: {}'.format(_version))
     click.echo('Protocols: {}'.format(server.Server.subprotocols))
 
@@ -118,7 +122,7 @@ Generate a new permanent key pair for the server and write the private key to
 the respective KEY_FILE.
 """)
 @click.argument('KEY_FILE', type=click.Path(writable=True, dir_okay=False))
-def generate(key_file):
+def generate(key_file: str) -> None:
     # Generate key pair
     key_pair = libnacl.public.SecretKey()
 
@@ -155,19 +159,19 @@ provided will be used as the primary key."""))
 @click.option('-l', '--loop', type=click.Choice(['asyncio', 'uvloop']), default='asyncio',
               help="Use a specific asyncio-compatible event loop. Defaults to 'asyncio'.")
 @click.pass_context
-def serve(ctx, **arguments):
+def serve(ctx: click.Context, **arguments: Any) -> None:
     # Get arguments
-    ssl_cert = arguments.get('sslcert', None)
-    ssl_key = arguments.get('sslkey', None)
-    dh_params = arguments.get('dhparams', None)
-    keys = arguments.get('key')
-    host = arguments.get('host')
-    port = arguments['port']
-    loop = arguments['loop']
+    ssl_cert = arguments.get('sslcert', None)  # type: Optional[str]
+    ssl_key = arguments.get('sslkey', None)  # type: Optional[str]
+    dh_params = arguments.get('dhparams', None)  # type: Optional[str]
+    keys_str = arguments['key']  # type: Sequence[str]
+    host = arguments.get('host')  # type: Optional[str]
+    port = arguments['port']  # type: int
+    loop_str = arguments['loop']  # type: str
     safety_off = os.environ.get('SALTYRTC_SAFETY_OFF') == 'yes-and-i-know-what-im-doing'
 
     # Make sure the user provides cert & keys or has safety turned off
-    if ssl_cert is None or len(keys) == 0:
+    if ssl_cert is None or len(keys_str) == 0:
         if safety_off:
             click.echo(('It is RECOMMENDED to use SaltyRTC with both a SSL '
                        'certificate and a server permanent key!'), err=True)
@@ -185,8 +189,8 @@ def serve(ctx, **arguments):
             certfile=ssl_cert, keyfile=ssl_key, dh_params_file=dh_params)
 
     # Get private permanent keys of the server
-    if len(keys) > 0:
-        keys = [util.load_permanent_key(key) for key in keys]
+    keys = [util.load_permanent_key(key)
+            for key in keys_str]  # type: List[ServerSecretPermanentKey]
 
     # Validate permanent keys
     # Note: The permanent keys will be checked in the server coroutine but we don't want
@@ -197,9 +201,9 @@ def serve(ctx, **arguments):
         ctx.exit(code=_ErrorCode.repeated_keys)
 
     # Set event loop policy
-    if loop == 'uvloop':
+    if loop_str == 'uvloop':
         try:
-            # noinspection PyPackageRequirements,PyUnresolvedReferences
+            # noinspection PyUnresolvedReferences
             import uvloop
         except ImportError:
             click.echo("Cannot use event loop 'uvloop', make sure it is installed.",
@@ -209,7 +213,7 @@ def serve(ctx, **arguments):
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
     # Get event loop
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_event_loop()  # type: asyncio.AbstractEventLoop
 
     while True:
         # Run the server
@@ -221,14 +225,17 @@ def serve(ctx, **arguments):
             for i, key in enumerate(secondary_keys, start=1):
                 click.echo('Secondary key #{}: {}'.format(
                     i, key.hex_pk().decode('ascii')))
-        coroutine = server.serve(ssl_context, keys, host=host, port=port, loop=loop)
+        coroutine = server.serve(
+            ssl_context, keys,
+            host=host, port=port, loop=loop
+        )  # type: Coroutine[Any, Any, server.Server]
         server_ = loop.run_until_complete(coroutine)
 
         # Restart server on HUP signal
-        restart_signal = asyncio.Future(loop=loop)
+        restart_signal = asyncio.Future(loop=loop)  # type: asyncio.Future[None]
 
-        def _restart_signal_handler(*_):
-            restart_signal.set_result(True)
+        def _restart_signal_handler() -> None:
+            restart_signal.set_result(None)
 
         # Register restart server routine
         try:
@@ -261,7 +268,7 @@ def serve(ctx, **arguments):
     loop.close()
 
 
-def main():
+def main() -> None:
     obj = {'logging_handler': None}
     try:
         cli(obj=obj)
@@ -270,8 +277,14 @@ def main():
         click.echo(exc, err=True)
         raise
     finally:
-        if obj['logging_handler'] is not None:
-            obj['logging_handler'].pop_application()
+        try:
+            import logbook  # noqa
+        except ImportError:
+            pass
+        else:
+            logging_handler = obj['logging_handler']  # type: Optional[logbook.Handler]
+            if logging_handler is not None:
+                logging_handler.pop_application()
 
 
 if __name__ == '__main__':

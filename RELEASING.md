@@ -8,6 +8,7 @@ Signing key: https://lgrahl.de/pub/pgp-key.txt
    ```bash
    flake8 .
    isort -rc -c . || isort -rc -df
+   MYPYPATH=${PWD}/stubs mypy saltyrtc examples
    py.test
    ```
 

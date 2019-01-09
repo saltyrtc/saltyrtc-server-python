@@ -5,9 +5,22 @@ Server.
 import binascii
 import logging
 import ssl
+from typing import (
+    Any,
+    List,
+    Mapping,
+    Optional,
+)
 
 import libnacl
 import libnacl.public
+
+from .typing import (
+    LogbookLevel,
+    LoggingLevel,
+    NoReturn,
+    ServerSecretPermanentKey,
+)
 
 __all__ = (
     'logger_group',
@@ -21,29 +34,38 @@ __all__ = (
 
 
 # noinspection PyPropertyDefinition
-def _logging_error(*_, **__):
+def _logging_error(*_: Any, **__: Any) -> NoReturn:
     raise ImportError('Please install saltyrtc.server[logging] for logging support')
 
 
+_logger_redirect_handler = None  # type: Optional[logbook.compat.RedirectLoggingHandler]
+_logger_convert_level_handler = None  # type: Optional[logbook.compat.LoggingHandler]
+
 try:
-    # noinspection PyPackageRequirements,PyUnresolvedReferences
+    # noinspection PyUnresolvedReferences
     import logbook
 except ImportError:
     class _Logger:
         """
         Dummy logger in case :mod:`logbook` is not present.
         """
-        def __init__(self, name, level=0):
+        def __init__(self, name: str, level: Optional[int] = 0) -> None:
             self.name = name
             self.level = level
         debug = info = warn = warning = notice = error = exception = \
             critical = log = lambda *a, **kw: None
 
+    # noinspection PyPropertyDefinition
     class _LoggerGroup:
         """
         Dummy logger group in case :mod:`logbook` is not present.
         """
-        def __init__(self, loggers=None, level=0, processor=None):
+        def __init__(
+                self,
+                loggers: Optional[List[Any]] = None,
+                level: Optional[int] = 0,
+                processor: Optional[Any] = None,
+        ) -> None:
             self.loggers = loggers
             self.level = level
             self.processor = processor
@@ -51,48 +73,44 @@ except ImportError:
         disabled = property(lambda *_, **__: True, _logging_error)
         add_logger = remove_logger = process_record = _logging_error
 
-    _logger_redirect_handler = None
-    _logger_convert_level_handler = None
+    logger_group = _LoggerGroup()
 else:
-    _Logger = logbook.Logger
-
-    # noinspection PyPep8Naming
-    def _LoggerGroup():
-        group = logbook.LoggerGroup()
-        group.disabled = True
-        return group
+    _Logger = logbook.Logger  # type: ignore
 
     _logger_redirect_handler = logbook.compat.RedirectLoggingHandler()
     _logger_convert_level_handler = logbook.compat.LoggingHandler()
 
+    logger_group = logbook.LoggerGroup()
+    logger_group.disabled = True
 
-# Create logger group
-logger_group = _LoggerGroup()
 
-
-def _convert_level(logging_level):
+def _convert_level(logbook_level: LogbookLevel) -> LoggingLevel:
     """
-    Convert a :mod:`logging` level to a :mod:`logbook` level.
+    Convert a :mod:`logbook` level to a :mod:`logging` level.
 
     Arguments:
-        - `logging_level`: A :mod:`logging` level.
+        - `logging_level`: A :mod:`logbook` level.
 
     Raises :class:`ImportError` in case :mod:`logbook` is not
     installed.
     """
     if _logger_convert_level_handler is None:
         _logging_error()
-    return _logger_convert_level_handler.convert_level(logging_level)
+    return LoggingLevel(_logger_convert_level_handler.convert_level(logbook_level))
 
 
-def _redirect_logging_loggers(logging_loggers, remove=False):
+def _redirect_logging_loggers(
+        wrapped_loggers: Mapping[str, LogbookLevel],
+        remove: Optional[bool] = False,
+) -> None:
     """
-    Enable logging and redirect :mod:`logging` loggers of dependencies.
+    Enable logging and redirect :mod:`logging` loggers to
+    :mod:`logbook`.
 
     Arguments:
-        - `logging_loggers`: A dictionary containing :mod:`logging`
-          logger names as key and their respective :mod:`logging` level
-          as value. These loggers will be redirected to logbook.
+        - `wrapped_loggers`: A dictionary containing :mod:`logging`
+          logger names as key and the targeted :mod:`logbook` logging
+          level as value. These loggers will be redirected to logbook.
         - `remove`: Flag to remove the redirect handler from each
           logger instead of adding it.
 
@@ -103,7 +121,7 @@ def _redirect_logging_loggers(logging_loggers, remove=False):
         _logging_error()
 
     # At this point, logbook is either defined or an error has been returned
-    for name, level in logging_loggers.items():
+    for name, level in wrapped_loggers.items():
         # Lookup logger and translate level
         logger = logging.getLogger(name)
         logger.setLevel(_convert_level(level))
@@ -115,7 +133,10 @@ def _redirect_logging_loggers(logging_loggers, remove=False):
             logger.addHandler(_logger_redirect_handler)
 
 
-def enable_logging(level=None, redirect_loggers=None):
+def enable_logging(
+        level: Optional[LogbookLevel] = None,
+        redirect_loggers: Optional[Mapping[str, LogbookLevel]] = None,
+) -> None:
     """
     Enable logging for the *saltyrtc* logger group.
 
@@ -123,9 +144,9 @@ def enable_logging(level=None, redirect_loggers=None):
         - `level`: A :mod:`logbook` logging level. Defaults to
           ``WARNING``.
         - `redirect_loggers`: A dictionary containing :mod:`logging`
-          logger names as key and their respective :mod:`logging` level
-          as value. Each logger will be looked up and redirected to
-          :mod:`logbook`. Defaults to an empty dictionary.
+          logger names as key and the targeted :mod:`logbook` logging
+          level as value. Each logger will be looked up and redirected
+          to :mod:`logbook`. Defaults to an empty dictionary.
 
     Raises :class:`ImportError` in case :mod:`logbook` is not
     installed.
@@ -142,16 +163,18 @@ def enable_logging(level=None, redirect_loggers=None):
         _redirect_logging_loggers(redirect_loggers, remove=False)
 
 
-def disable_logging(redirect_loggers=None):
+def disable_logging(
+        redirect_loggers: Optional[Mapping[str, LogbookLevel]] = None,
+) -> None:
     """
     Disable logging for the *saltyrtc* logger group.
 
     Arguments:
         - `level`: A :mod:`logbook` logging level.
         - `redirect_loggers`: A dictionary containing :mod:`logging`
-          logger names as key and their respective :mod:`logging` level
-          as value. Each logger will be looked up and removed from the
-          redirect handler. Defaults to an empty dictionary.
+          logger names as key and the targeted :mod:`logbook` logging
+          level as value. Each logger will be looked up and removed
+          from the redirect handler. Defaults to an empty dictionary.
 
     Raises :class:`ImportError` in case :mod:`logbook` is not
     installed.
@@ -161,13 +184,18 @@ def disable_logging(redirect_loggers=None):
         _redirect_logging_loggers(redirect_loggers, remove=True)
 
 
-def get_logger(name=None, level=None):
+def get_logger(
+        name: Optional[str] = None,
+        level: Optional[LogbookLevel] = None,
+) -> 'logbook.Logger':
     """
     Return a :class:`logbook.Logger`.
 
     Arguments:
-        - `name`: The name of a specific sub-logger.
-        - `level`: A :mod:`logbook` logging level.
+        - `name`: The name of a specific sub-logger. Defaults to
+          `saltyrtc`. If supplied, will be prefixed with `saltyrtc.`.
+        - `level`: A :mod:`logbook` logging level. Defaults to
+          :attr:`logbook.NOTSET`.
     """
     if _logger_convert_level_handler is None:
         _logging_error()
@@ -184,7 +212,7 @@ def get_logger(name=None, level=None):
     return logger
 
 
-def consteq(left, right):
+def consteq(left: bytes, right: bytes) -> bool:
     """
     Compares two byte instances with one another. If `a` and `b` have
     different lengths, return `False` immediately. Otherwise `a` and `b`
@@ -198,7 +226,11 @@ def consteq(left, right):
     return libnacl.bytes_eq(left, right)
 
 
-def create_ssl_context(certfile, keyfile=None, dh_params_file=None):
+def create_ssl_context(
+        certfile: str,
+        keyfile: Optional[str] = None,
+        dh_params_file: Optional[str] = None,
+) -> ssl.SSLContext:
     """
     Create and return a :class:`ssl.SSLContext` for the server.
     The settings are chosen by the :mod:`ssl` module, and usually
@@ -221,7 +253,7 @@ def create_ssl_context(certfile, keyfile=None, dh_params_file=None):
     return ssl_context
 
 
-def load_permanent_key(key):
+def load_permanent_key(key: str) -> ServerSecretPermanentKey:
     """
     Decode a hex-encoded NaCl private permanent key or read it from a
     file.
@@ -244,9 +276,9 @@ def load_permanent_key(key):
 
     # Un-hexlify
     try:
-        key = binascii.unhexlify(key)
+        key_bytes = binascii.unhexlify(key)
     except binascii.Error as exc:
         raise ValueError('Could not decode key') from exc
 
     # Convert to private key (raises ValueError on its own)
-    return libnacl.public.SecretKey(sk=key)
+    return ServerSecretPermanentKey(libnacl.public.SecretKey(sk=key_bytes))

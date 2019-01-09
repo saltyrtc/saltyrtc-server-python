@@ -1,34 +1,14 @@
 import collections
 import enum
-from typing import (  # noqa
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Union,
-)
+from typing import Dict  # noqa
+from typing import List
 
-try:
-    from typing import Coroutine
-except ImportError:
-    from collections.abc import Coroutine  # Python <= 3.5.2
+from .typing import EventCallback
 
 __all__ = (
-    'DisconnectedData',
-    'EventData',
-    'EventCallback',
     'Event',
     'EventRegistry',
 )
-
-
-# Types
-DisconnectedData = int
-EventData = Union[
-    None,  # `initiator-connected` / `responder-connected`
-    DisconnectedData,
-]
-EventCallback = Callable[[str, Optional[str], EventData], Coroutine],
 
 
 @enum.unique
@@ -49,6 +29,7 @@ class EventRegistry:
 
     A callback must be an `async` function. When it is being invoked,
     the following parameters need to be provided:
+        - `event`: The :class:`Event` that is being raised.
         - `path`: A `str` instance containing the path in hexadecimal
           representation an event is associated to or `None` if
           unavailable (which can only happen in case of a `disconnected`
@@ -61,9 +42,11 @@ class EventRegistry:
         - `responder-connected`: `None`
         - `disconnected`: :class:`DisconnectedData`
     """
-    events = collections.defaultdict(list)  # type: Dict[Event, List[EventCallback]]
+    def __init__(self) -> None:
+        self.events = \
+            collections.defaultdict(list)  # type: Dict[Event, List[EventCallback]]
 
-    def register(self, event: Event, handler: EventCallback):
+    def register(self, event: Event, handler: EventCallback) -> None:
         """
         Register an event callback.
         """

@@ -8,9 +8,9 @@ import collections
 import pytest
 
 from saltyrtc.server import (
-    AddressType,
+    SERVER_ADDRESS,
     CloseCode,
-    RawMessage,
+    RelayMessage,
     ServerProtocol,
     exception,
     serve,
@@ -77,16 +77,15 @@ class TestServer:
 
         # Mock the initiator receive loop and cancel itself after a brief timeout
         class _MockProtocol(ServerProtocol):
-            def initiator_receive_loop(self):
-                receive_loop = asyncio.ensure_future(
-                    super().initiator_receive_loop(), loop=self._loop)
+            async def initiator_receive_loop(self):
+                receive_loop = self._loop.create_task(super().initiator_receive_loop())
 
                 async def _cancel_loop():
                     await sleep(0.1)
                     receive_loop.cancel()
 
-                asyncio.ensure_future(_cancel_loop(), loop=self._loop)
-                return receive_loop
+                self._loop.create_task(_cancel_loop())
+                await receive_loop
 
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
@@ -122,7 +121,7 @@ class TestServer:
                 async def _revert_future():
                     await sleep(0.05)
                     self.client._connection_closed_future = connection_closed_future
-                asyncio.ensure_future(_revert_future(), loop=self._loop)
+                self._loop.create_task(_revert_future())
 
                 # Resolve the connection closed future and the loop future
                 self.client._connection_closed_future.set_result(1337)
@@ -212,8 +211,8 @@ class TestServer:
                 await close_future
 
                 async def _send_task():
-                    message = RawMessage(AddressType.server, self.client.id, b'\x00')
-                    message._nonce = b'\x00' * 24
+                    message = RelayMessage(
+                        SERVER_ADDRESS, self.client.id, b'\x00', b'\x00' * 24)
                     await self.client.send(message)
 
                 await self.client.enqueue_task(_send_task())
@@ -435,7 +434,7 @@ class TestServer:
         async def enqueue_bad_task():
             cancelled_future = asyncio.Future(loop=event_loop)
             await path_client.enqueue_task(
-                asyncio.ensure_future(bad_coroutine(cancelled_future)))
+                event_loop.create_task(bad_coroutine(cancelled_future)))
             return cancelled_future
 
         # Enqueue misbehaving task
