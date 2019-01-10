@@ -20,8 +20,8 @@ __all__ = (
 )
 
 
-# noinspection PyUnusedLocal,PyPropertyDefinition
-def _logging_error(*args, **kwargs):
+# noinspection PyPropertyDefinition
+def _logging_error(*_, **__):
     raise ImportError('Please install saltyrtc.server[logging] for logging support')
 
 
@@ -48,7 +48,7 @@ except ImportError:
             self.level = level
             self.processor = processor
 
-        disabled = property(lambda: True, _logging_error)
+        disabled = property(lambda *_, **__: True, _logging_error)
         add_logger = remove_logger = process_record = _logging_error
 
     _logger_redirect_handler = None
