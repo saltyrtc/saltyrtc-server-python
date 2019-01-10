@@ -12,11 +12,14 @@ from saltyrtc.server import (
     validate_client_id,
     validate_responder_id,
     validate_responder_ids,
+    validate_subprotocol,
+    validate_subprotocols,
 )
 
+valid_subprotocols = ['', 'kittie-protocol-3000']
 valid_client_ids = [0x01, 0x30, 0xff]
 valid_responder_ids = [0x02, 0x30, 0xff]
-
+invalid_subprotocols = [b'h3h3', 1, float(3.3333)]
 invalid_client_ids = [
     b'\x01',
     'meow',
@@ -29,7 +32,45 @@ invalid_client_ids = [
 invalid_responder_ids = invalid_client_ids + [0x01]
 
 
-@pytest.mark.usefixtures('evaluate_log')
+class TestSubprotocol:
+    """
+    A sub-protocol must be a string.
+    """
+    @pytest.mark.parametrize('subprotocol', invalid_subprotocols)
+    def test_invalid_subprotocol(self, subprotocol: Any) -> None:
+        with pytest.raises(MessageError) as exc_info:
+            validate_subprotocol(subprotocol)
+        assert 'Invalid sub-protocol' in str(exc_info.value)
+
+    @pytest.mark.parametrize('subprotocol', valid_subprotocols)
+    def test_valid_subprotocol(self, subprotocol: str) -> None:
+        validate_subprotocol(subprotocol)
+
+
+class TestSubprotocols:
+    """
+    A sub-protocol must contain a list of strings.
+    """
+    @pytest.mark.parametrize('subprotocols', valid_subprotocols + invalid_subprotocols)
+    def test_invalid_not_list_like(self, subprotocols: Any) -> None:
+        with pytest.raises(MessageError) as exc_info:
+            validate_subprotocols(subprotocols)
+        assert 'Sub-protocols not list or tuple' in str(exc_info.value)
+
+    @pytest.mark.parametrize('subprotocols', [invalid_subprotocols])
+    def test_invalid_ids(self, subprotocols: Union[List[Any], Tuple[Any]]):
+        with pytest.raises(MessageError) as exc_info:
+            validate_subprotocols(subprotocols)
+        assert 'Invalid sub-protocol' in str(exc_info.value)
+
+    @pytest.mark.parametrize('subprotocols', [
+        tuple(valid_subprotocols),
+        list(valid_subprotocols)
+    ])
+    def test_valid_ids(self, subprotocols: Union[List[str], Tuple[str]]) -> None:
+        validate_subprotocols(subprotocols)
+
+
 class TestClientId:
     """
     A client id must be an integer in the valid range of client ids.
