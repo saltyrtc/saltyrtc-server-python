@@ -749,7 +749,7 @@ class ServerProtocol(Protocol):
                     pong_future, client.keep_alive_timeout, loop=self._loop)
             except asyncio.TimeoutError:
                 client.log.debug('Ping timed out')
-                raise PingTimeoutError(client)
+                raise PingTimeoutError(str(client))
             else:
                 client.log.debug('Pong')
                 client.keep_alive_pings += 1

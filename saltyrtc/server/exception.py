@@ -12,6 +12,7 @@ __all__ = (
     'Disconnected',
     'MessageError',
     'DowngradeError',
+    'Disconnected',
 )
 
 
@@ -30,7 +31,7 @@ class InternalError(SignalingError):
 
 class PathError(SignalingError):
     """
-    TODO: Describe
+    Invalid path provided by the client.
     """
 
 
@@ -50,27 +51,25 @@ class ServerKeyError(SignalingError):
 
 class MessageFlowError(SignalingError):
     """
-    TODO: Describe
+    Raised when an associated message is considered valid but it has
+    been sent or received at a point in time where it's unexpected or
+    other circumstances prevent it from being processed (such as a
+    combined sequence number overflow).
     """
 
 
 class PingTimeoutError(SignalingError):
     """
-    TODO: Describe
+    The client did not respond to a WebSocket *ping* in time.
+
+    Arguments:
+        - `client_name`: The *name* of the client that did not respond.
     """
-    def __init__(self, client):
-        self.client = client
+    def __init__(self, client_name):
+        self.client_name = client_name
 
     def __str__(self):
-        return 'Ping to {} timed out'.format(*self.args)
-
-
-class Disconnected(Exception):
-    """
-    TODO: Describe
-    """
-    def __init__(self, reason: int = None):
-        self.reason = reason
+        return 'Ping to {} timed out'.format(self.client_name)
 
 
 class MessageError(SignalingError):
@@ -83,3 +82,15 @@ class DowngradeError(SignalingError):
     """
     A protocol downgrade has been detected.
     """
+
+
+class Disconnected(Exception):
+    """
+    The client disconnected from the server or has been disconnected by
+    the server.
+
+    ..note:: This does not derive from :class:`SignalingError` since it
+             is not considered an *error*.
+    """
+    def __init__(self, reason: int = None):
+        self.reason = reason
