@@ -211,21 +211,20 @@ def validate_initiator_connected(initiator_connected):
 
 
 def validate_client_id(id_):
-    if not is_client_id(id_):
+    if not isinstance(id_, int) or not is_client_id(id_):
         raise MessageError('Invalid client id: {}'.format(id_))
 
 
 def validate_responder_id(id_):
-    if not is_responder_id(id_):
+    if not isinstance(id_, int) or not is_responder_id(id_):
         raise MessageError('Invalid responder id: {}'.format(id_))
 
 
 def validate_responder_ids(ids):
-    try:
-        iterator = iter(ids)
-    except TypeError as exc:
-        raise MessageError('Responder list is not iterable') from exc
-    for responder in iterator:
+    if not isinstance(ids, (list, tuple)):
+        raise MessageError('Responder ids not list or tuple (type `{}`)'.format(
+            type(ids)))
+    for responder in ids:
         validate_responder_id(responder)
 
 
