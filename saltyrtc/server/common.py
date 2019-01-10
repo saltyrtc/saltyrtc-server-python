@@ -29,6 +29,7 @@ __all__ = (
     'is_initiator_id',
     'is_responder_id',
     'validate_public_key',
+    'validate_subprotocol',
     'validate_subprotocols',
     'validate_cookie',
     'validate_signed_keys',
@@ -183,12 +184,18 @@ def validate_cookie(cookie):
             len(cookie), COOKIE_LENGTH))
 
 
+def validate_subprotocol(subprotocol):
+    if not isinstance(subprotocol, str):
+        raise MessageError('Invalid sub-protocol: Must be `str` (is `{}`)'.format(
+            type(subprotocol)))
+
+
 def validate_subprotocols(subprotocols):
-    try:
-        iter(subprotocols)
-    except TypeError as exc:
-        raise MessageError('Sub-protocol list is not iterable (type `{}`)'.format(
-            type(subprotocols))) from exc
+    if not isinstance(subprotocols, (list, tuple)):
+        raise MessageError('Sub-protocols not list or tuple (type `{}`)'.format(
+            type(subprotocols)))
+    for subprotocol in subprotocols:
+        validate_subprotocol(subprotocol)
 
 
 def validate_signed_keys(signed_keys):
