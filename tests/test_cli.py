@@ -16,49 +16,49 @@ from saltyrtc.server import (
 @pytest.mark.usefixtures('evaluate_log')
 class TestCLI:
     @pytest.mark.asyncio
-    def test_invalid_command(self, cli):
+    async def test_invalid_command(self, cli):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli('meow')
+            await cli('meow')
         assert 'No such command "meow"' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_invalid_verbosity(self, cli):
+    async def test_invalid_verbosity(self, cli):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli('-v', '8')
+            await cli('-v', '8')
         assert 'is not in the valid range' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_import_error_logbook(self, cli, fake_logbook_env):
+    async def test_import_error_logbook(self, cli, fake_logbook_env):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli('-v', '7', 'serve', '-p', '8443', env=fake_logbook_env)
+            await cli('-v', '7', 'serve', '-p', '8443', env=fake_logbook_env)
         assert ('Please install saltyrtc.server[logging] for '
                 'logging support') in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_get_version(self, cli):
-        output = yield from cli('-v', '7', '-c', 'version')
+    async def test_get_version(self, cli):
+        output = await cli('-v', '7', '-c', 'version')
         assert 'Version: {}'.format(_version) in output
         assert str(Server.subprotocols) in output
 
     @pytest.mark.asyncio
-    def test_generate_key_invalid_path(self, cli, tmpdir):
+    async def test_generate_key_invalid_path(self, cli, tmpdir):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli('generate', str(tmpdir))
+            await cli('generate', str(tmpdir))
         assert 'is a directory' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_generate_key_invalid_permissions(self, cli, tmpdir):
+    async def test_generate_key_invalid_permissions(self, cli, tmpdir):
         keyfile = tmpdir.join('keyfile.key')
         keyfile.write('meow')
         keyfile.chmod(stat.S_IREAD)
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli('generate', str(keyfile))
+            await cli('generate', str(keyfile))
         assert 'is not writable' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_generate_key(self, cli, tmpdir):
+    async def test_generate_key(self, cli, tmpdir):
         keyfile = tmpdir.join('keyfile.key')
-        yield from cli('generate', str(keyfile))
+        await cli('generate', str(keyfile))
 
         # Check length
         key = binascii.unhexlify(keyfile.read())
@@ -70,9 +70,9 @@ class TestCLI:
         assert permissions & stat.S_IRWXU == stat.S_IRUSR | stat.S_IWUSR
 
     @pytest.mark.asyncio
-    def test_serve_key_missing(self, cli):
+    async def test_serve_key_missing(self, cli):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-p', '8443',
@@ -80,9 +80,9 @@ class TestCLI:
         assert 'It is REQUIRED' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_cert_missing(self, cli):
+    async def test_serve_cert_missing(self, cli):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
                 '-sk', pytest.saltyrtc.key,
@@ -91,11 +91,11 @@ class TestCLI:
         assert 'It is REQUIRED' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_invalid_cert(self, cli, tmpdir):
+    async def test_serve_invalid_cert(self, cli, tmpdir):
         cert = tmpdir.join('cert.pem')
         cert.write('meowmeow')
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-sc', str(cert),
                 '-k', pytest.saltyrtc.permanent_key_primary,
@@ -104,11 +104,11 @@ class TestCLI:
         assert 'SSLError' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_invalid_key_file(self, cli, tmpdir):
+    async def test_serve_invalid_key_file(self, cli, tmpdir):
         keyfile = tmpdir.join('keyfile.key')
         keyfile.write('6d656f77')
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
                 '-sk', pytest.saltyrtc.key,
@@ -118,11 +118,11 @@ class TestCLI:
         assert 'ValueError' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_invalid_dh_params_file(self, cli, tmpdir):
+    async def test_serve_invalid_dh_params_file(self, cli, tmpdir):
         dh_params_file = tmpdir.join('dh_params.pem')
         dh_params_file.write('meowmeow')
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
                 '-sk', pytest.saltyrtc.key,
@@ -133,10 +133,10 @@ class TestCLI:
         assert 'SSLError' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_invalid_hex_encoded_key(self, cli):
+    async def test_serve_invalid_hex_encoded_key(self, cli):
         key = open(pytest.saltyrtc.permanent_key_primary, 'r').read()[:63]
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
                 '-sk', pytest.saltyrtc.key,
@@ -146,9 +146,9 @@ class TestCLI:
         assert 'ValueError' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_invalid_host(self, cli):
+    async def test_serve_invalid_host(self, cli):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
                 '-sk', pytest.saltyrtc.key,
@@ -159,9 +159,9 @@ class TestCLI:
         assert 'Name or service not known' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_invalid_port(self, cli):
+    async def test_serve_invalid_port(self, cli):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
                 '-sk', pytest.saltyrtc.key,
@@ -171,9 +171,9 @@ class TestCLI:
         assert 'is not a valid integer' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_invalid_loop(self, cli):
+    async def test_serve_invalid_loop(self, cli):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
                 '-sk', pytest.saltyrtc.key,
@@ -185,9 +185,9 @@ class TestCLI:
 
     @pytest.saltyrtc.no_uvloop
     @pytest.mark.asyncio
-    def test_serve_uvloop_unavailable(self, cli):
+    async def test_serve_uvloop_unavailable(self, cli):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
                 '-sk', pytest.saltyrtc.key,
@@ -198,8 +198,8 @@ class TestCLI:
         assert "Cannot use event loop 'uvloop'" in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio(self, cli):
-        output = yield from cli(
+    async def test_serve_asyncio(self, cli):
+        output = await cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-sk', pytest.saltyrtc.key,
@@ -210,8 +210,8 @@ class TestCLI:
         assert 'Stopped' in output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio_dh_params(self, cli):
-        output = yield from cli(
+    async def test_serve_asyncio_dh_params(self, cli):
+        output = await cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-sk', pytest.saltyrtc.key,
@@ -223,8 +223,8 @@ class TestCLI:
         assert 'Stopped' in output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio_hex_encoded_key(self, cli):
-        output = yield from cli(
+    async def test_serve_asyncio_hex_encoded_key(self, cli):
+        output = await cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-sk', pytest.saltyrtc.key,
@@ -235,8 +235,8 @@ class TestCLI:
         assert 'Stopped' in output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio_plus_logging(self, cli):
-        output = yield from cli(
+    async def test_serve_asyncio_plus_logging(self, cli):
+        output = await cli(
             '-v', '7',
             'serve',
             '-sc', pytest.saltyrtc.cert,
@@ -250,8 +250,8 @@ class TestCLI:
 
     @pytest.saltyrtc.have_uvloop
     @pytest.mark.asyncio
-    def test_serve_uvloop(self, cli):
-        output = yield from cli(
+    async def test_serve_uvloop(self, cli):
+        output = await cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-sk', pytest.saltyrtc.key,
@@ -264,8 +264,8 @@ class TestCLI:
 
     @pytest.saltyrtc.have_uvloop
     @pytest.mark.asyncio
-    def test_serve_uvloop_dh_params(self, cli):
-        output = yield from cli(
+    async def test_serve_uvloop_dh_params(self, cli):
+        output = await cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-sk', pytest.saltyrtc.key,
@@ -279,8 +279,8 @@ class TestCLI:
 
     @pytest.saltyrtc.have_uvloop
     @pytest.mark.asyncio
-    def test_serve_uvloop_plus_logging(self, cli):
-        output = yield from cli(
+    async def test_serve_uvloop_plus_logging(self, cli):
+        output = await cli(
             '-v', '7',
             'serve',
             '-sc', pytest.saltyrtc.cert,
@@ -294,8 +294,8 @@ class TestCLI:
         assert 'Closing protocols' in output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio_restart(self, cli):
-        output = yield from cli(
+    async def test_serve_asyncio_restart(self, cli):
+        output = await cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-sk', pytest.saltyrtc.key,
@@ -308,21 +308,21 @@ class TestCLI:
         assert output.count('Stopped') == 2
 
     @pytest.mark.asyncio
-    def test_serve_safety_not_quite_off(self, cli):
+    async def test_serve_safety_not_quite_off(self, cli):
         env = os.environ.copy()
         env['SALTYRTC_SAFETY_OFF'] = 'Eh... yeah'
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 env=env,
              )
         assert 'It is REQUIRED' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_safety_off(self, cli):
+    async def test_serve_safety_off(self, cli):
         env = os.environ.copy()
         env['SALTYRTC_SAFETY_OFF'] = 'yes-and-i-know-what-im-doing'
-        output = yield from cli(
+        output = await cli(
             'serve',
             '-p', '8443',
             signal=signal.SIGINT,
@@ -331,7 +331,7 @@ class TestCLI:
         assert 'Stopped' in output
 
     @pytest.mark.asyncio
-    def test_serve_repeated_key(self, cli):
+    async def test_serve_repeated_key(self, cli):
         primary_key = open(pytest.saltyrtc.permanent_key_primary, 'r').read()
         combinations = [
             ['-k', pytest.saltyrtc.permanent_key_primary,
@@ -345,7 +345,7 @@ class TestCLI:
         # Try all combinations
         for key_arguments in combinations:
             with pytest.raises(subprocess.CalledProcessError) as exc_info:
-                yield from cli(*[
+                await cli(*[
                     'serve',
                     '-sc', pytest.saltyrtc.cert,
                     '-sk', pytest.saltyrtc.key,
@@ -354,11 +354,11 @@ class TestCLI:
             assert 'key has been supplied more than once' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_invalid_2nd_key_file(self, cli, tmpdir):
+    async def test_serve_invalid_2nd_key_file(self, cli, tmpdir):
         keyfile = tmpdir.join('keyfile.key')
         keyfile.write('6d656f77')
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
                 '-sk', pytest.saltyrtc.key,
@@ -369,10 +369,10 @@ class TestCLI:
         assert 'ValueError' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_invalid_2nd_hex_encoded_key(self, cli):
+    async def test_serve_invalid_2nd_hex_encoded_key(self, cli):
         key = open(pytest.saltyrtc.permanent_key_primary, 'r').read()[:63]
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
-            yield from cli(
+            await cli(
                 'serve',
                 '-sc', pytest.saltyrtc.cert,
                 '-sk', pytest.saltyrtc.key,
@@ -383,7 +383,7 @@ class TestCLI:
         assert 'ValueError' in exc_info.value.output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio_2nd_key(self, cli):
+    async def test_serve_asyncio_2nd_key(self, cli):
         # Load keys
         primary_key = util.load_permanent_key(pytest.saltyrtc.permanent_key_primary)
         primary_key = primary_key.hex_pk().decode('ascii')
@@ -391,7 +391,7 @@ class TestCLI:
         secondary_key = secondary_key.hex_pk().decode('ascii')
 
         # Check output
-        output = yield from cli(
+        output = await cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-sk', pytest.saltyrtc.key,
@@ -405,7 +405,7 @@ class TestCLI:
         assert 'Stopped' in output
 
     @pytest.mark.asyncio
-    def test_serve_asyncio_2nd_key_reversed(self, cli):
+    async def test_serve_asyncio_2nd_key_reversed(self, cli):
         # Load keys
         primary_key = util.load_permanent_key(pytest.saltyrtc.permanent_key_primary)
         primary_key = primary_key.hex_pk().decode('ascii')
@@ -413,7 +413,7 @@ class TestCLI:
         secondary_key = secondary_key.hex_pk().decode('ascii')
 
         # Check output
-        output = yield from cli(
+        output = await cli(
             'serve',
             '-sc', pytest.saltyrtc.cert,
             '-sk', pytest.saltyrtc.key,

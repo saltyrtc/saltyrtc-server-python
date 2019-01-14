@@ -217,10 +217,9 @@ def sleep(event_loop):
     """
     Sleep *timeout* seconds.
     """
-    @asyncio.coroutine
-    def _sleep(delay, **kwargs):
+    async def _sleep(delay, **kwargs):
         kwargs.setdefault('loop', event_loop)
-        yield from asyncio.sleep(delay, **kwargs)
+        await asyncio.sleep(delay, **kwargs)
 
     return _sleep
 
@@ -266,26 +265,23 @@ class TestServer(Server):
             self._most_recent_connection_closed_future.set_result(args)
             self._most_recent_connection_closed_future = asyncio.Future(loop=self._loop)
 
-    @asyncio.coroutine
-    def wait_connections_closed(self):
+    async def wait_connections_closed(self):
         self._log.debug('#protocols remaining: {}', len(self.protocols))
 
-        @asyncio.coroutine
-        def _wait_connections_closed():
+        async def _wait_connections_closed():
             if len(self.protocols) > 0:
                 tasks = [protocol.handler_task for protocol in self.protocols]
-                yield from asyncio.gather(*tasks, loop=self._loop)
+                await asyncio.gather(*tasks, loop=self._loop)
 
-        yield from asyncio.wait_for(
+        await asyncio.wait_for(
             _wait_connections_closed(), timeout=self.timeout, loop=self._loop)
 
-    @asyncio.coroutine
-    def wait_most_recent_connection_closed(self, connection_closed_future=None):
+    async def wait_most_recent_connection_closed(self, connection_closed_future=None):
         # If there is no future, we simply wait for the 'disconnected' event
         if connection_closed_future is None:
             connection_closed_future = self._most_recent_connection_closed_future
-        return (yield from asyncio.wait_for(
-            connection_closed_future, timeout=self.timeout, loop=self._loop))
+        return await asyncio.wait_for(
+            connection_closed_future, timeout=self.timeout, loop=self._loop)
 
     def wait_connection_closed_marker(self):
         protocol = self.protocols[-1]
@@ -420,23 +416,21 @@ class Client:
         self.session_key = None
         self.box = None
 
-    @asyncio.coroutine
-    def send(self, nonce, message, box=_DefaultBox, timeout=None, pack=True):
+    async def send(self, nonce, message, box=_DefaultBox, timeout=None, pack=True):
         if timeout is None:
             timeout = self.timeout
-        return (yield from self.pack_and_send(
+        return await self.pack_and_send(
             self.ws_client, nonce, message,
             box=self.box if box == _DefaultBox else box, timeout=timeout, pack=pack
-        ))
+        )
 
-    @asyncio.coroutine
-    def recv(self, box=_DefaultBox, timeout=None):
+    async def recv(self, box=_DefaultBox, timeout=None):
         if timeout is None:
             timeout = self.timeout
-        return (yield from self.recv_and_unpack(
+        return await self.recv_and_unpack(
             self.ws_client,
             box=self.box if box == _DefaultBox else box, timeout=timeout
-        ))
+        )
 
     def close(self):
         return self.ws_client.close()
@@ -494,8 +488,7 @@ def client_factory(
         ssl.Purpose.SERVER_AUTH, cafile=pytest.saltyrtc.cert)
     ssl_context.load_dh_params(pytest.saltyrtc.dh_params)
 
-    @asyncio.coroutine
-    def _client_factory(
+    async def _client_factory(
             server=None, ws_client=None,
             path=initiator_key, timeout=None, csn=None, cookie=None, permanent_key=None,
             ping_interval=None, explicit_permanent_key=False,
@@ -511,7 +504,7 @@ def client_factory(
         _kwargs = client_kwargs.copy()
         _kwargs.update(kwargs)
         if ws_client is None:
-            ws_client = yield from websockets.connect(
+            ws_client = await websockets.connect(
                 '{}/{}'.format(url(*server.address), key_path(path)),
                 ssl=ssl_context, **_kwargs
             )
@@ -528,7 +521,7 @@ def client_factory(
         key = initiator_key if initiator_handshake else responder_key
 
         # server-hello
-        message, nonce, sck, s, d, start_scsn = yield from client.recv()
+        message, nonce, sck, s, d, start_scsn = await client.recv()
         ssk = message['key']
         nonces['server-hello'] = nonce
 
@@ -537,7 +530,7 @@ def client_factory(
             # client-hello
             nonce = pack_nonce(cck, 0x00, 0x00, ccsn)
             nonces['client-hello'] = nonce
-            yield from client.send(nonce, {
+            await client.send(nonce, {
                 'type': 'client-hello',
                 'key': responder_key.pk,
             })
@@ -556,12 +549,12 @@ def client_factory(
             payload['ping_interval'] = ping_interval
         if explicit_permanent_key is not None:
             payload['your_key'] = permanent_key
-        yield from client.send(nonce, payload)
+        await client.send(nonce, payload)
         ccsn += 1
 
         # server-auth
         client.sign_box = libnacl.public.Box(sk=key, pk=permanent_key)
-        message, nonce, ck, s, d, scsn = yield from client.recv()
+        message, nonce, ck, s, d, scsn = await client.recv()
         nonces['server-auth'] = nonce
 
         # Return client and additional data
@@ -585,10 +578,9 @@ def client_factory(
 
 @pytest.fixture(scope='module')
 def unpack_message(request, event_loop):
-    @asyncio.coroutine
-    def _unpack_message(client, box=None, timeout=None):
+    async def _unpack_message(client, box=None, timeout=None):
         timeout = _get_timeout(timeout=timeout, request=request)
-        data = yield from asyncio.wait_for(client.recv(), timeout, loop=event_loop)
+        data = await asyncio.wait_for(client.recv(), timeout, loop=event_loop)
         nonce = data[:NONCE_LENGTH]
         (cookie,
          source, destination,
@@ -625,8 +617,7 @@ def pack_nonce():
 
 @pytest.fixture(scope='module')
 def pack_message(request, event_loop):
-    @asyncio.coroutine
-    def _pack_message(client, nonce, message, box=None, timeout=None, pack=True):
+    async def _pack_message(client, nonce, message, box=None, timeout=None, pack=True):
         if pack:
             data = umsgpack.packb(message)
         else:
@@ -635,15 +626,14 @@ def pack_message(request, event_loop):
             _, data = box.encrypt(data, nonce=nonce, pack_nonce=False)
         data = b''.join((nonce, data))
         timeout = _get_timeout(timeout=timeout, request=request)
-        yield from asyncio.wait_for(client.send(data), timeout, loop=event_loop)
+        await asyncio.wait_for(client.send(data), timeout, loop=event_loop)
         return data
     return _pack_message
 
 
 @pytest.fixture(scope='module')
 def cli(request, event_loop):
-    @asyncio.coroutine
-    def _call_cli(*args, input=None, timeout=None, signal=None, env=None):
+    async def _call_cli(*args, input=None, timeout=None, signal=None, env=None):
         # Get timeout
         timeout = _get_timeout(timeout=timeout, request=request)
 
@@ -660,7 +650,7 @@ def cli(request, event_loop):
         create = asyncio.create_subprocess_exec(
             *parameters, env=env, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-        process = yield from create
+        process = await create
 
         # Wait for process to terminate
         task = asyncio.ensure_future(process.communicate(input=input), loop=event_loop)
@@ -670,7 +660,7 @@ def cli(request, event_loop):
         output = None
         timeout_exc = False
         try:
-            output, _ = yield from asyncio.wait_for(
+            output, _ = await asyncio.wait_for(
                 maybe_shielded_task, timeout, loop=event_loop)
         except asyncio.TimeoutError:
             if signal is None:
@@ -688,7 +678,7 @@ def cli(request, event_loop):
                 shielded_task = asyncio.shield(task, loop=event_loop)
                 process.send_signal(signal)
                 try:
-                    output, _ = yield from asyncio.wait_for(
+                    output, _ = await asyncio.wait_for(
                         shielded_task, timeout, loop=event_loop)
                 except asyncio.TimeoutError:
                     if i == (length - 1):
