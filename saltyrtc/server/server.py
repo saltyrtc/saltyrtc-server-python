@@ -66,7 +66,6 @@ from .message import (
 from .protocol import (
     Path,
     PathClient,
-    PathClientTasks,
 )
 from .typing import ClassVar  # noqa
 from .typing import (
@@ -429,17 +428,20 @@ class ServerProtocol:
         # Do handshake
         client.log.debug('Starting handshake')
         await self.handshake()
-        client.log.info('Handshake completed')
-
-        # Task: Execute enqueued tasks
-        client.log.debug('Starting to poll for enqueued tasks')
-        task_loop = self.task_loop()
 
         # Check if the client is still connected to the path or has already been dropped.
         # Note: This can happen when the client is being picked up and dropped by another
         #       client while running the handshake. To prevent other race conditions, we
         #       have to add the client instance to the path early during the handshake.
         is_connected = path.has_client(client)
+        if is_connected:
+            client.log.info('Handshake completed')
+        else:
+            client.log.info('Handshake completed but client already dropped')
+
+        # Task: Execute enqueued tasks
+        client.log.debug('Starting to poll for enqueued tasks')
+        task_loop = self.task_loop()
 
         # Task: Poll for messages
         hex_path = PathHex(binascii.hexlify(path.initiator_key).decode('ascii'))
@@ -463,12 +465,11 @@ class ServerProtocol:
             client.log.debug('Starting keep-alive task')
             keep_alive_loop = self.keep_alive_loop()
 
-        # Move the tasks into a context and store it on the path
-        client.tasks = PathClientTasks(
-            task_loop=task_loop,
-            receive_loop=receive_loop,
-            keep_alive_loop=keep_alive_loop,
-            loop=self._loop
+        # Set the tasks
+        client.tasks.set(
+            self._loop.create_task(task_loop),
+            None if receive_loop is None else self._loop.create_task(receive_loop),
+            None if keep_alive_loop is None else self._loop.create_task(keep_alive_loop),
         )
 
         # Wait until complete

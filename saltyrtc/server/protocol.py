@@ -253,29 +253,17 @@ class Path:
 
 class PathClientTasks:
     __slots__ = (
+        '_cancelled',
         'task_loop',
         'receive_loop',
         'keep_alive_loop',
     )
 
-    def __init__(
-            self,
-            task_loop: Coroutine[Any, Any, None],
-            receive_loop: Optional[Coroutine[Any, Any, None]],
-            keep_alive_loop: Optional[Coroutine[Any, Any, None]],
-            loop: asyncio.AbstractEventLoop,
-    ) -> None:
-        if loop is None:
-            loop = asyncio.get_event_loop()
-        self.task_loop = loop.create_task(task_loop)
-        receive_loop_task = None
-        if receive_loop is not None:
-            receive_loop_task = loop.create_task(receive_loop)
-        keep_alive_loop_task = None
-        if keep_alive_loop is not None:
-            keep_alive_loop_task = loop.create_task(keep_alive_loop)
-        self.receive_loop = receive_loop_task
-        self.keep_alive_loop = keep_alive_loop_task
+    def __init__(self) -> None:
+        self._cancelled = False
+        self.task_loop = None  # type: Optional[asyncio.Task[None]]
+        self.receive_loop = None  # type: Optional[asyncio.Task[None]]
+        self.keep_alive_loop = None  # type: Optional[asyncio.Task[None]]
 
     @property
     def tasks(self) -> Sequence[Optional['asyncio.Task[None]']]:
@@ -289,6 +277,29 @@ class PathClientTasks:
             self.keep_alive_loop,
         )
 
+    def set(
+            self,
+            task_loop: 'asyncio.Task[None]',
+            receive_loop: Optional['asyncio.Task[None]'],
+            keep_alive_loop: Optional['asyncio.Task[None]'],
+    ) -> None:
+        """
+        Set path client tasks.
+
+        .. note:: All tasks (but the task loop) will be immediately
+                  cancelled if requested by another client prior to
+                  this method being called.
+        """
+        assert self.task_loop is None
+
+        self.task_loop = task_loop
+        self.receive_loop = receive_loop
+        self.keep_alive_loop = keep_alive_loop
+
+        # Cancel?
+        if self._cancelled:
+            self.cancel_all_but_task_loop(force=True)
+
     @property
     def valid(self) -> Iterable['asyncio.Task[None]']:
         """
@@ -297,13 +308,16 @@ class PathClientTasks:
         """
         return (task for task in self.tasks if task is not None)
 
-    def cancel_all_but_task_loop(self) -> None:
+    def cancel_all_but_task_loop(self, force: bool = False) -> None:
         """
         Cancel all valid tasks but the task queue.
         """
+        if self._cancelled and not force:
+            return
         for task in self.valid:
             if task != self.task_loop:
                 task.cancel()
+        self._cancelled = True
 
 
 class PathClient:
@@ -383,7 +397,7 @@ class PathClient:
         self.type = None  # type: Optional[AddressType]
         self.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
         self.keep_alive_pings = 0
-        self.tasks = None  # type: Optional[PathClientTasks]
+        self.tasks = PathClientTasks()
 
         # Schedule connection closed future
         def _connection_closed(_: Any) -> None:

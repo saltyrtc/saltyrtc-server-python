@@ -10,6 +10,7 @@ import pytest
 from saltyrtc.server import (
     SERVER_ADDRESS,
     CloseCode,
+    PathClient,
     RelayMessage,
     ServerProtocol,
     exception,
@@ -521,9 +522,7 @@ class TestServer:
         ]
 
     @pytest.mark.asyncio
-    async def test_error_after_disconnect(
-            self, mocker, server, client_factory
-    ):
+    async def test_error_after_disconnect(self, mocker, server, client_factory):
         """
         Ensure the server does not error after the client's disconnect
         procedure has been started.
@@ -557,4 +556,45 @@ class TestServer:
         # exception being logged. Thus, we don't have to assert anything here.
         await responder.close()
         await initiator.close()
+        await server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    async def test_drop_client_while_authenticating(
+            self, mocker, event_loop, server, client_factory
+    ):
+        """
+        Ensure the server handles closing the task queue correctly
+        when a client is being dropped by another client after it has
+        been added to a patch but before the handshake completed.
+        """
+        # Mock the client's send method to wait a little longer after having sent a
+        # 'server-auth' message. This simulates a 'server-auth' send taking a little
+        # longer.
+        client_dropped_future = \
+            asyncio.Future(loop=event_loop)  # type: asyncio.Future[None]
+
+        class _MockProtocol(ServerProtocol):
+            async def handshake(self) -> None:
+                await super().handshake()
+                await client_dropped_future
+
+            def _drop_client(
+                    self, client: PathClient, code: CloseCode
+            ) -> 'asyncio.Task[None]':
+                task = super()._drop_client(client, code)
+                client_dropped_future.set_result(None)
+                return task
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # First initiator handshake
+        first_initiator, _ = await client_factory(initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
+
+        # Second initiator handshake (drops the first initiator)
+        second_initiator, _ = await client_factory(initiator_handshake=True)
+
+        # Wait until the first initiator has been dropped
+        await connection_closed_future()
+        await second_initiator.close()
         await server.wait_connections_closed()
