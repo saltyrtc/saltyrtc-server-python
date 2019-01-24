@@ -84,6 +84,17 @@ class TestProtocol:
         assert len(server.protocols) == 0
 
     @pytest.mark.asyncio
+    async def test_invalid_message_str(self, server, ws_client_factory):
+        """
+        The server must discard string messages.
+        """
+        client = await ws_client_factory()
+        await client.send('m30w' * 10)
+        await server.wait_connections_closed()
+        assert not client.open
+        assert client.close_code == CloseCode.protocol_error
+
+    @pytest.mark.asyncio
     async def test_server_hello(self, server, client_factory):
         """
         The server must send a valid `server-hello` on connection.
