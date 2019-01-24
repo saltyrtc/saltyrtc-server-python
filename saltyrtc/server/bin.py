@@ -32,6 +32,10 @@ __all__ = (
 )
 
 
+def _echo_deprecated(message: str) -> None:
+    click.echo(click.style('DeprecationWarning: {}'.format(message), fg='yellow'))
+
+
 def _h(text: str) -> str:
     """
     For some reason, :mod:`click` does not strip new line characters
@@ -165,14 +169,21 @@ provided will be used as the primary key."""))
 @click.pass_context
 def serve(ctx: click.Context, **arguments: Any) -> None:
     # Get arguments
-    tls_cert = arguments.get('tlscert', None) or arguments.get('sslcert', None)  # type: Optional[str]
-    tls_key = arguments.get('tlskey', None) or arguments.get('sslkey', None)  # type: Optional[str]
+    ssl_cert = arguments.get('sslcert', None)  # type: Optional[str]
+    ssl_key = arguments.get('sslkey', None)  # type: Optional[str]
+    tls_cert = arguments.get('tlscert', None) or ssl_cert  # type: Optional[str]
+    tls_key = arguments.get('tlskey', None) or ssl_key  # type: Optional[str]
     dh_params = arguments.get('dhparams', None)  # type: Optional[str]
     keys_str = arguments['key']  # type: Sequence[str]
     host = arguments.get('host')  # type: Optional[str]
     port = arguments['port']  # type: int
     loop_str = arguments['loop']  # type: str
     safety_off = os.environ.get('SALTYRTC_SAFETY_OFF') == 'yes-and-i-know-what-im-doing'
+
+    # Deprecation warning
+    if ssl_cert is not None or ssl_key is not None:
+        _echo_deprecated(('The options -sc, --sslcert and -sk, --sslkey are deprecated. '
+                          'Use -tc, --tlscert and -tk, --tlskey instead.'))
 
     # Make sure the user provides cert & keys or has safety turned off
     if tls_cert is None or len(keys_str) == 0:

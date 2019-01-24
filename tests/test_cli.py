@@ -84,8 +84,8 @@ class TestCLI:
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli(
                 'serve',
-                '-sc', pytest.saltyrtc.cert,
-                '-sk', pytest.saltyrtc.key,
+                '-tc', pytest.saltyrtc.cert,
+                '-tk', pytest.saltyrtc.key,
                 '-p', '8443',
             )
         assert 'It is REQUIRED' in exc_info.value.output
@@ -97,7 +97,7 @@ class TestCLI:
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli(
                 'serve',
-                '-sc', str(cert),
+                '-tc', str(cert),
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-p', '8443',
             )
@@ -110,8 +110,8 @@ class TestCLI:
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli(
                 'serve',
-                '-sc', pytest.saltyrtc.cert,
-                '-sk', pytest.saltyrtc.key,
+                '-tc', pytest.saltyrtc.cert,
+                '-tk', pytest.saltyrtc.key,
                 '-k', str(keyfile),
                 '-p', '8443',
             )
@@ -124,8 +124,8 @@ class TestCLI:
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli(
                 'serve',
-                '-sc', pytest.saltyrtc.cert,
-                '-sk', pytest.saltyrtc.key,
+                '-tc', pytest.saltyrtc.cert,
+                '-tk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-dhp', str(dh_params_file),
                 '-p', '8443',
@@ -138,8 +138,8 @@ class TestCLI:
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli(
                 'serve',
-                '-sc', pytest.saltyrtc.cert,
-                '-sk', pytest.saltyrtc.key,
+                '-tc', pytest.saltyrtc.cert,
+                '-tk', pytest.saltyrtc.key,
                 '-k', key,
                 '-p', '8443',
             )
@@ -150,8 +150,8 @@ class TestCLI:
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli(
                 'serve',
-                '-sc', pytest.saltyrtc.cert,
-                '-sk', pytest.saltyrtc.key,
+                '-tc', pytest.saltyrtc.cert,
+                '-tk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-h', 'meow',
                 '-p', '8443',
@@ -163,8 +163,8 @@ class TestCLI:
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli(
                 'serve',
-                '-sc', pytest.saltyrtc.cert,
-                '-sk', pytest.saltyrtc.key,
+                '-tc', pytest.saltyrtc.cert,
+                '-tk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-p', 'meow',
             )
@@ -175,8 +175,8 @@ class TestCLI:
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli(
                 'serve',
-                '-sc', pytest.saltyrtc.cert,
-                '-sk', pytest.saltyrtc.key,
+                '-tc', pytest.saltyrtc.cert,
+                '-tk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-p', '8443',
                 '-l', 'meow',
@@ -189,8 +189,8 @@ class TestCLI:
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli(
                 'serve',
-                '-sc', pytest.saltyrtc.cert,
-                '-sk', pytest.saltyrtc.key,
+                '-tc', pytest.saltyrtc.cert,
+                '-tk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-p', '8443',
                 '-l', 'uvloop',
@@ -201,8 +201,8 @@ class TestCLI:
     async def test_serve_asyncio(self, cli):
         output = await cli(
             'serve',
-            '-sc', pytest.saltyrtc.cert,
-            '-sk', pytest.saltyrtc.key,
+            '-tc', pytest.saltyrtc.cert,
+            '-tk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             signal=signal.SIGINT,
@@ -213,8 +213,8 @@ class TestCLI:
     async def test_serve_asyncio_dh_params(self, cli):
         output = await cli(
             'serve',
-            '-sc', pytest.saltyrtc.cert,
-            '-sk', pytest.saltyrtc.key,
+            '-tc', pytest.saltyrtc.cert,
+            '-tk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-dhp', pytest.saltyrtc.dh_params,
             '-p', '8443',
@@ -226,8 +226,8 @@ class TestCLI:
     async def test_serve_asyncio_hex_encoded_key(self, cli):
         output = await cli(
             'serve',
-            '-sc', pytest.saltyrtc.cert,
-            '-sk', pytest.saltyrtc.key,
+            '-tc', pytest.saltyrtc.cert,
+            '-tk', pytest.saltyrtc.key,
             '-k', open(pytest.saltyrtc.permanent_key_primary, 'r').read(),
             '-p', '8443',
             signal=signal.SIGINT,
@@ -239,8 +239,8 @@ class TestCLI:
         output = await cli(
             '-v', '7',
             'serve',
-            '-sc', pytest.saltyrtc.cert,
-            '-sk', pytest.saltyrtc.key,
+            '-tc', pytest.saltyrtc.cert,
+            '-tk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             signal=signal.SIGINT,
@@ -253,8 +253,8 @@ class TestCLI:
     async def test_serve_uvloop(self, cli):
         output = await cli(
             'serve',
-            '-sc', pytest.saltyrtc.cert,
-            '-sk', pytest.saltyrtc.key,
+            '-tc', pytest.saltyrtc.cert,
+            '-tk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             '-l', 'uvloop',
@@ -267,8 +267,8 @@ class TestCLI:
     async def test_serve_uvloop_dh_params(self, cli):
         output = await cli(
             'serve',
-            '-sc', pytest.saltyrtc.cert,
-            '-sk', pytest.saltyrtc.key,
+            '-tc', pytest.saltyrtc.cert,
+            '-tk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-dhp', pytest.saltyrtc.dh_params,
             '-p', '8443',
@@ -283,8 +283,8 @@ class TestCLI:
         output = await cli(
             '-v', '7',
             'serve',
-            '-sc', pytest.saltyrtc.cert,
-            '-sk', pytest.saltyrtc.key,
+            '-tc', pytest.saltyrtc.cert,
+            '-tk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             '-l', 'uvloop',
@@ -297,8 +297,8 @@ class TestCLI:
     async def test_serve_asyncio_restart(self, cli):
         output = await cli(
             'serve',
-            '-sc', pytest.saltyrtc.cert,
-            '-sk', pytest.saltyrtc.key,
+            '-tc', pytest.saltyrtc.cert,
+            '-tk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
             signal=[signal.SIGHUP, signal.SIGINT],
@@ -347,8 +347,8 @@ class TestCLI:
             with pytest.raises(subprocess.CalledProcessError) as exc_info:
                 await cli(*[
                     'serve',
-                    '-sc', pytest.saltyrtc.cert,
-                    '-sk', pytest.saltyrtc.key,
+                    '-tc', pytest.saltyrtc.cert,
+                    '-tk', pytest.saltyrtc.key,
                     '-p', '8443',
                 ] + key_arguments)
             assert 'key has been supplied more than once' in exc_info.value.output
@@ -360,8 +360,8 @@ class TestCLI:
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli(
                 'serve',
-                '-sc', pytest.saltyrtc.cert,
-                '-sk', pytest.saltyrtc.key,
+                '-tc', pytest.saltyrtc.cert,
+                '-tk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-k', str(keyfile),
                 '-p', '8443',
@@ -374,8 +374,8 @@ class TestCLI:
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli(
                 'serve',
-                '-sc', pytest.saltyrtc.cert,
-                '-sk', pytest.saltyrtc.key,
+                '-tc', pytest.saltyrtc.cert,
+                '-tk', pytest.saltyrtc.key,
                 '-k', pytest.saltyrtc.permanent_key_primary,
                 '-k', key,
                 '-p', '8443',
@@ -393,8 +393,8 @@ class TestCLI:
         # Check output
         output = await cli(
             'serve',
-            '-sc', pytest.saltyrtc.cert,
-            '-sk', pytest.saltyrtc.key,
+            '-tc', pytest.saltyrtc.cert,
+            '-tk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-k', pytest.saltyrtc.permanent_key_secondary,
             '-p', '8443',
@@ -415,8 +415,8 @@ class TestCLI:
         # Check output
         output = await cli(
             'serve',
-            '-sc', pytest.saltyrtc.cert,
-            '-sk', pytest.saltyrtc.key,
+            '-tc', pytest.saltyrtc.cert,
+            '-tk', pytest.saltyrtc.key,
             '-k', pytest.saltyrtc.permanent_key_secondary,
             '-k', pytest.saltyrtc.permanent_key_primary,
             '-p', '8443',
@@ -424,4 +424,17 @@ class TestCLI:
         )
         assert 'Primary public permanent key: {}'.format(secondary_key) in output
         assert 'Secondary key #1: {}'.format(primary_key) in output
+        assert 'Stopped' in output
+
+    @pytest.mark.asyncio
+    async def test_serve_deprecated_options(self, cli):
+        output = await cli(
+            'serve',
+            '-sc', pytest.saltyrtc.cert,
+            '-sk', pytest.saltyrtc.key,
+            '-k', pytest.saltyrtc.permanent_key_primary,
+            '-p', '8443',
+            signal=signal.SIGINT,
+        )
+        assert 'DeprecationWarning' in output
         assert 'Stopped' in output
