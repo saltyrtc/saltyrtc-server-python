@@ -25,4 +25,4 @@ __all__ = tuple(itertools.chain(
 
 __author__ = 'Lennart Grahl <lennart.grahl@gmail.com>'
 __status__ = 'Production'
-__version__ = '3.1.2'
+__version__ = '4.0.0'

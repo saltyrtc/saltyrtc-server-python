@@ -8,7 +8,7 @@ Signing key: https://lgrahl.de/pub/pgp-key.txt
    ```bash
    flake8 .
    isort -rc -c . || isort -rc -df
-   MYPYPATH=${PWD}/stubs mypy saltyrtc examples
+   rm -rf .mypy_cache && MYPYPATH=${PWD}/stubs mypy saltyrtc examples
    py.test
    ```
 
@@ -35,7 +35,7 @@ Signing key: https://lgrahl.de/pub/pgp-key.txt
 5. Build source and binary distributions:
 
    ```bash
-   rm -rf build dist saltyrtc.server.egg-info
+   rm -rf build dist saltyrtc.server.egg-info .mypy_cache
    find . \( -name \*.pyc -o -name \*.pyo -o -name __pycache__ \) -prune -exec rm -rf {} +
    python setup.py sdist bdist_wheel
    ```
