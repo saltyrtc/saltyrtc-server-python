@@ -4,7 +4,7 @@ Changelog
 `4.0.0`_ (2018-01-24)
 ---------------------
 
-**Important:** Make sure you're using Python >= 3.5.2 before upgrading.
+**Important:** Make sure you're using Python >= 3.5.3 before upgrading.
 
 - Drop Python 3.4 support (major)
 - Deprecate the CLI options `-sc`, `--sslcert` and `-sk`, `--sslkey`. Use

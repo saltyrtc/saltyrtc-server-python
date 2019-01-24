@@ -4,13 +4,13 @@ import signal
 import ssl  # noqa
 import sys
 from typing import Any  # noqa
+from typing import Coroutine  # noqa
 from typing import List  # noqa
 from typing import Optional
 
 import logbook.more
 
 import saltyrtc.server
-from saltyrtc.server.typing import Coroutine  # noqa
 from saltyrtc.server.typing import ServerSecretPermanentKey  # noqa
 
 

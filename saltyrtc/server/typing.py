@@ -1,4 +1,3 @@
-import sys
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -24,8 +23,6 @@ if TYPE_CHECKING:
     from .events import Event  # noqa
 
 __all__ = (
-    'Coroutine',
-    'ClassVar',
     'NoReturn',
     'ListOrTuple',
     'PathHex',
@@ -62,20 +59,6 @@ __all__ = (
 # Important: Do not export!
 T = TypeVar('T')  # Any type
 
-# Coroutine
-try:
-    from typing import Coroutine
-except ImportError:
-    # noinspection PyUnresolvedReferences
-    from typing_extensions import Coroutine  # Python <= 3.5.2
-
-# ClassVar
-try:
-    from typing import ClassVar
-except ImportError:
-    # noinspection PyUnresolvedReferences
-    from typing_extensions import ClassVar  # Python <= 3.5.2
-
 # NoReturn
 try:
     from typing import NoReturn
@@ -87,12 +70,7 @@ except ImportError:
 # -------
 
 # List or Tuple
-py_version = sys.version_info[:3]
-if py_version > (3, 5, 2):
-    ListOrTuple = Union[List[T], Tuple[T]]
-else:
-    # Workaround for "Cannot subscript an existing Union" in Python 3.5.2
-    ListOrTuple = List  # type: ignore
+ListOrTuple = Union[List[T], Tuple[T]]
 
 
 # Common

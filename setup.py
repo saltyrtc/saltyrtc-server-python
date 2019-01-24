@@ -29,8 +29,8 @@ long_description = '\n\n'.join((read('README.rst'), read('CHANGELOG.rst')))
 
 # Check python version
 py_version = sys.version_info[:3]
-if py_version < (3, 5, 2):
-    raise Exception("SaltyRTC requires Python >= 3.5.2")
+if py_version < (3, 5, 3):
+    raise Exception("SaltyRTC requires Python >= 3.5.3")
 
 # Logging requirements
 logging_require = [
@@ -73,9 +73,6 @@ setup(
     ],
     tests_require=tests_require,
     extras_require={
-        ':python_version<="3.5.2"': [
-            'typing-extensions==3.7.2',
-        ],
         'dev': tests_require,
         'logging': logging_require,
         'uvloop': ['uvloop>=0.8.0,<2'],

@@ -22,11 +22,11 @@ before_cache:
 language: python
 matrix:
   include:
-  - python: "3.5"
+  - python: "3.5.3"
     env:
     - EVENT_LOOP=asyncio
     - TIMEOUT=2.0
-  - python: "3.5"
+  - python: "3.5.3"
     env:
     - EVENT_LOOP=uvloop
     - TIMEOUT=2.0

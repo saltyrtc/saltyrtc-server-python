@@ -2,6 +2,7 @@ import abc
 import binascii
 import io
 import struct
+from typing import ClassVar  # noqa
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -42,7 +43,6 @@ from .exception import (
     MessageError,
     MessageFlowError,
 )
-from .typing import ClassVar  # noqa
 from .typing import (
     ChosenSubProtocol,
     ClientCookie,
