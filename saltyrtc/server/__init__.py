@@ -1,5 +1,5 @@
 """
-This is a SaltyRTC server implementation for Python 3.5+ using
+This is a SaltyRTC server implementation for Python 3.5.3+ using
 :mod:`asyncio`.
 """
 import itertools

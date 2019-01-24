@@ -3,11 +3,13 @@ import binascii
 import ssl
 from collections import OrderedDict
 from typing import Awaitable  # noqa
+from typing import ClassVar  # noqa
 from typing import Dict  # noqa
 from typing import List  # noqa
 from typing import Set  # noqa
 from typing import (
     Any,
+    Coroutine,
     Iterable,
     Mapping,
     Optional,
@@ -67,10 +69,8 @@ from .protocol import (
     Path,
     PathClient,
 )
-from .typing import ClassVar  # noqa
 from .typing import (
     ChosenSubProtocol,
-    Coroutine,
     DisconnectedData,
     EventCallback,
     EventData,

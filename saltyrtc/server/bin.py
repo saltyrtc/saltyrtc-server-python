@@ -7,6 +7,7 @@ import os
 import signal
 import stat
 from typing import Any  # noqa
+from typing import Coroutine  # noqa
 from typing import List  # noqa
 from typing import Optional  # noqa
 from typing import Sequence  # noqa
@@ -19,7 +20,6 @@ from . import (
     server,
     util,
 )
-from .typing import Coroutine  # noqa
 from .typing import ServerSecretPermanentKey  # noqa
 from .typing import LogbookLevel
 

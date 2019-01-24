@@ -2,6 +2,8 @@ import asyncio
 import enum
 import os
 import struct
+# noinspection PyUnresolvedReferences
+from typing import Coroutine  # noqa
 from typing import Dict  # noqa
 from typing import (
     Any,
@@ -47,8 +49,6 @@ from .message import (
     OutgoingMessageMixin,
     unpack,
 )
-# noinspection PyUnresolvedReferences
-from .typing import Coroutine  # noqa
 from .typing import (
     ClientCookie,
     ClientPublicKey,
