@@ -1,6 +1,12 @@
 Changelog
 *********
 
+`4.0.1`_ (2019-01-24)
+---------------------
+
+- Bump the Python version requirement to 3.5.3
+- Remove workarounds for Python 3.5.2
+
 `4.0.0`_ (2018-01-24)
 ---------------------
 
@@ -86,6 +92,7 @@ support the `disconnected` message before upgrading.
 .. _#90: https://github.com/saltyrtc/saltyrtc-server-python/issues/90
 .. _SaltyRTC 1.0 Protocol: https://github.com/saltyrtc/saltyrtc-meta/blob/protocol-1.0/Protocol.md
 
+.. _4.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v4.0.0...v4.0.1
 .. _4.0.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.1.2...v4.0.0
 .. _3.1.2: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.1.1...v3.1.2
 .. _3.1.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.1.0...v3.1.1
