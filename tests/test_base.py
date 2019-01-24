@@ -5,6 +5,14 @@ import libnacl.public
 import pytest
 import websockets
 
+from saltyrtc.server.typing import ListOrTuple
+
+
+# noinspection PyStatementEffect
+class TestTypes:
+    def test_list_or_tuple_runtime(self):
+        ListOrTuple[str]
+
 
 @pytest.mark.usefixtures('evaluate_log')
 class TestPrerequisites:

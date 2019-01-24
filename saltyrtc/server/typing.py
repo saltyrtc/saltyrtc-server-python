@@ -1,3 +1,4 @@
+import sys
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -86,7 +87,12 @@ except ImportError:
 # -------
 
 # List or Tuple
-ListOrTuple = Union[List[T], Tuple[T]]
+py_version = sys.version_info[:3]
+if py_version > (3, 5, 2):
+    ListOrTuple = Union[List[T], Tuple[T]]
+else:
+    # Workaround for "Cannot subscript an existing Union" in Python 3.5.2
+    ListOrTuple = List  # type: ignore
 
 
 # Common
