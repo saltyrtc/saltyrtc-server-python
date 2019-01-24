@@ -8,9 +8,10 @@ import collections
 import pytest
 
 from saltyrtc.server import (
-    AddressType,
+    SERVER_ADDRESS,
     CloseCode,
-    RawMessage,
+    PathClient,
+    RelayMessage,
     ServerProtocol,
     exception,
     serve,
@@ -77,16 +78,15 @@ class TestServer:
 
         # Mock the initiator receive loop and cancel itself after a brief timeout
         class _MockProtocol(ServerProtocol):
-            def initiator_receive_loop(self):
-                receive_loop = asyncio.ensure_future(
-                    super().initiator_receive_loop(), loop=self._loop)
+            async def initiator_receive_loop(self):
+                receive_loop = self._loop.create_task(super().initiator_receive_loop())
 
                 async def _cancel_loop():
                     await sleep(0.1)
                     receive_loop.cancel()
 
-                asyncio.ensure_future(_cancel_loop(), loop=self._loop)
-                return receive_loop
+                self._loop.create_task(_cancel_loop())
+                await receive_loop
 
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
@@ -122,7 +122,7 @@ class TestServer:
                 async def _revert_future():
                     await sleep(0.05)
                     self.client._connection_closed_future = connection_closed_future
-                asyncio.ensure_future(_revert_future(), loop=self._loop)
+                self._loop.create_task(_revert_future())
 
                 # Resolve the connection closed future and the loop future
                 self.client._connection_closed_future.set_result(1337)
@@ -212,8 +212,8 @@ class TestServer:
                 await close_future
 
                 async def _send_task():
-                    message = RawMessage(AddressType.server, self.client.id, b'\x00')
-                    message._nonce = b'\x00' * 24
+                    message = RelayMessage(
+                        SERVER_ADDRESS, self.client.id, b'\x00', b'\x00' * 24)
                     await self.client.send(message)
 
                 await self.client.enqueue_task(_send_task())
@@ -435,7 +435,7 @@ class TestServer:
         async def enqueue_bad_task():
             cancelled_future = asyncio.Future(loop=event_loop)
             await path_client.enqueue_task(
-                asyncio.ensure_future(bad_coroutine(cancelled_future)))
+                event_loop.create_task(bad_coroutine(cancelled_future)))
             return cancelled_future
 
         # Enqueue misbehaving task
@@ -522,9 +522,7 @@ class TestServer:
         ]
 
     @pytest.mark.asyncio
-    async def test_error_after_disconnect(
-            self, mocker, server, client_factory
-    ):
+    async def test_error_after_disconnect(self, mocker, server, client_factory):
         """
         Ensure the server does not error after the client's disconnect
         procedure has been started.
@@ -558,4 +556,45 @@ class TestServer:
         # exception being logged. Thus, we don't have to assert anything here.
         await responder.close()
         await initiator.close()
+        await server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    async def test_drop_client_while_authenticating(
+            self, mocker, event_loop, server, client_factory
+    ):
+        """
+        Ensure the server handles closing the task queue correctly
+        when a client is being dropped by another client after it has
+        been added to a patch but before the handshake completed.
+        """
+        # Mock the client's send method to wait a little longer after having sent a
+        # 'server-auth' message. This simulates a 'server-auth' send taking a little
+        # longer.
+        client_dropped_future = \
+            asyncio.Future(loop=event_loop)  # type: asyncio.Future[None]
+
+        class _MockProtocol(ServerProtocol):
+            async def handshake(self) -> None:
+                await super().handshake()
+                await client_dropped_future
+
+            def _drop_client(
+                    self, client: PathClient, code: CloseCode
+            ) -> 'asyncio.Task[None]':
+                task = super()._drop_client(client, code)
+                client_dropped_future.set_result(None)
+                return task
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # First initiator handshake
+        first_initiator, _ = await client_factory(initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
+
+        # Second initiator handshake (drops the first initiator)
+        second_initiator, _ = await client_factory(initiator_handshake=True)
+
+        # Wait until the first initiator has been dropped
+        await connection_closed_future()
+        await second_initiator.close()
         await server.wait_connections_closed()

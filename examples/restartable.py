@@ -1,18 +1,27 @@
 import asyncio
 import os
 import signal
+import ssl  # noqa
 import sys
+from typing import Any  # noqa
+from typing import List  # noqa
+from typing import Optional
 
 import logbook.more
 
 import saltyrtc.server
+from saltyrtc.server.typing import Coroutine  # noqa
+from saltyrtc.server.typing import ServerSecretPermanentKey  # noqa
 
 
-def env(name, default=None):
-    return os.environ.get(name, default)
+def env(name: str, default: Optional[str] = None) -> Optional[str]:
+    try:
+        return os.environ[name]
+    except KeyError:
+        return default
 
 
-def require_env(name):
+def require_env(name: str) -> str:
     value = env(name)
     if value is None:
         print("Missing '{}' env variable".format(name))
@@ -20,7 +29,7 @@ def require_env(name):
     return value
 
 
-def main():
+def main() -> None:
     """
     Run the SaltyRTC server until Ctrl+C has been pressed.
 
@@ -31,32 +40,34 @@ def main():
 
     while True:
         # Create SSL context
+        ssl_context = None  # type: Optional[ssl.SSLContext]
         if env('SALTYRTC_DISABLE_TLS') != 'yes-and-i-know-what-im-doing':
             ssl_context = saltyrtc.server.create_ssl_context(
                 certfile=require_env('SALTYRTC_TLS_CERT'),
                 keyfile=require_env('SALTYRTC_TLS_KEY'),
                 dh_params_file=require_env('SALTYRTC_DH_PARAMS'),
             )
-        else:
-            ssl_context = None
 
         # Get permanent key
+        permanent_keys = None  # type: Optional[List[ServerSecretPermanentKey]]
         if env('SALTYRTC_DISABLE_SERVER_PERMANENT_KEY') != 'yes-and-i-know-what-im-doing':
             permanent_keys = [saltyrtc.server.load_permanent_key(
                 require_env('SALTYRTC_SERVER_PERMANENT_KEY'))]
-        else:
-            permanent_keys = None
 
         # Start server
-        port = int(env('SALTYRTC_PORT', '8765'))
-        coroutine = saltyrtc.server.serve(ssl_context, permanent_keys, port=port)
+        port_str = env('SALTYRTC_PORT', '8765')
+        assert port_str is not None
+        port = int(port_str)
+        coroutine = saltyrtc.server.serve(
+            ssl_context, permanent_keys, port=port
+        )  # type: Coroutine[Any, Any, saltyrtc.server.Server]
         server = loop.run_until_complete(coroutine)
 
         # Restart server on HUP signal
-        restart_signal = asyncio.Future(loop=loop)
+        restart_signal = asyncio.Future(loop=loop)  # type: asyncio.Future[None]
 
-        def _restart_signal_handler(*_):
-            restart_signal.set_result(True)
+        def _restart_signal_handler(*_: None) -> None:
+            restart_signal.set_result(None)
 
         # Register restart server routine
         loop.add_signal_handler(signal.SIGHUP, _restart_signal_handler)

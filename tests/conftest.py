@@ -51,12 +51,14 @@ def pytest_report_header(config):
 
 
 def pytest_namespace():
+    # uvloop
     try:
-        # noinspection PyPackageRequirements,PyUnresolvedReferences
         import uvloop  # noqa
         have_uvloop = True
     except ImportError:
         have_uvloop = False
+
+    # Configuration
     saltyrtc = {
         'have_uvloop': pytest.mark.skipif(not have_uvloop, reason='requires uvloop'),
         'no_uvloop': pytest.mark.skipif(
@@ -247,7 +249,7 @@ def url_factory(server):
 
 
 class TestServer(Server):
-    def __init__(self, *args, timeout=None, **kwargs):
+    def __init__(self, *args, timeout=None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         # Store timeout
@@ -408,7 +410,10 @@ class _DefaultBox:
 
 
 class Client:
-    def __init__(self, ws_client, pack_message, unpack_message, request, timeout=None):
+    def __init__(
+            self, ws_client, pack_message, unpack_message, request,
+            timeout=None,
+    ) -> None:
         self.ws_client = ws_client
         self.pack_and_send = pack_message
         self.recv_and_unpack = unpack_message
@@ -653,7 +658,7 @@ def cli(request, event_loop):
         process = await create
 
         # Wait for process to terminate
-        task = asyncio.ensure_future(process.communicate(input=input), loop=event_loop)
+        task = event_loop.create_task(process.communicate(input=input))
         maybe_shielded_task = task
         if signal is not None:
             maybe_shielded_task = asyncio.shield(maybe_shielded_task, loop=event_loop)

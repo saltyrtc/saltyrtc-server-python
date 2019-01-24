@@ -17,20 +17,20 @@ Prerequisites
 
 .. code-block:: bash
 
-    $ sudo apt-get install python3 python3-pip
+    sudo apt-get install python3 python3-pip
 
 We recommend using `venv`_ to create an isolated Python environment:
 
 .. code-block:: bash
 
-    $ pyvenv venv
+    pyvenv venv
 
 You can switch into the created virtual environment *venv* by running
 this command:
 
 .. code-block:: bash
 
-    $ source venv/bin/activate
+    source venv/bin/activate
 
 While the virtual environment is active, all packages installed using
 ``pip`` will be installed into this environment.
@@ -39,7 +39,7 @@ To deactivate the virtual environment, just run:
 
 .. code-block:: bash
 
-    $ deactivate
+    deactivate
 
 If you want easier handling of your virtualenvs, you might also want to
 take a look at `virtualenvwrapper`_.
@@ -53,7 +53,7 @@ Install the module by running:
 
 .. code-block:: bash
 
-    $ pip install saltyrtc.server
+    pip install saltyrtc.server
 
 The dependency ``libnacl`` will be installed automatically. However, you
 may need to install `libsodium`_ for ``libnacl`` to work.
@@ -67,7 +67,7 @@ command to see usage information:
 
 .. code-block:: bash
 
-    $ saltyrtc-server --help
+    saltyrtc-server --help
 
 Contributing
 ************
@@ -77,19 +77,20 @@ optional ``dev`` requirements of the project in an editable environment:
 
 .. code-block:: bash
 
-    $ git clone https://github.com/saltyrtc/saltyrtc-server-python.git
-    $ cd saltyrtc-server-python
-    $ pip install -e .[dev]
+    git clone https://github.com/saltyrtc/saltyrtc-server-python.git
+    cd saltyrtc-server-python
+    pip install -e .[dev]
 
 Before creating a pull request, it is recommended to run the following
 commands to check for code style violations (``flake8``), optimise
-imports (``isort``) and run the project's tests:
+imports (``isort``), do a static type analysis and run the project's tests:
 
 .. code-block:: bash
 
-    $ flake8 .
-    $ isort -rc .
-    $ py.test
+    flake8 .
+    isort -rc .
+    MYPYPATH=${PWD}/stubs mypy saltyrtc examples
+    py.test
 
 Reporting Security Issues
 *************************

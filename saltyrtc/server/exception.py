@@ -9,7 +9,6 @@ __all__ = (
     'ServerKeyError',
     'MessageFlowError',
     'PingTimeoutError',
-    'Disconnected',
     'MessageError',
     'DowngradeError',
     'Disconnected',
@@ -65,10 +64,10 @@ class PingTimeoutError(SignalingError):
     Arguments:
         - `client_name`: The *name* of the client that did not respond.
     """
-    def __init__(self, client_name):
+    def __init__(self, client_name: str) -> None:
         self.client_name = client_name
 
-    def __str__(self):
+    def __str__(self) -> str:
         return 'Ping to {} timed out'.format(self.client_name)
 
 
@@ -92,5 +91,5 @@ class Disconnected(Exception):
     ..note:: This does not derive from :class:`SignalingError` since it
              is not considered an *error*.
     """
-    def __init__(self, reason: int = None):
+    def __init__(self, reason: int) -> None:
         self.reason = reason

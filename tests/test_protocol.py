@@ -17,7 +17,7 @@ from saltyrtc.server.common import (
 
 
 class _FakePathClient:
-    def __init__(self):
+    def __init__(self) -> None:
         self.connection_closed_future = asyncio.Future()
         self.connection_closed_future.set_result(None)
         self.state = ClientState.restricted
@@ -988,7 +988,7 @@ class TestProtocol:
         # Patch server's combined sequence number of the initiator instance
         assert len(server.protocols) == 1
         protocol = next(iter(server.protocols))
-        protocol.client.combined_sequence_number_out = 2 ** 48 - 1
+        protocol.client._csn_out = 2 ** 48 - 1
 
         # Connect a new responder
         first_responder, r = await client_factory(responder_handshake=True)
@@ -1516,10 +1516,10 @@ class TestProtocol:
         # Patch server's combined sequence number of the initiator instance
         assert len(server.protocols) == 1
         protocol = next(iter(server.protocols))
-        protocol.client.combined_sequence_number_in = 2 ** 48 - 1
-        assert isinstance(protocol.client.combined_sequence_number_in, int)
-        protocol.client.combined_sequence_number_in += 1
-        assert not isinstance(protocol.client.combined_sequence_number_in, int)
+        protocol.client._csn_in = 2 ** 48 - 1
+        assert isinstance(protocol.client.csn_in, int)
+        protocol.client.increment_csn_in()
+        assert not isinstance(protocol.client.csn_in, int)
         i['ccsn'] = 0  # Invalid!
 
         # Responder handshake
@@ -1617,7 +1617,7 @@ class TestProtocol:
         # Patch server's combined sequence number of the initiator instance
         assert len(server.protocols) == 1
         i_protocol = next(iter(server.protocols))
-        i_protocol.client.combined_sequence_number_out = 2 ** 48 - 1
+        i_protocol.client._csn_out = 2 ** 48 - 1
 
         # Connect a new responder
         first_responder, r1 = await client_factory(responder_handshake=True)
@@ -1631,10 +1631,10 @@ class TestProtocol:
             if protocol != i_protocol:
                 r1_protocol = protocol
                 break
-        r1_protocol.client.combined_sequence_number_out = 2 ** 48 - 1
-        assert isinstance(r1_protocol.client.combined_sequence_number_out, int)
-        r1_protocol.client.combined_sequence_number_out += 1
-        assert not isinstance(r1_protocol.client.combined_sequence_number_out, int)
+        r1_protocol.client._csn_out = 2 ** 48 - 1
+        assert isinstance(r1_protocol.client.csn_out, int)
+        r1_protocol.client.increment_csn_out()
+        assert not isinstance(r1_protocol.client.csn_out, int)
 
         # new-responder
         message, _, sck, s, d, scsn = await initiator.recv()

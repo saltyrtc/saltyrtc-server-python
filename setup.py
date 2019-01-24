@@ -1,5 +1,6 @@
 import ast
 import os
+import platform
 import sys
 
 from setuptools import setup
@@ -28,13 +29,21 @@ long_description = '\n\n'.join((read('README.rst'), read('CHANGELOG.rst')))
 
 # Check python version
 py_version = sys.version_info[:3]
-if py_version < (3, 5, 0):
-    raise Exception("SaltyRTC requires Python >= 3.5.0")
+if py_version < (3, 5, 2):
+    raise Exception("SaltyRTC requires Python >= 3.5.2")
 
 # Logging requirements
 logging_require = [
     'logbook>=1.0.0,<2',
 ]
+
+# mypy currently does not run on pypy (tested with pypy3 6.0.0)
+if platform.python_implementation() == 'PyPy':
+    mypy_require = []
+else:
+    mypy_require = [
+        'mypy==0.660',
+    ]
 
 # Test requirements
 # Note: These are just tools that aren't required, so a version range
@@ -49,12 +58,13 @@ tests_require = [
     'collective.checkdocs>=0.2',
     'Pygments>=2.2.0',  # required by checkdocs
     'ordered-set>=3.0.1',  # required by TestServer class
-] + logging_require
+] + logging_require + mypy_require
 
 setup(
     name='saltyrtc.server',
     version=get_version(),
     packages=['saltyrtc', 'saltyrtc.server'],
+    package_data={'saltyrtc.server': ['py.typed']},
     install_requires=[
         'libnacl>=1.5.0,<2',
         'click>=6.7',  # doesn't seem to follow semantic versioning (see #57)
@@ -63,6 +73,9 @@ setup(
     ],
     tests_require=tests_require,
     extras_require={
+        ':python_version<="3.5.2"': [
+            'typing-extensions==3.7.2',
+        ],
         'dev': tests_require,
         'logging': logging_require,
         'uvloop': ['uvloop>=0.8.0,<2'],

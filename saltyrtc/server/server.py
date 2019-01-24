@@ -1,10 +1,22 @@
 import asyncio
 import binascii
+import ssl
 from collections import OrderedDict
+from typing import Awaitable  # noqa
+from typing import Dict  # noqa
+from typing import List  # noqa
+from typing import Set  # noqa
 from typing import (
-    Dict,
-    List,
+    Any,
+    Iterable,
+    Mapping,
     Optional,
+    Sequence,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+    cast,
 )
 
 import websockets
@@ -12,19 +24,19 @@ import websockets
 from . import util
 from .common import (
     COOKIE_LENGTH,
+    INITIATOR_ADDRESS,
+    KEY_LENGTH,
     NONCE_LENGTH,
     RELAY_TIMEOUT,
     AddressType,
+    ClientAddress,
     ClientState,
     CloseCode,
-    MessageType,
+    ResponderAddress,
     SubProtocol,
 )
 from .events import (
-    DisconnectedData,
     Event,
-    EventCallback,
-    EventData,
     EventRegistry,
 )
 from .exception import (
@@ -40,10 +52,13 @@ from .exception import (
     SlotsFullError,
 )
 from .message import (
+    ClientAuthMessage,
+    ClientHelloMessage,
     DisconnectedMessage,
+    DropResponderMessage,
     NewInitiatorMessage,
     NewResponderMessage,
-    RawMessage,
+    RelayMessage,
     SendErrorMessage,
     ServerAuthMessage,
     ServerHelloMessage,
@@ -51,8 +66,22 @@ from .message import (
 from .protocol import (
     Path,
     PathClient,
-    PathClientTasks,
-    Protocol,
+)
+from .typing import ClassVar  # noqa
+from .typing import (
+    ChosenSubProtocol,
+    Coroutine,
+    DisconnectedData,
+    EventCallback,
+    EventData,
+    InitiatorPublicPermanentKey,
+    ListOrTuple,
+    MessageId,
+    PathHex,
+    ResponderPublicSessionKey,
+    ServerCookie,
+    ServerPublicPermanentKey,
+    ServerSecretPermanentKey,
 )
 
 __all__ = (
@@ -62,20 +91,32 @@ __all__ = (
     'Server',
 )
 
+# Constants
 _TASK_QUEUE_JOIN_TIMEOUT = 10.0
+
+# Do not export!
+ST = TypeVar('ST', bound='Server')
+CloseFuture = Union['asyncio.Future[None]', Coroutine[Any, Any, None]]
+Keys = Mapping[ServerPublicPermanentKey, ServerSecretPermanentKey]
 
 
 async def serve(
-        ssl_context, keys, paths=None, host=None, port=8765, loop=None,
-        event_callbacks: Dict[Event, List[EventCallback]] = None, server_class=None,
-        ws_kwargs=None,
-):
+        ssl_context: Optional[ssl.SSLContext],
+        keys: Optional[Sequence[ServerSecretPermanentKey]],
+        paths: Optional['Paths'] = None,
+        host: Optional[str] = None,
+        port: int = 8765,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+        event_callbacks: Optional[Mapping[Event, Iterable[EventCallback]]] = None,
+        server_class: Optional[Type[ST]] = None,
+        ws_kwargs: Optional[Mapping[str, Any]] = None,
+) -> ST:
     """
     Start serving SaltyRTC Signalling Clients.
 
     Arguments:
         - `ssl_context`: An `ssl.SSLContext` instance for WSS.
-        - `keys`: A sorted iterable of :class:`libnacl.public.SecretKey`
+        - `keys`: A sorted sequence of :class:`libnacl.public.SecretKey`
           instances containing permanent private keys of the server.
           The first key will be designated as the primary key.
         - `paths`: A :class:`Paths` instance that maps path names to
@@ -114,7 +155,7 @@ async def serve(
 
     # Create server
     if server_class is None:
-        server_class = Server
+        server_class = cast('Type[ST]', Server)
     server = server_class(keys, paths, loop=loop)
 
     # Register event callbacks
@@ -126,6 +167,8 @@ async def serve(
     # Prepare arguments for the WS server
     if ws_kwargs is None:
         ws_kwargs = {}
+    else:
+        ws_kwargs = dict(ws_kwargs)
     ws_kwargs['ssl'] = ssl_context
     ws_kwargs['host'] = host
     ws_kwargs['port'] = port
@@ -143,7 +186,9 @@ async def serve(
     return server
 
 
-class ServerProtocol(Protocol):
+class ServerProtocol:
+    PATH_LENGTH = KEY_LENGTH * 2  # type: ClassVar[int]
+
     __slots__ = (
         '_log',
         '_loop',
@@ -154,17 +199,24 @@ class ServerProtocol(Protocol):
         'handler_task'
     )
 
-    def __init__(self, server, subprotocol, connection, ws_path, loop=None):
+    def __init__(
+            self,
+            server: 'Server',
+            subprotocol: SubProtocol,
+            connection: websockets.WebSocketServerProtocol,
+            ws_path: str,
+            loop: Optional[asyncio.AbstractEventLoop] = None,
+    ) -> None:
         self._log = util.get_logger('server.protocol')
         self._loop = asyncio.get_event_loop() if loop is None else loop
 
         # Server instance and subprotocol
-        self._server = server  # type: Server
+        self._server = server
         self.subprotocol = subprotocol
 
         # Path and client instance
-        self.path = None
-        self.client = None
+        self.path = None  # type: Optional[Path]
+        self.client = None  # type: Optional[PathClient]
         self._log.debug('New connection on WS path {}', ws_path)
 
         # Get path and client instance as early as possible
@@ -173,9 +225,10 @@ class ServerProtocol(Protocol):
         except PathError as exc:
             self._log.notice('Closing due to path error: {}', exc)
 
-            async def close_with_protocol_error():
+            async def close_with_protocol_error() -> None:
                 await connection.close(code=CloseCode.protocol_error.value)
-                self._server.notify_disconnected(None, CloseCode.protocol_error.value)
+                self._server.notify_disconnected(
+                    None, DisconnectedData(CloseCode.protocol_error.value))
             handler_coroutine = close_with_protocol_error()
         else:
             handler_coroutine = self.handler()
@@ -188,55 +241,66 @@ class ServerProtocol(Protocol):
             self._server.register(self)
 
         # Start handler task
-        self.handler_task = asyncio.ensure_future(handler_coroutine, loop=self._loop)
+        self.handler_task = self._loop.create_task(handler_coroutine)
 
-    async def handler(self):
+    async def handler(self) -> None:
         client, path = self.client, self.path
+        assert client is not None
+        assert path is not None
 
         # Handle client until disconnected or an exception occurred
-        hex_path = binascii.hexlify(self.path.initiator_key).decode('ascii')
-        close_future = asyncio.Future(loop=self._loop)
+        hex_path = PathHex(binascii.hexlify(path.initiator_key).decode('ascii'))
+        close_future = asyncio.Future(loop=self._loop)  # type: asyncio.Future[None]
 
         try:
             await self.handle_client()
         except Disconnected as exc:
             client.log.info('Connection closed (code: {})', exc.reason)
             close_future.set_result(None)
-            self._server.notify_disconnected(hex_path, exc.reason)
+            close_awaitable = close_future  # type: Awaitable[None]
+            self._server.notify_disconnected(hex_path, DisconnectedData(exc.reason))
         except PingTimeoutError:
             client.log.info('Closing because of a ping timeout')
-            close_future = client.close(CloseCode.timeout)
-            self._server.notify_disconnected(hex_path, CloseCode.timeout.value)
+            close_awaitable = client.close(CloseCode.timeout.value)
+            self._server.notify_disconnected(
+                hex_path, DisconnectedData(CloseCode.timeout.value))
         except SlotsFullError as exc:
             client.log.notice('Closing because all path slots are full: {}', exc)
-            close_future = client.close(code=CloseCode.path_full_error.value)
-            self._server.notify_disconnected(hex_path, CloseCode.path_full_error.value)
+            close_awaitable = client.close(code=CloseCode.path_full_error.value)
+            self._server.notify_disconnected(
+                hex_path, DisconnectedData(CloseCode.path_full_error.value))
         except ServerKeyError as exc:
             client.log.notice('Closing due to server key error: {}', exc)
-            close_future = client.close(code=CloseCode.invalid_key.value)
-            self._server.notify_disconnected(hex_path, CloseCode.invalid_key.value)
+            close_awaitable = client.close(code=CloseCode.invalid_key.value)
+            self._server.notify_disconnected(
+                hex_path, DisconnectedData(CloseCode.invalid_key.value))
         except InternalError as exc:
             client.log.exception('Closing due to an internal error:', exc)
-            close_future = client.close(code=CloseCode.internal_error.value)
-            self._server.notify_disconnected(hex_path, CloseCode.internal_error.value)
+            close_awaitable = client.close(code=CloseCode.internal_error.value)
+            self._server.notify_disconnected(
+                hex_path, DisconnectedData(CloseCode.internal_error.value))
         except SignalingError as exc:
             client.log.notice('Closing due to protocol error: {}', exc)
-            close_future = client.close(code=CloseCode.protocol_error.value)
-            self._server.notify_disconnected(hex_path, CloseCode.protocol_error.value)
+            close_awaitable = client.close(code=CloseCode.protocol_error.value)
+            self._server.notify_disconnected(
+                hex_path, DisconnectedData(CloseCode.protocol_error.value))
         except Exception as exc:
             client.log.exception('Closing due to exception:', exc)
-            close_future = client.close(code=CloseCode.internal_error.value)
-            self._server.notify_disconnected(hex_path, CloseCode.internal_error.value)
+            close_awaitable = client.close(code=CloseCode.internal_error.value)
+            self._server.notify_disconnected(
+                hex_path, DisconnectedData(CloseCode.internal_error.value))
         else:
             # Note: This should not ever happen since 'handle_client'
             #       contains an infinite loop that only stops due to an exception.
             client.log.error('Client closed without exception')
             close_future.set_result(None)
+            close_awaitable = close_future
 
         # Schedule closing of the client
         # Note: This ensures the client is closed soon even if the task queue is holding
         #       us up.
-        close_future = asyncio.ensure_future(close_future, loop=self._loop)
+        if not isinstance(close_awaitable, asyncio.Future):
+            close_awaitable = self._loop.create_task(close_awaitable)
 
         # Wait until all queued tasks have been processed
         # Note: This ensure that a send-error message (and potentially other messages)
@@ -256,13 +320,13 @@ class ServerProtocol(Protocol):
             # Initiator: Send to all responders
             if client.type == AddressType.initiator:
                 responder_ids = path.get_responder_ids()
-                coroutines = []
+                coroutines = []  # type: List[Coroutine[Any, Any, None]]
                 for responder_id in responder_ids:
                     responder = path.get_responder(responder_id)
 
                     # Create message and add send coroutine to task queue of the responder
                     message = DisconnectedMessage.create(
-                        AddressType.server, responder_id, client.id)
+                        responder_id, INITIATOR_ADDRESS)
                     responder.log.debug('Enqueueing disconnected message')
                     coroutines.append(responder.enqueue_task(responder.send(message)))
                 try:
@@ -281,7 +345,7 @@ class ServerProtocol(Protocol):
                     # Create message and add send coroutine to task queue of the
                     # initiator
                     message = DisconnectedMessage.create(
-                        AddressType.server, initiator.id, client.id)
+                        INITIATOR_ADDRESS, ResponderAddress(client.id))
                     initiator.log.debug('Enqueueing disconnected message')
                     try:
                         await initiator.enqueue_task(initiator.send(message))
@@ -293,17 +357,18 @@ class ServerProtocol(Protocol):
                 client.log.error('Invalid address type: {}', client.type)
         else:
             client.log.debug(
-                'Skipping disconnected message due to {} state', client.state.name)
+                'Skipping potential disconnected message due to {} state',
+                client.state.name)
 
         # Wait for the connection to be closed
-        await close_future
+        await close_awaitable
         client.log.debug('WS connection closed')
 
         # Remove protocol from server and stop
         self._server.unregister(self)
         client.log.debug('Worker stopped')
 
-    async def close(self, code):
+    async def close(self, code: CloseCode) -> None:
         """
         Close the underlying connection and stop the protocol.
 
@@ -318,15 +383,20 @@ class ServerProtocol(Protocol):
             # 'disconnect' message for each client.
             await self._drop_client(self.client, code)
 
-    def get_path_client(self, connection, ws_path):
+    def get_path_client(
+            self,
+            connection: websockets.WebSocketServerProtocol,
+            ws_path: str,
+    ) -> Tuple[Path, PathClient]:
         # Extract public key from path
-        initiator_key = ws_path[1:]
+        initiator_key_hex = ws_path[1:]
 
         # Validate key
-        if len(initiator_key) != self.PATH_LENGTH:
-            raise PathError('Invalid path length: {}'.format(len(initiator_key)))
+        if len(initiator_key_hex) != self.PATH_LENGTH:
+            raise PathError('Invalid path length: {}'.format(len(initiator_key_hex)))
         try:
-            initiator_key = binascii.unhexlify(initiator_key)
+            initiator_key = InitiatorPublicPermanentKey(
+                binascii.unhexlify(initiator_key_hex))
         except (binascii.Error, ValueError) as exc:
             raise PathError('Could not unhexlify path') from exc
 
@@ -334,13 +404,12 @@ class ServerProtocol(Protocol):
         path = self._server.paths.get(initiator_key)
 
         # Create client instance
-        client = PathClient(connection, path.number, initiator_key,
-                            loop=self._loop)
+        client = PathClient(connection, path.number, initiator_key, loop=self._loop)
 
         # Return path and client
         return path, client
 
-    async def handle_client(self):
+    async def handle_client(self) -> None:
         """
         SignalingError
         PathError
@@ -353,25 +422,30 @@ class ServerProtocol(Protocol):
         InternalError
         """
         path, client = self.path, self.client
+        assert path is not None
+        assert client is not None
 
         # Do handshake
         client.log.debug('Starting handshake')
         await self.handshake()
-        client.log.info('Handshake completed')
-
-        # Task: Execute enqueued tasks
-        client.log.debug('Starting to poll for enqueued tasks')
-        task_loop = self.task_loop()
 
         # Check if the client is still connected to the path or has already been dropped.
         # Note: This can happen when the client is being picked up and dropped by another
         #       client while running the handshake. To prevent other race conditions, we
         #       have to add the client instance to the path early during the handshake.
         is_connected = path.has_client(client)
+        if is_connected:
+            client.log.info('Handshake completed')
+        else:
+            client.log.info('Handshake completed but client already dropped')
+
+        # Task: Execute enqueued tasks
+        client.log.debug('Starting to poll for enqueued tasks')
+        task_loop = self.task_loop()
 
         # Task: Poll for messages
-        hex_path = binascii.hexlify(path.initiator_key).decode('ascii')
-        receive_loop = None
+        hex_path = PathHex(binascii.hexlify(path.initiator_key).decode('ascii'))
+        receive_loop = None  # type: Optional[Coroutine[Any, Any, None]]
         if client.type == AddressType.initiator:
             self._server.notify_initiator_connected(hex_path)
             if is_connected:
@@ -386,18 +460,16 @@ class ServerProtocol(Protocol):
             raise ValueError('Invalid address type: {}'.format(client.type))
 
         # Task: Keep alive
+        keep_alive_loop = None  # type: Optional[Coroutine[Any, Any, None]]
         if is_connected:
             client.log.debug('Starting keep-alive task')
             keep_alive_loop = self.keep_alive_loop()
-        else:
-            keep_alive_loop = None
 
-        # Move the tasks into a context and store it on the path
-        client.tasks = PathClientTasks(
-            task_loop=task_loop,
-            receive_loop=receive_loop,
-            keep_alive_loop=keep_alive_loop,
-            loop=self._loop
+        # Set the tasks
+        client.tasks.set(
+            self._loop.create_task(task_loop),
+            None if receive_loop is None else self._loop.create_task(receive_loop),
+            None if keep_alive_loop is None else self._loop.create_task(keep_alive_loop),
         )
 
         # Wait until complete
@@ -407,12 +479,12 @@ class ServerProtocol(Protocol):
         #
         # Warning: This is probably the most complicated piece of code in the server.
         #          Avoid touching this!
-        tasks = set(client.tasks.valid)
+        tasks = set(client.tasks.valid)  # type: Set[Awaitable[None]]
         while True:
             done, pending = await asyncio.wait(
                 tasks, loop=self._loop, return_when=asyncio.FIRST_COMPLETED)
             is_connected = path.has_client(client)
-            exc = None
+            exc = None  # type: Optional[BaseException]
             for task in done:
                 client.log.debug('Task done {}, connected={}', task, is_connected)
 
@@ -461,7 +533,6 @@ class ServerProtocol(Protocol):
             #       client's path instance from the path while it is already effectively
             #       disconnected.
             client.cancel_task_queue()
-            path = self.path
             try:
                 path.remove_client(client)
             except KeyError:
@@ -473,7 +544,7 @@ class ServerProtocol(Protocol):
             # Finally, raise the exception
             raise exc
 
-    async def handshake(self):
+    async def handshake(self) -> None:
         """
         Disconnected
         MessageError
@@ -483,31 +554,32 @@ class ServerProtocol(Protocol):
         ServerKeyError
         """
         client = self.client
+        assert client is not None
 
         # Send server-hello
-        message = ServerHelloMessage.create(
-            AddressType.server, client.id, client.server_key.pk)
+        server_hello = ServerHelloMessage.create(
+            ServerPublicPermanentKey(client.server_key.pk))
         client.log.debug('Sending server-hello')
-        await client.send(message)
+        await client.send(server_hello)
 
         # Receive client-hello or client-auth
         client.log.debug('Waiting for client-hello or client-auth')
-        message = await client.receive()
-        if message.type == MessageType.client_auth:
+        client_auth = await client.receive()
+        if isinstance(client_auth, ClientAuthMessage):
             client.log.debug('Received client-auth')
             # Client is the initiator
             client.type = AddressType.initiator
-            await self.handshake_initiator(message)
-        elif message.type == MessageType.client_hello:
+            await self.handshake_initiator(client_auth)
+        elif isinstance(client_auth, ClientHelloMessage):
             client.log.debug('Received client-hello')
             # Client is a responder
             client.type = AddressType.responder
-            await self.handshake_responder(message)
+            await self.handshake_responder(client_auth)
         else:
             error = "Expected 'client-hello' or 'client-auth', got '{}'"
-            raise MessageFlowError(error.format(message.type))
+            raise MessageFlowError(error.format(client_auth.type))
 
-    async def handshake_initiator(self, message):
+    async def handshake_initiator(self, client_auth: ClientAuthMessage) -> None:
         """
         Disconnected
         MessageError
@@ -516,9 +588,11 @@ class ServerProtocol(Protocol):
         ServerKeyError
         """
         path, initiator = self.path, self.client
+        assert path is not None
+        assert initiator is not None
 
         # Handle client-auth
-        self._handle_client_auth(message)
+        self._handle_client_auth(client_auth)
 
         # Authenticated
         previous_initiator = path.set_initiator(initiator)
@@ -526,29 +600,30 @@ class ServerProtocol(Protocol):
             # Drop previous initiator using its task queue
             path.log.debug('Dropping previous initiator {}', previous_initiator)
             previous_initiator.log.debug('Dropping (another initiator connected)')
+            # noinspection PyAsyncCall
             self._drop_client(previous_initiator, CloseCode.drop_by_initiator)
 
         # Send new-initiator message if any responder is present
         responder_ids = path.get_responder_ids()
-        coroutines = []
+        coroutines = []  # type: List[Coroutine[Any, Any, None]]
         for responder_id in responder_ids:
             responder = path.get_responder(responder_id)
 
             # Create message and add send coroutine to task queue of the responder
-            message = NewInitiatorMessage.create(AddressType.server, responder_id)
+            new_initiator = NewInitiatorMessage.create(responder_id)
             responder.log.debug('Enqueueing new-initiator message')
-            coroutines.append(responder.enqueue_task(responder.send(message)))
+            coroutines.append(responder.enqueue_task(responder.send(new_initiator)))
         await asyncio.gather(*coroutines, loop=self._loop)
 
         # Send server-auth
         responder_ids = list(path.get_responder_ids())
-        message = ServerAuthMessage.create(
-            AddressType.server, initiator.id, initiator.cookie_in,
+        server_auth = ServerAuthMessage.create(
+            INITIATOR_ADDRESS, initiator.cookie_in,
             sign_keys=len(self._server.keys) > 0, responder_ids=responder_ids)
         initiator.log.debug('Sending server-auth including responder ids')
-        await initiator.send(message)
+        await initiator.send(server_auth)
 
-    async def handshake_responder(self, message):
+    async def handshake_responder(self, client_hello: ClientHelloMessage) -> None:
         """
         Disconnected
         MessageError
@@ -558,81 +633,93 @@ class ServerProtocol(Protocol):
         ServerKeyError
         """
         path, responder = self.path, self.client
+        assert path is not None
+        assert responder is not None
 
         # Set key on client
-        responder.set_client_key(message.client_public_key)
+        responder.set_client_key(
+            ResponderPublicSessionKey(client_hello.client_public_key))
 
         # Receive client-auth
-        message = await responder.receive()
-        if message.type != MessageType.client_auth:
+        client_auth = await responder.receive()
+        if not isinstance(client_auth, ClientAuthMessage):
             error = "Expected 'client-auth', got '{}'"
-            raise MessageFlowError(error.format(message.type))
+            raise MessageFlowError(error.format(client_auth.type))
 
         # Handle client-auth
-        self._handle_client_auth(message)
+        self._handle_client_auth(client_auth)
 
         # Authenticated
         id_ = path.add_responder(responder)
 
         # Send new-responder message if initiator is present
+        initiator = None  # type: Optional[PathClient]
         try:
             initiator = path.get_initiator()
         except KeyError:
-            initiator = None
+            pass
         else:
             # Create message and add send coroutine to task queue of the initiator
-            message = NewResponderMessage.create(AddressType.server, initiator.id, id_)
+            new_responder = NewResponderMessage.create(id_)
             initiator.log.debug('Enqueueing new-responder message')
-            await initiator.enqueue_task(initiator.send(message))
+            await initiator.enqueue_task(initiator.send(new_responder))
 
         # Send server-auth
-        message = ServerAuthMessage.create(
-            AddressType.server, responder.id, responder.cookie_in,
+        server_auth = ServerAuthMessage.create(
+            ResponderAddress(responder.id), responder.cookie_in,
             sign_keys=len(self._server.keys) > 0,
             initiator_connected=initiator is not None)
         responder.log.debug('Sending server-auth without responder ids')
-        await responder.send(message)
+        await responder.send(server_auth)
 
-    async def task_loop(self):
+    async def task_loop(self) -> None:
         client = self.client
+        assert client is not None
         while not client.connection_closed_future.done():
             # Get a task from the queue
-            task = await client.dequeue_task()
+            awaitable = await client.dequeue_task()
 
             # Wait and handle exceptions
-            client.log.debug('Waiting for task to complete {}', task)
+            client.log.debug('Waiting for task to complete {}', awaitable)
             try:
-                await task
+                await awaitable
             except Exception as exc:
                 if isinstance(exc, asyncio.CancelledError):
-                    client.log.debug('Cancelling active task {}', task)
+                    client.log.debug('Cancelling active task {}', awaitable)
                 else:
-                    client.log.debug('Stopping active task {}, ', task)
-                if asyncio.iscoroutine(task):
-                    task.close()
-                    client.task_done(task)
+                    client.log.debug('Stopping active task {}, ', awaitable)
+                if asyncio.iscoroutine(awaitable):
+                    coroutine = cast('Coroutine[Any, Any, None]', awaitable)
+                    coroutine.close()
+                    client.task_done(coroutine)
                 else:
+                    task = cast('asyncio.Task[None]', awaitable)
                     task.add_done_callback(client.task_done)
                 raise
-            client.task_done(task)
+            client.task_done(awaitable)
 
-    async def initiator_receive_loop(self):
+    async def initiator_receive_loop(self) -> None:
         path, initiator = self.path, self.client
+        assert path is not None
+        assert initiator is not None
         while not initiator.connection_closed_future.done():
             # Receive relay message or drop-responder
             message = await initiator.receive()
 
             # Relay
-            if isinstance(message, RawMessage):
+            if isinstance(message, RelayMessage):
                 # Lookup responder
+                responder = None  # type: Optional[PathClient]
                 try:
-                    responder = path.get_responder(message.destination)
+                    responder_id = ResponderAddress(message.destination)
+                    responder = path.get_responder(responder_id)
                 except KeyError:
-                    responder = None
+                    pass
                 # Send to responder
-                await self.relay_message(responder, message.destination, message)
+                await self.relay_message(
+                    responder, ClientAddress(message.destination), message)
             # Drop-responder
-            elif message.type == MessageType.drop_responder:
+            elif isinstance(message, DropResponderMessage):
                 # Lookup responder
                 try:
                     responder = path.get_responder(message.responder_id)
@@ -645,41 +732,51 @@ class ServerProtocol(Protocol):
                         'Dropping responder {}, reason: {}', responder, message.reason)
                     responder.log.debug(
                         'Dropping (requested by initiator), reason: {}', message.reason)
-                    self._drop_client(responder, message.reason.value)
+                    # noinspection PyAsyncCall
+                    self._drop_client(responder, CloseCode(message.reason))
             else:
                 error = "Expected relay message or 'drop-responder', got '{}'"
                 raise MessageFlowError(error.format(message.type))
 
-    async def responder_receive_loop(self):
+    async def responder_receive_loop(self) -> None:
         path, responder = self.path, self.client
+        assert path is not None
+        assert responder is not None
         while not responder.connection_closed_future.done():
             # Receive relay message
             message = await responder.receive()
 
             # Relay
-            if isinstance(message, RawMessage):
+            if isinstance(message, RelayMessage):
                 # Lookup initiator
+                initiator = None  # type: Optional[PathClient]
                 try:
                     initiator = path.get_initiator()
                 except KeyError:
-                    initiator = None
+                    pass
                 # Send to initiator
-                await self.relay_message(initiator, AddressType.initiator, message)
+                await self.relay_message(initiator, INITIATOR_ADDRESS, message)
             else:
                 error = "Expected relay message, got '{}'"
                 raise MessageFlowError(error.format(message.type))
 
-    async def relay_message(self, destination, destination_id, message):
+    async def relay_message(
+            self,
+            destination: Optional[PathClient],
+            destination_id: ClientAddress,
+            message: RelayMessage,
+    ) -> None:
         source = self.client
+        assert source is not None
 
         # Prepare message
         source.log.debug('Packing relay message')
-        message_id = message.pack(source)[COOKIE_LENGTH:NONCE_LENGTH]
+        message_id = MessageId(message.pack(source)[COOKIE_LENGTH:NONCE_LENGTH])
 
-        async def send_error_message():
+        async def send_error_message() -> None:
+            assert source is not None
             # Create message and add send coroutine to task queue of the source
-            error = SendErrorMessage.create(
-                AddressType.server, source.id, message_id)
+            error = SendErrorMessage.create(ClientAddress(source.id), message_id)
             source.log.info('Relaying failed, enqueuing send-error')
             await source.enqueue_task(source.send(error))
 
@@ -692,7 +789,7 @@ class ServerProtocol(Protocol):
             return
 
         # Add send task to task queue of the source
-        task = asyncio.ensure_future(destination.send(message), loop=self._loop)
+        task = self._loop.create_task(destination.send(message))
         destination.log.debug('Enqueueing relayed message from 0x{:02x}', source.id)
         await destination.enqueue_task(task)
 
@@ -717,14 +814,16 @@ class ServerProtocol(Protocol):
             source.log.debug('Sending relayed message to 0x{:02x} successful',
                              destination.id)
 
-    async def keep_alive_loop(self):
+    async def keep_alive_loop(self) -> None:
         """
         Disconnected
         PingTimeoutError
         """
         client = self.client
+        assert client is not None
         while not client.connection_closed_future.done():
             # Wait
+            # noinspection PyTypeChecker
             await asyncio.sleep(client.keep_alive_interval, loop=self._loop)
 
             # Send ping and wait for pong
@@ -740,32 +839,34 @@ class ServerProtocol(Protocol):
                 client.log.debug('Pong')
                 client.keep_alive_pings += 1
 
-    def _handle_client_auth(self, message):
+    def _handle_client_auth(self, client_auth: ClientAuthMessage) -> None:
         """
         MessageError
         DowngradeError
         ServerKeyError
         """
         client = self.client
+        assert client is not None
 
         # Validate cookie and ensure no sub-protocol downgrade took place
-        self._validate_cookie(message.server_cookie, client.cookie_out)
-        self._validate_subprotocol(message.subprotocols)
+        self._validate_cookie(client_auth.server_cookie, client.cookie_out)
+        self._validate_subprotocol(client_auth.subprotocols)
 
         # Set the keep alive interval (if any)
-        if message.ping_interval is not None:
-            client.log.debug('Setting keep-alive interval to {}', message.ping_interval)
-            client.keep_alive_interval = message.ping_interval
+        if client_auth.ping_interval is not None:
+            client.log.debug(
+                'Setting keep-alive interval to {}', client_auth.ping_interval)
+            client.keep_alive_interval = client_auth.ping_interval
 
         # Set the public permanent key the client wants to use (or fallback to primary)
         server_keys_count = len(self._server.keys)
-        if message.server_key is not None:
+        if client_auth.server_key is not None:
             # No permanent key pair?
             if server_keys_count == 0:
                 raise ServerKeyError('Server does not have a permanent public key')
 
             # Find the key instance
-            server_key = self._server.keys.get(message.server_key)
+            server_key = self._server.keys.get(client_auth.server_key)
             if server_key is None:
                 raise ServerKeyError(
                     'Server does not have the requested permanent public key')
@@ -776,20 +877,31 @@ class ServerProtocol(Protocol):
             # Use primary permanent key
             client.server_permanent_key = next(iter(self._server.keys.values()))
 
-    def _validate_cookie(self, expected_cookie, actual_cookie):
+    def _validate_cookie(
+            self,
+            expected_cookie: ServerCookie,
+            actual_cookie: ServerCookie,
+    ) -> None:
         """
         MessageError
         """
-        self.client.log.debug('Validating cookie')
+        client = self.client
+        assert client is not None
+        client.log.debug('Validating cookie')
         if not util.consteq(expected_cookie, actual_cookie):
             raise MessageError('Cookies do not match')
 
-    def _validate_subprotocol(self, client_subprotocols):
+    def _validate_subprotocol(
+            self,
+            client_subprotocols: ListOrTuple[ChosenSubProtocol],
+    ) -> None:
         """
         MessageError
         DowngradeError
         """
-        self.client.log.debug(
+        client = self.client
+        assert client is not None
+        client.log.debug(
             'Checking for subprotocol downgrade, client: {}, server: {}',
             client_subprotocols, self._server.subprotocols)
         chosen = websockets.WebSocketServerProtocol.select_subprotocol(
@@ -797,7 +909,7 @@ class ServerProtocol(Protocol):
         if chosen != self.subprotocol.value:
             raise DowngradeError('Subprotocol downgrade detected')
 
-    def _drop_client(self, client, code):
+    def _drop_client(self, client: PathClient, code: CloseCode) -> 'asyncio.Task[None]':
         """
         Mark the client as closed, schedule the closing procedure on
         the client's task queue, remove it from the path and return the
@@ -815,6 +927,7 @@ class ServerProtocol(Protocol):
 
         # Remove the client from the path
         path = self.path
+        assert path is not None
         path.remove_client(client)
 
         return drop_task
@@ -823,19 +936,19 @@ class ServerProtocol(Protocol):
 class Paths:
     __slots__ = ('_log', 'number', 'paths')
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._log = util.get_logger('paths')
         self.number = 0
-        self.paths = {}
+        self.paths = {}  # type: Dict[InitiatorPublicPermanentKey, Path]
 
-    def get(self, initiator_key):
+    def get(self, initiator_key: InitiatorPublicPermanentKey) -> Path:
         if self.paths.get(initiator_key) is None:
             self.number += 1
             self.paths[initiator_key] = Path(initiator_key, self.number, attached=True)
             self._log.debug('Created new path: {}', self.number)
         return self.paths[initiator_key]
 
-    def clean(self, path):
+    def clean(self, path: Path) -> None:
         if path.attached and path.empty:
             path.attached = False
             try:
@@ -846,12 +959,17 @@ class Paths:
                 self._log.debug('Removed empty path: {}', path.number)
 
 
-class Server(asyncio.AbstractServer):
+class Server:
     subprotocols = [
         SubProtocol.saltyrtc_v1.value
-    ]
+    ]  # type: ClassVar[Sequence[SubProtocol]]
 
-    def __init__(self, keys, paths, loop=None):
+    def __init__(
+            self,
+            keys: Optional[Sequence[ServerSecretPermanentKey]],
+            paths: Paths,
+            loop: Optional[asyncio.AbstractEventLoop] = None,
+    ) -> None:
         self._log = util.get_logger('server')
         self._loop = asyncio.get_event_loop() if loop is None else loop
 
@@ -866,38 +984,44 @@ class Server(asyncio.AbstractServer):
             keys = []
         if len(keys) != len({key.pk for key in keys}):
             raise ServerKeyError('Repeated permanent keys')
-        self.keys = OrderedDict(((key.pk, key) for key in keys))
+        self.keys = OrderedDict(
+            ((ServerPublicPermanentKey(key.pk), key) for key in keys))  # type: Keys
 
         # Store paths
         self.paths = paths
 
         # Store server protocols and closing task
-        self.protocols = set()
-        self._close_task = None
+        self.protocols = set()  # type: Set[ServerProtocol]
+        self._close_task = None  # type: Optional[asyncio.Task[None]]
 
         # Event Registry
         self._events = EventRegistry()
 
     @property
-    def server(self):
+    def server(self) -> websockets.server.WebSocketServer:
         return self._server
 
     @server.setter
-    def server(self, server):
+    def server(self, server: websockets.server.WebSocketServer) -> None:
         self._server = server
         self._log.debug('Server instance: {}', server)
 
-    async def handler(self, connection, ws_path):
+    async def handler(
+            self,
+            connection: websockets.WebSocketServerProtocol,
+            ws_path: str,
+    ) -> None:
         # Closing? Drop immediately
         if self._close_task is not None:
             await connection.close(CloseCode.going_away.value)
             return
 
         # Convert sub-protocol
+        subprotocol = None  # type: Optional[SubProtocol]
         try:
             subprotocol = SubProtocol(connection.subprotocol)
         except ValueError:
-            subprotocol = None
+            pass
 
         # Determine ServerProtocol instance by selected sub-protocol
         if subprotocol != SubProtocol.saltyrtc_v1:
@@ -905,36 +1029,47 @@ class Server(asyncio.AbstractServer):
             # We need to close the connection manually as the client may choose
             # to ignore
             await connection.close(code=CloseCode.subprotocol_error.value)
-            self.notify_disconnected(None, CloseCode.subprotocol_error.value)
+            self.notify_disconnected(
+                None, DisconnectedData(CloseCode.subprotocol_error.value))
         else:
+            assert subprotocol is not None
             protocol = self._protocol_class(
                 self, subprotocol, connection, ws_path, loop=self._loop)
             await protocol.handler_task
 
-    def register(self, protocol):
+    def register(self, protocol: ServerProtocol) -> None:
         self.protocols.add(protocol)
         self._log.debug('Protocol registered: {}', protocol)
 
-    def unregister(self, protocol):
+    def unregister(self, protocol: ServerProtocol) -> None:
         self.protocols.remove(protocol)
         self._log.debug('Protocol unregistered: {}', protocol)
 
-    def register_event_callback(self, event: Event, callback: EventCallback):
+    def register_event_callback(self, event: Event, callback: EventCallback) -> None:
         """
         Register a new event callback.
         """
         self._events.register(event, callback)
 
-    def notify_initiator_connected(self, path: str):
+    def notify_initiator_connected(self, path: PathHex) -> None:
         self._raise_event(Event.initiator_connected, path, None)
 
-    def notify_responder_connected(self, path: str):
+    def notify_responder_connected(self, path: PathHex) -> None:
         self._raise_event(Event.responder_connected, path, None)
 
-    def notify_disconnected(self, path: Optional[str], data: DisconnectedData):
+    def notify_disconnected(
+            self,
+            path: Optional[PathHex],
+            data: DisconnectedData,
+    ) -> None:
         self._raise_event(Event.disconnected, path, data)
 
-    def _raise_event(self, event: Event, path: Optional[str], data: EventData):
+    def _raise_event(
+            self,
+            event: Event,
+            path: Optional[PathHex],
+            data: EventData,
+    ) -> None:
         """
         Raise an event and invoke all registered event callbacks.
 
@@ -949,34 +1084,37 @@ class Server(asyncio.AbstractServer):
             coroutine = callback(event, path, data)
             asyncio.ensure_future(coroutine, loop=self._loop)
 
-    def close(self):
+    def close(self) -> None:
         """
         Close open connections and the server.
         """
         if self._close_task is None:
-            self._close_task = asyncio.ensure_future(
-                self._close_after_all_protocols_closed(), loop=self._loop)
+            self._close_task = self._loop.create_task(
+                self._close_after_all_protocols_closed())
 
-    async def wait_closed(self):
+    async def wait_closed(self) -> None:
         """
         Wait until all connections and the server itself has been
         closed.
         """
         await self.server.wait_closed()
 
-    async def _close_after_all_protocols_closed(self, timeout=None):
+    async def _close_after_all_protocols_closed(
+            self,
+            timeout: Optional[float] = None,
+    ) -> None:
         # Schedule closing all protocols
         self._log.info('Closing protocols')
         if len(self.protocols) > 0:
-            async def _close_and_wait():
+            async def _close_and_wait() -> None:
                 # Wait until all connections have been scheduled to be closed
-                tasks = [protocol.close(CloseCode.going_away.value)
-                         for protocol in self.protocols]
-                await asyncio.gather(*tasks, loop=self._loop)
+                close_tasks = [protocol.close(CloseCode.going_away)
+                               for protocol in self.protocols]
+                await asyncio.gather(*close_tasks, loop=self._loop)
 
                 # Wait until all protocols have returned
-                tasks = [protocol.handler_task for protocol in self.protocols]
-                await asyncio.gather(*tasks, loop=self._loop)
+                handler_tasks = [protocol.handler_task for protocol in self.protocols]
+                await asyncio.gather(*handler_tasks, loop=self._loop)
 
             await asyncio.wait_for(_close_and_wait(), timeout, loop=self._loop)
 

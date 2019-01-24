@@ -4,30 +4,23 @@ This is a SaltyRTC server implementation for Python 3.5+ using
 """
 import itertools
 
-# noinspection PyUnresolvedReferences
-from .exception import *  # noqa
-# noinspection PyUnresolvedReferences
 from .common import *  # noqa
-# noinspection PyUnresolvedReferences
-from .message import *  # noqa
-# noinspection PyUnresolvedReferences
-from .protocol import *  # noqa
-# noinspection PyUnresolvedReferences
-from .server import *  # noqa
-# noinspection PyUnresolvedReferences
-from .util import *  # noqa
-# noinspection PyUnresolvedReferences
 from .events import *  # noqa
+from .exception import *  # noqa
+from .message import *  # noqa
+from .protocol import *  # noqa
+from .server import *  # noqa
+from .util import *  # noqa
 
 __all__ = tuple(itertools.chain(
-    ('bin',),
-    exception.__all__,  # noqa
+    ('bin', 'typing'),
     common.__all__,  # noqa
+    events.__all__,  # noqa
+    exception.__all__,  # noqa
     message.__all__,  # noqa
     protocol.__all__,  # noqa
     server.__all__,  # noqa
     util.__all__,  # noqa
-    events.__all__,  # noqa
 ))
 
 __author__ = 'Lennart Grahl <lennart.grahl@gmail.com>'

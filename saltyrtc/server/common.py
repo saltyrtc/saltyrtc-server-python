@@ -3,8 +3,21 @@ This package will be moved to `saltyrtc.common` as soon as a SaltyRTC
 client is being written.
 """
 import enum
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    cast,
+)
 
 from .exception import MessageError
+from .typing import (
+    Nonce,
+    PingInterval,
+    SignedKeys,
+)
+
+if TYPE_CHECKING:
+    from .protocol import PathClient
 
 __all__ = (
     'DATA_LENGTH_MIN',
@@ -21,23 +34,23 @@ __all__ = (
     'OverflowSentinel',
     'SubProtocol',
     'CloseCode',
+    'DropReason',
+    'DEFAULT_DROP_REASON',
     'ClientState',
     'AddressType',
+    'Address',
+    'ServerAddress',
+    'SERVER_ADDRESS',
+    'ClientAddress',
+    'InitiatorAddress',
+    'INITIATOR_ADDRESS',
+    'ResponderAddress',
     'MessageType',
-    'available_slot_range',
-    'is_client_id',
-    'is_initiator_id',
-    'is_responder_id',
     'validate_public_key',
+    'validate_cookie',
     'validate_subprotocol',
     'validate_subprotocols',
-    'validate_cookie',
-    'validate_signed_keys',
-    'validate_initiator_connected',
-    'validate_client_id',
     'validate_responder_id',
-    'validate_responder_ids',
-    'validate_hash',
     'validate_ping_interval',
     'validate_drop_reason',
     'sign_keys',
@@ -52,7 +65,7 @@ HASH_LENGTH = 32
 SIGNED_KEYS_CIPHERTEXT_LENGTH = 80
 RELAY_TIMEOUT = 30.0
 KEEP_ALIVE_INTERVAL_MIN = 1.0
-KEEP_ALIVE_INTERVAL_DEFAULT = 3600.0
+KEEP_ALIVE_INTERVAL_DEFAULT = PingInterval(3600)
 KEEP_ALIVE_TIMEOUT = 30.0
 
 
@@ -66,10 +79,6 @@ class OverflowSentinel:
 @enum.unique
 class SubProtocol(enum.Enum):
     saltyrtc_v1 = 'v1.saltyrtc.org'
-
-
-# Valid drop responder reasons
-_drop_reasons = {3001, 3002, 3004, 3005}
 
 
 @enum.unique
@@ -86,9 +95,16 @@ class CloseCode(enum.IntEnum):
     invalid_key = 3007
     timeout = 3008
 
-    @property
-    def is_valid_drop_reason(self):
-        return self.value in _drop_reasons
+
+@enum.unique
+class DropReason(enum.IntEnum):
+    protocol_error = 3001
+    internal_error = 3002
+    drop_by_initiator = 3004
+    initiator_could_not_decrypt = 3005
+
+
+DEFAULT_DROP_REASON = DropReason.drop_by_initiator
 
 
 @enum.unique
@@ -113,7 +129,7 @@ class ClientState(enum.IntEnum):
     dropped = 3
 
     @property
-    def next(self):
+    def next(self) -> 'ClientState':
         """
         Return the subsequent state.
 
@@ -123,17 +139,76 @@ class ClientState(enum.IntEnum):
 
 
 @enum.unique
-class AddressType(enum.IntEnum):
-    server = 0x00
-    initiator = 0x01
-    responder = 0xff
+class AddressType(enum.Enum):
+    server = 1
+    initiator = 2
+    responder = 3
 
-    @classmethod
-    def from_address(cls, address):
-        if address > 0x01:
-            return cls.responder
+
+class Address(int):
+    """
+    A valid SaltyRTC address must be in the range of 0x00 to 0xff.
+    """
+    def __new__(cls, value: int) -> 'Address':
+        if not isinstance(value, int):
+            raise ValueError('Invalid address: {}'.format(value))
+        if not 0x00 <= value <= 0xff:
+            raise ValueError('Invalid address: 0x{:02x}'.format(value))
+        return cast('Address', super().__new__(cls, value))  # type: ignore
+
+    @property
+    def type(self) -> AddressType:
+        if self == 0x00:
+            return AddressType.server
+        elif self == 0x01:
+            return AddressType.initiator
         else:
-            return cls(address)
+            return AddressType.responder
+
+
+class ServerAddress(Address):
+    """
+    SaltyRTC address towards the server (0x00).
+    """
+    def __new__(cls) -> 'ServerAddress':
+        return cast('ServerAddress', super().__new__(cls, 0x00))
+
+
+SERVER_ADDRESS = ServerAddress()
+
+
+class ClientAddress(Address):
+    """
+    SaltyRTC address towards a client (0x01 to 0xff).
+    """
+    def __new__(cls, value: int) -> 'ClientAddress':
+        address = cast('ClientAddress', super().__new__(cls, value))
+        if address == SERVER_ADDRESS:
+            raise ValueError('Invalid address: 0x{:02x}'.format(value))
+        return address
+
+
+class InitiatorAddress(ClientAddress):
+    """
+    SaltyRTC address towards the initiator (0x01).
+    """
+    def __new__(cls) -> 'InitiatorAddress':
+        return cast('InitiatorAddress', super().__new__(cls, 0x01))
+
+
+INITIATOR_ADDRESS = InitiatorAddress()
+
+
+class ResponderAddress(ClientAddress):
+    """
+    SaltyRTC address towards a responder (0x02 to 0xff).
+    """
+    def __new__(cls, value: int) -> 'ResponderAddress':
+        address = cast('ResponderAddress', super().__new__(cls, value))
+        # Note: ServerAddress has already been ruled out at this point
+        if address == INITIATOR_ADDRESS:
+            raise ValueError('Invalid address: 0x{:02x}'.format(value))
+        return address
 
 
 @enum.unique
@@ -150,23 +225,7 @@ class MessageType(enum.Enum):
     disconnected = 'disconnected'
 
 
-def available_slot_range():
-    return range(0x01, 0xff + 1)
-
-
-def is_client_id(id_):
-    return 0x01 <= id_ <= 0xff
-
-
-def is_initiator_id(id_):
-    return id_ == 0x01
-
-
-def is_responder_id(id_):
-    return 0x01 < id_ <= 0xff
-
-
-def validate_public_key(key):
+def validate_public_key(key: Any) -> None:
     if not isinstance(key, bytes):
         raise MessageError('Invalid key: Must be `bytes` (is `{}`)'.format(type(key)))
     key_length = len(key)
@@ -175,7 +234,7 @@ def validate_public_key(key):
             key_length, KEY_LENGTH))
 
 
-def validate_cookie(cookie):
+def validate_cookie(cookie: Any) -> None:
     if not isinstance(cookie, bytes):
         raise MessageError('Invalid cookie: Must be `bytes` (is `{}`)'.format(
             type(cookie)))
@@ -184,13 +243,13 @@ def validate_cookie(cookie):
             len(cookie), COOKIE_LENGTH))
 
 
-def validate_subprotocol(subprotocol):
+def validate_subprotocol(subprotocol: Any) -> None:
     if not isinstance(subprotocol, str):
         raise MessageError('Invalid sub-protocol: Must be `str` (is `{}`)'.format(
             type(subprotocol)))
 
 
-def validate_subprotocols(subprotocols):
+def validate_subprotocols(subprotocols: Any) -> None:
     if not isinstance(subprotocols, (list, tuple)):
         raise MessageError('Sub-protocols not list or tuple (type `{}`)'.format(
             type(subprotocols)))
@@ -198,53 +257,14 @@ def validate_subprotocols(subprotocols):
         validate_subprotocol(subprotocol)
 
 
-def validate_signed_keys(signed_keys):
-    expected_length = SIGNED_KEYS_CIPHERTEXT_LENGTH
-    if not isinstance(signed_keys, bytes):
-        error = "Invalid value for field 'signed_keys', must be `bytes` (is `{}`)".format(
-            type(signed_keys))
-        raise MessageError(error)
-    signed_keys_length = len(signed_keys)
-    if signed_keys_length != expected_length:
-        raise MessageError("Invalid length of field 'signed_keys' ({} != {})".format(
-            signed_keys_length, expected_length))
+def validate_responder_id(id_: Any) -> ResponderAddress:
+    try:
+        return ResponderAddress(id_)
+    except ValueError as exc:
+        raise MessageError('Invalid responder id: {}'.format(id_)) from exc
 
 
-def validate_initiator_connected(initiator_connected):
-    if not isinstance(initiator_connected, bool):
-        error = "Invalid value for field 'initiator_connected', must be `bool` " \
-                "(is `{}`)".format(type(initiator_connected))
-        raise MessageError(error)
-
-
-def validate_client_id(id_):
-    if not isinstance(id_, int) or not is_client_id(id_):
-        raise MessageError('Invalid client id: {}'.format(id_))
-
-
-def validate_responder_id(id_):
-    if not isinstance(id_, int) or not is_responder_id(id_):
-        raise MessageError('Invalid responder id: {}'.format(id_))
-
-
-def validate_responder_ids(ids):
-    if not isinstance(ids, (list, tuple)):
-        raise MessageError('Responder ids not list or tuple (type `{}`)'.format(
-            type(ids)))
-    for responder in ids:
-        validate_responder_id(responder)
-
-
-def validate_hash(hash_):
-    if not isinstance(hash_, bytes):
-        raise MessageError('Invalid hash: Must be `bytes` (is `{}`)'.format(type(hash_)))
-    hash_length = len(hash_)
-    if hash_length != HASH_LENGTH:
-        raise MessageError('Invalid hash: Invalid length ({} != {})'.format(
-            hash_length, HASH_LENGTH))
-
-
-def validate_ping_interval(ping_interval):
+def validate_ping_interval(ping_interval: Any) -> None:
     if not isinstance(ping_interval, int):
         raise MessageError('Invalid ping interval: Must be `int` (is `{}`)'.format(
             type(ping_interval)))
@@ -252,28 +272,21 @@ def validate_ping_interval(ping_interval):
         raise MessageError('Invalid ping interval ({} >= 0)'.format(ping_interval))
 
 
-def validate_drop_reason(reason):
-    # Default drop reason
+def validate_drop_reason(reason: Any) -> DropReason:
     if reason is None:
-        return CloseCode.drop_by_initiator
-
-    # Validate reason
+        return DEFAULT_DROP_REASON
     try:
-        reason = CloseCode(reason)
-    except ValueError:
-        raise MessageError('Invalid close code: {}'.format(reason))
-    if not reason.is_valid_drop_reason:
-        raise MessageError('Reason not from acceptable range of close codes')
-
-    return reason
+        return DropReason(reason)
+    except ValueError as exc:
+        raise MessageError('Invalid drop reason: {}'.format(reason)) from exc
 
 
-def sign_keys(client, nonce):
+def sign_keys(client: 'PathClient', nonce: Nonce) -> SignedKeys:
     # Sign server's public session key and client's public permanent key (in that
     # order)
     payload = b''.join((client.server_key.pk, client.client_key))
     try:
         _, signed_keys = client.sign_box.encrypt(payload, nonce=nonce, pack_nonce=False)
-        return signed_keys
+        return SignedKeys(cast(bytes, signed_keys))
     except ValueError as exc:
         raise MessageError('Could not sign keys') from exc
