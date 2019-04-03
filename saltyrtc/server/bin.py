@@ -286,7 +286,7 @@ def serve(ctx: click.Context, **arguments: Any) -> None:
 def main() -> None:
     obj = {'logging_handler': None}
     try:
-        cli(obj=obj)
+        cli(obj=obj, auto_envvar_prefix='SALTYRTC_SERVER')
     except Exception as exc:
         click.echo('An error occurred:', err=True)
         click.echo(exc, err=True)
