@@ -400,7 +400,7 @@ class IncomingMessage(CookedMessage, IncomingMessageMixin, metaclass=abc.ABCMeta
             cls,
             data: Packet,
             client: 'PathClient',
-    )-> Tuple[Nonce, Address, Address]:
+    ) -> Tuple[Nonce, Address, Address]:
         """
         It is critical that this function ensures...
 

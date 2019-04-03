@@ -1,0 +1,129 @@
+version: 2.0
+
+
+shared: &shared
+  working_directory: /home/saltyrtc/saltyrtc-server-python
+
+  steps:
+    - checkout
+    - run:
+        name: Install SaltyRTC Server
+        command: |
+          pip install --no-cache-dir .[dev];
+          if [ "${EVENT_LOOP}" = "uvloop" ]; then
+            pip install --no-cache-dir .[dev,uvloop];
+          fi
+    - run:
+        name: Run tests
+        command: |
+          chown -R saltyrtc:saltyrtc /home/saltyrtc
+          su saltyrtc -c "py.test \
+            --cov-config=.coveragerc \
+            --cov=saltyrtc.server \
+            --loop=${EVENT_LOOP} \
+            --timeout=${TIMEOUT}"
+    - deploy:
+        name: Upload Codecov
+        command: codecov
+
+
+jobs:
+  lint:
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.7
+    steps:
+      - checkout
+      - run:
+          name: Install SaltyRTC Server
+          command: pip install .[dev]
+      - run:
+          name: Run Flake8
+          command: flake8 .
+      - run:
+          name: Run isort
+          command: isort -rc -c . || (isort -rc -df . && exit 1)
+      - run:
+          name: Run Mypy
+          command: MYPYPATH=${PWD}/stubs mypy saltyrtc examples
+      - run:
+          name: Run checkdocs
+          command: python setup.py checkdocs
+
+  test-python-3.7-asyncio:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.7
+    environment:
+      - EVENT_LOOP: asyncio
+      - TIMEOUT: "2.0"
+
+  test-python-3.7-uvloop:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.7
+    environment:
+      - EVENT_LOOP: uvloop
+      - TIMEOUT: "2.0"
+
+  test-python-3.6-asyncio:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.6
+    environment:
+      - EVENT_LOOP: asyncio
+      - TIMEOUT: "2.0"
+
+  test-python-3.6-uvloop:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.6
+    environment:
+      - EVENT_LOOP: uvloop
+      - TIMEOUT: "2.0"
+
+  test-python-3.5-asyncio:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.5
+    environment:
+      - EVENT_LOOP: asyncio
+      - TIMEOUT: "2.0"
+
+  test-python-3.5-uvloop:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.5
+    environment:
+      - EVENT_LOOP: uvloop
+      - TIMEOUT: "2.0"
+
+  test-pypy-3.6-asyncio:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:pypy-3.6
+    environment:
+      - EVENT_LOOP: asyncio
+      - TIMEOUT: "6.0"
+
+  test-pypy-3.5-asyncio:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:pypy-3.5
+    environment:
+      - EVENT_LOOP: asyncio
+      - TIMEOUT: "6.0"
+
+
+workflows:
+  version: 2
+  test:
+    jobs:
+      - lint
+      - test-python-3.7-asyncio
+      - test-python-3.7-uvloop
+      - test-python-3.6-asyncio
+      - test-python-3.6-uvloop
+      - test-python-3.5-asyncio
+      - test-python-3.5-uvloop
+      - test-pypy-3.6-asyncio
+      - test-pypy-3.5-asyncio

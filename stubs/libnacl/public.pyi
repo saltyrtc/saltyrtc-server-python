@@ -1,5 +1,11 @@
-from typing import Optional, Tuple, Union
+from typing import (
+    Optional,
+    Tuple,
+    Union,
+)
+
 from .base import BaseKey
+
 
 class PublicKey(BaseKey):
     def __init__(self, pk: bytes) -> None: ...

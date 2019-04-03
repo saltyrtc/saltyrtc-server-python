@@ -63,7 +63,7 @@ def pytest_namespace():
         'have_uvloop': pytest.mark.skipif(not have_uvloop, reason='requires uvloop'),
         'no_uvloop': pytest.mark.skipif(
             have_uvloop, reason='requires uvloop to be not installed'),
-        'host': 'localhost',
+        'host': '127.0.0.1',
         'port': 8766,
         'cli_path': os.path.join(sys.exec_prefix, 'bin', 'saltyrtc-server'),
         'key': os.path.normpath(
