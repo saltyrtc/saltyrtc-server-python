@@ -1,7 +1,7 @@
 SaltyRTC Signalling Server
 ==========================
 
-|Travis| |codecov| |PyPI| |Gitter|
+|CircleCI| |codecov| |PyPI| |Gitter|
 
 This is a SaltyRTC server implementation for Python 3.5+ using
 `asyncio`_.
@@ -115,8 +115,8 @@ contacts:
 .. _virtualenvwrapper: https://virtualenvwrapper.readthedocs.io/
 .. _libsodium: https://download.libsodium.org/doc/installation/
 
-.. |Travis| image:: https://travis-ci.org/saltyrtc/saltyrtc-server-python.svg?branch=master
-   :target: https://travis-ci.org/saltyrtc/saltyrtc-server-python
+.. |CircleCI| image:: https://circleci.com/gh/saltyrtc/saltyrtc-server-python.svg?style=shield
+   :target: https://circleci.com/gh/saltyrtc/saltyrtc-server-python
 .. |codecov| image:: https://codecov.io/gh/saltyrtc/saltyrtc-server-python/branch/master/graph/badge.svg
    :target: https://codecov.io/gh/saltyrtc/saltyrtc-server-python
 .. |PyPI| image:: https://badge.fury.io/py/saltyrtc.server.svg
