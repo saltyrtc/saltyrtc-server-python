@@ -123,6 +123,9 @@ jobs:
     environment:
       - SUPPORTED_TAGS: ^v4\.[1-9]+\.[0-9]+$
     steps:
+      - run:
+          name: Install git
+          command: apk add git openssh
       - checkout
       - setup_remote_docker
       - run:
