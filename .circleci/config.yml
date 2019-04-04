@@ -125,7 +125,7 @@ jobs:
     steps:
       - run:
           name: Install git
-          command: apk add git openssh
+          command: apk add bash git openssh
       - checkout
       - setup_remote_docker
       - run:
