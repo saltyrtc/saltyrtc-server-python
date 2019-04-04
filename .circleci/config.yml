@@ -129,7 +129,6 @@ jobs:
           name: Determine tag name
           command: |
             tag=$([ -n "${CIRCLE_TAG}" ] && echo "${CIRCLE_TAG:1}" || echo "${CIRCLE_BRANCH}")
-            [ "${CIRCLE_BRANCH}" = "master" ] && tag="latest"
             echo "Mapping branch ${CIRCLE_BRANCH} to ${tag}"
             echo "export TAG=${tag}" >> ${BASH_ENV}
       - run:

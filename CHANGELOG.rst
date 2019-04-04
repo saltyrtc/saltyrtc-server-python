@@ -1,6 +1,14 @@
 Changelog
 *********
 
+`4.1.0`_ (2019-04-04)
+---------------------
+
+- Allow the use of environment variables as CLI parameter substitution
+    - Instead of ``saltyrtc-server serve --tlskey=foo`` you can now write
+      ``SALTYRTC_SERVER_TLSKEY=foo saltyrtc-server serve``
+- Fix import order in pyi files
+
 `4.0.1`_ (2019-01-24)
 ---------------------
 
@@ -92,6 +100,7 @@ support the `disconnected` message before upgrading.
 .. _#90: https://github.com/saltyrtc/saltyrtc-server-python/issues/90
 .. _SaltyRTC 1.0 Protocol: https://github.com/saltyrtc/saltyrtc-meta/blob/protocol-1.0/Protocol.md
 
+.. _4.1.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v4.0.1...v4.1.0
 .. _4.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v4.0.0...v4.0.1
 .. _4.0.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.1.2...v4.0.0
 .. _3.1.2: https://github.com/saltyrtc/saltyrtc-server-python/compare/v3.1.1...v3.1.2
