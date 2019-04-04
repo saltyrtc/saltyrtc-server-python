@@ -1,4 +1,4 @@
-version: 2.0
+version: 2.1
 
 
 shared: &shared
@@ -28,6 +28,70 @@ shared: &shared
 
 
 jobs:
+  test-python-3_7-asyncio:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.7
+    environment:
+      - EVENT_LOOP: asyncio
+      - TIMEOUT: "2.0"
+
+  test-python-3_7-uvloop:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.7
+    environment:
+      - EVENT_LOOP: uvloop
+      - TIMEOUT: "2.0"
+
+  test-python-3_6-asyncio:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.6
+    environment:
+      - EVENT_LOOP: asyncio
+      - TIMEOUT: "2.0"
+
+  test-python-3_6-uvloop:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.6
+    environment:
+      - EVENT_LOOP: uvloop
+      - TIMEOUT: "2.0"
+
+  test-python-3_5-asyncio:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.5
+    environment:
+      - EVENT_LOOP: asyncio
+      - TIMEOUT: "2.0"
+
+  test-python-3_5-uvloop:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:python-3.5
+    environment:
+      - EVENT_LOOP: uvloop
+      - TIMEOUT: "2.0"
+
+  test-pypy-3_6-asyncio:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:pypy-3.6
+    environment:
+      - EVENT_LOOP: asyncio
+      - TIMEOUT: "6.0"
+
+  test-pypy-3_5-asyncio:
+    <<: *shared
+    docker:
+      - image: saltyrtc/circleci-image-python:pypy-3.5
+    environment:
+      - EVENT_LOOP: asyncio
+      - TIMEOUT: "6.0"
+
   lint:
     docker:
       - image: saltyrtc/circleci-image-python:python-3.7
@@ -49,69 +113,45 @@ jobs:
           name: Run checkdocs
           command: python setup.py checkdocs
 
-  test-python-3.7-asyncio:
-    <<: *shared
+  build-docker:
     docker:
-      - image: saltyrtc/circleci-image-python:python-3.7
+      - image: docker:stable
+    parameters:
+      rebuild:
+        type: boolean
+        default: false
     environment:
-      - EVENT_LOOP: asyncio
-      - TIMEOUT: "2.0"
-
-  test-python-3.7-uvloop:
-    <<: *shared
-    docker:
-      - image: saltyrtc/circleci-image-python:python-3.7
-    environment:
-      - EVENT_LOOP: uvloop
-      - TIMEOUT: "2.0"
-
-  test-python-3.6-asyncio:
-    <<: *shared
-    docker:
-      - image: saltyrtc/circleci-image-python:python-3.6
-    environment:
-      - EVENT_LOOP: asyncio
-      - TIMEOUT: "2.0"
-
-  test-python-3.6-uvloop:
-    <<: *shared
-    docker:
-      - image: saltyrtc/circleci-image-python:python-3.6
-    environment:
-      - EVENT_LOOP: uvloop
-      - TIMEOUT: "2.0"
-
-  test-python-3.5-asyncio:
-    <<: *shared
-    docker:
-      - image: saltyrtc/circleci-image-python:python-3.5
-    environment:
-      - EVENT_LOOP: asyncio
-      - TIMEOUT: "2.0"
-
-  test-python-3.5-uvloop:
-    <<: *shared
-    docker:
-      - image: saltyrtc/circleci-image-python:python-3.5
-    environment:
-      - EVENT_LOOP: uvloop
-      - TIMEOUT: "2.0"
-
-  test-pypy-3.6-asyncio:
-    <<: *shared
-    docker:
-      - image: saltyrtc/circleci-image-python:pypy-3.6
-    environment:
-      - EVENT_LOOP: asyncio
-      - TIMEOUT: "6.0"
-
-  test-pypy-3.5-asyncio:
-    <<: *shared
-    docker:
-      - image: saltyrtc/circleci-image-python:pypy-3.5
-    environment:
-      - EVENT_LOOP: asyncio
-      - TIMEOUT: "6.0"
+      - SUPPORTED_TAGS: ^v4\.[1-9]+\.[0-9]+$
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Determine tag name
+          command: |
+            tag=$([ -n "${CIRCLE_TAG}" ] && echo "${CIRCLE_TAG:1}" || echo "${CIRCLE_BRANCH}")
+            [ "${CIRCLE_BRANCH}" = "master" ] && tag="latest"
+            echo "Mapping branch ${CIRCLE_BRANCH} to ${tag}"
+            echo "export TAG=${tag}" >> ${BASH_ENV}
+      - run:
+          name: Build Docker image
+          command: |
+            source ${BASH_ENV}
+            docker build \
+              --no-cache \
+              -t saltyrtc/saltyrtc-server-python:${TAG} \
+              .
+      - run:
+          name: Push Docker image
+          command: |
+            source ${BASH_ENV}
+            docker login -u ${DOCKER_USER} -p ${DOCKER_API_KEY}
+            docker push saltyrtc/saltyrtc-server-python:${TAG}
+      - when:
+          condition: << parameters.rebuild >>
+          steps:
+            - run:
+                name: Build and push Docker images for supported tags
+                command: .circleci/build-docker.sh
 
 
 workflows:
@@ -119,11 +159,28 @@ workflows:
   test:
     jobs:
       - lint
-      - test-python-3.7-asyncio
-      - test-python-3.7-uvloop
-      - test-python-3.6-asyncio
-      - test-python-3.6-uvloop
-      - test-python-3.5-asyncio
-      - test-python-3.5-uvloop
-      - test-pypy-3.6-asyncio
-      - test-pypy-3.5-asyncio
+      - test-python-3_7-asyncio
+      - test-python-3_7-uvloop
+      - test-python-3_6-asyncio
+      - test-python-3_6-uvloop
+      - test-python-3_5-asyncio
+      - test-python-3_5-uvloop
+      - test-pypy-3_6-asyncio
+      - test-pypy-3_5-asyncio
+  docker:
+    jobs:
+      - build-docker:
+          filters:
+            tags:
+              only: /^v.*/
+  docker-weekly:
+    triggers:
+      - schedule:
+          cron: "0 5 * * 1"
+          filters:
+            branches:
+              only: master
+    jobs:
+      - build-docker:
+          rebuild: true
+
