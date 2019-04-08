@@ -442,7 +442,7 @@ class PathClient:
 
         Return the close code.
         """
-        return self._connection_closed_future
+        return asyncio.shield(self._connection_closed_future, loop=self._loop)
 
     @property
     def id(self) -> Address:
