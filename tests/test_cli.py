@@ -156,7 +156,8 @@ class TestCLI:
                 '-h', 'meow',
                 '-p', '8443',
             )
-        assert 'Name or service not known' in exc_info.value.output
+        assert any(('Name or service not known' in exc_info.value.output,
+                    'No address associated with hostname' in exc_info.value.output))
 
     @pytest.mark.asyncio
     async def test_serve_invalid_port(self, cli):
