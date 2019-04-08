@@ -2,14 +2,20 @@
 This module provides utility functions for the SaltyRTC Signalling
 Server.
 """
+import asyncio
 import binascii
 import logging
 import ssl
+# noinspection PyUnresolvedReferences
+from typing import Coroutine  # noqa
 from typing import (
     Any,
+    Awaitable,
+    Callable,
     List,
     Mapping,
     Optional,
+    cast,
 )
 
 import libnacl
@@ -30,6 +36,7 @@ __all__ = (
     'consteq',
     'create_ssl_context',
     'load_permanent_key',
+    'cancel_awaitable',
 )
 
 
@@ -282,3 +289,45 @@ def load_permanent_key(key: str) -> ServerSecretPermanentKey:
 
     # Convert to private key (raises ValueError on its own)
     return ServerSecretPermanentKey(libnacl.public.SecretKey(sk=key_bytes))
+
+
+def cancel_awaitable(
+        awaitable: Awaitable[None],
+        log: 'logbook.Logger',
+        done_cb: Optional[Callable[[Awaitable[None]], Any]] = None
+) -> None:
+    """
+    Cancel a coroutine or a :class:`asyncio.Task`.
+
+    Arguments:
+        - `coroutine_or_task`: The coroutine or
+          :class:`asyncio.Task` to be cancelled.
+        - `done_cb`: An optional callback to be called once the task
+          has been cancelled. Will be called immediately if
+          `coroutine_or_task` is a coroutine.
+    """
+    if asyncio.iscoroutine(awaitable):
+        coroutine = cast('Coroutine[Any, Any, None]', awaitable)
+        log.debug('Closing coroutine {}', coroutine)
+        coroutine.close()
+        if done_cb is not None:
+            done_cb(coroutine)
+    else:
+        task = cast('asyncio.Task[None]', awaitable)
+        if done_cb is not None:
+            task.add_done_callback(done_cb)
+        # Note: We need to check for .cancelled first since a task is also marked
+        #       .done when it is cancelled.
+        if task.cancelled():
+            log.debug('Already cancelled task {}', task)
+        elif task.done():
+            exc = task.exception()
+            if exc is not None:
+                message = 'Ignoring exception of task {}: {}'
+                log.debug(message, task, repr(exc))
+            else:
+                message = 'Ignoring completion of task {}'
+                log.debug(message, task)
+        else:
+            log.debug('Cancelling task {}', task)
+            task.cancel()

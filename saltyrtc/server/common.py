@@ -32,6 +32,7 @@ __all__ = (
     'KEEP_ALIVE_INTERVAL_DEFAULT',
     'KEEP_ALIVE_TIMEOUT',
     'OverflowSentinel',
+    'TaskLoopStopSentinel',
     'SubProtocol',
     'CloseCode',
     'DropReason',
@@ -73,6 +74,13 @@ class OverflowSentinel:
     """
     The combined sequence number will be set to this object if the
     counter did overflow.
+    """
+
+
+class TaskLoopStopSentinel:
+    """
+    The task loop will stop if this has been dequeued from the task
+    queue.
     """
 
 

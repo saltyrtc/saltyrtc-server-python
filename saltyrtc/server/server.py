@@ -36,6 +36,7 @@ from .common import (
     CloseCode,
     ResponderAddress,
     SubProtocol,
+    TaskLoopStopSentinel,
 )
 from .events import (
     Event,
@@ -302,18 +303,17 @@ class ServerProtocol:
         if not isinstance(close_awaitable, asyncio.Future):
             close_awaitable = self._loop.create_task(close_awaitable)
 
-        # Wait until all queued tasks have been processed
+        # Wait until all queued tasks have been processed and the task loop returned.
         # Note: This ensure that a send-error message (and potentially other messages)
         #       are enqueued towards other clients before the disconnect message.
-        client.log.debug('Joining task queue')
         try:
             await asyncio.wait_for(
                 client.join_task_queue(), _TASK_QUEUE_JOIN_TIMEOUT, loop=self._loop)
         except asyncio.TimeoutError:
             client.log.error(
-                'Task queue did not close after {} seconds', _TASK_QUEUE_JOIN_TIMEOUT)
+                'Task queue did not complete after {} seconds', _TASK_QUEUE_JOIN_TIMEOUT)
         else:
-            client.log.debug('Task queue closed')
+            client.log.debug('Task queue completed')
 
         # Send disconnected message if client was authenticated
         if client.state == ClientState.authenticated:
@@ -472,13 +472,18 @@ class ServerProtocol:
             None if keep_alive_loop is None else self._loop.create_task(keep_alive_loop),
         )
 
+        # If already disconnected, schedule stopping of the task loop
+        if not is_connected:
+            client.stop_task_queue(immediate=True)
+
         # Wait until complete
         #
         # Note: We also add the task loop into this list to catch any errors that bubble
         #       up in tasks of this client.
         #
-        # Warning: This is probably the most complicated piece of code in the server.
-        #          Avoid touching this!
+        # Warning: This is probably the most brittle piece of code in the server.
+        #          It is an absolute disaster and I hate myself for having done it this
+        #          way. My sincere apologies if you have to touch this.
         tasks = set(client.tasks.valid)  # type: Set[Awaitable[None]]
         while True:
             done, pending = await asyncio.wait(
@@ -504,28 +509,48 @@ class ServerProtocol:
                 task_exc = task.exception()
                 if task_exc is None:
                     connection_closed_future = client.connection_closed_future
-                    if not connection_closed_future.done():
-                        client.log.error('Task {} returned unexpectedly', task)
-                        task_exc = InternalError('A task returned unexpectedly')
-                    else:
-                        # Note: This can happen in case a task returned due to the
-                        #       connection becoming closed. Since this doesn't raise an
-                        #       exception, we need to do it ourselves.
+
+                    # Tasks are allowed to return when the connection has been closed.
+                    # Note: This can happen in case a task returned due to the
+                    #       connection becoming closed. Since this doesn't raise an
+                    #       exception, we need to do it ourselves.
+                    if connection_closed_future.done():
                         task_exc = Disconnected(connection_closed_future.result())
+                    else:
+                        # The task loop is allowed to return early if the task queue has
+                        # been closed or cancelled and all tasks have been processed
+                        if task == client.tasks.task_loop:
+                            if client.task_queue_done():
+                                tasks.remove(task)
+                                continue
+                            task_exc = InternalError(
+                                'Task loop {} returned unexpectedly', task)
+                        else:
+                            # All other tasks are not allowed to return early
+                            client.log.error('Task {} returned unexpectedly', task)
+                            task_exc = InternalError('A task returned unexpectedly')
 
                 if exc is None:
                     exc = task_exc
 
             # Continue if we have no exception
-            # Note: This may only happen in case the client has been dropped and we need
+            # Note: This happens when the task loop returns early after it has been
+            #       stopped.
+            #       This may also happen in case the client has been dropped and we need
             #       to wait for the task loop to return.
             if exc is None:
                 continue
 
             # Cancel pending tasks
+            # Note: This excludes the task loop but cancels the currently awaited
+            #       task of the task loop.
             for pending_task in pending:
-                client.log.debug('Cancelling task {}', pending_task)
-                pending_task.cancel()
+                if pending_task == client.tasks.task_loop:
+                    if client.tasks.active_task is not None:
+                        util.cancel_awaitable(client.tasks.active_task, client.log)
+                else:
+                    client.log.debug('Cancelling pending task {}', pending_task)
+                    pending_task.cancel()
 
             # Cancel the task queue and remove client from path
             # Note: Removing the client needs to be done here since the re-raise hands
@@ -675,28 +700,33 @@ class ServerProtocol:
     async def task_loop(self) -> None:
         client = self.client
         assert client is not None
-        while not client.connection_closed_future.done():
+        while True:
             # Get a task from the queue
-            awaitable = await client.dequeue_task()
+            task = await client.dequeue_task()
+            if task is TaskLoopStopSentinel:
+                client.task_done(task)
+                break
 
             # Wait and handle exceptions
-            client.log.debug('Waiting for task to complete {}', awaitable)
+            future = asyncio.ensure_future(cast(Awaitable[None], task), loop=self._loop)
+            client.log.debug('Waiting for task to complete {}', future)
+            client.tasks.active_task = future
             try:
-                await awaitable
+                await future
             except Exception as exc:
+                need_raise = True
                 if isinstance(exc, asyncio.CancelledError):
-                    client.log.debug('Cancelling active task {}', awaitable)
+                    client.log.debug('Active task cancelled {}', future)
+                    need_raise = False
                 else:
-                    client.log.debug('Stopping active task {}, ', awaitable)
-                if asyncio.iscoroutine(awaitable):
-                    coroutine = cast('Coroutine[Any, Any, None]', awaitable)
-                    coroutine.close()
-                    client.task_done(coroutine)
-                else:
-                    task = cast('asyncio.Task[None]', awaitable)
-                    task.add_done_callback(client.task_done)
-                raise
-            client.task_done(awaitable)
+                    client.log.debug('Stopping active task {}', future)
+                future.add_done_callback(client.task_done)
+                if need_raise:
+                    raise
+            else:
+                client.task_done(future)
+
+        client.log.debug('Task loop returned')
 
     async def initiator_receive_loop(self) -> None:
         path, initiator = self.path, self.client
@@ -788,7 +818,7 @@ class ServerProtocol:
             await send_error_message()
             return
 
-        # Add send task to task queue of the source
+        # Add send task to task queue of the destination
         task = self._loop.create_task(destination.send(message))
         destination.log.debug('Enqueueing relayed message from 0x{:02x}', source.id)
         await destination.enqueue_task(task)
