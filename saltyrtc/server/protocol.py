@@ -36,6 +36,7 @@ from .common import (
     CloseCode,
     OverflowSentinel,
     ResponderAddress,
+    TaskLoopStopSentinel,
 )
 from .exception import (
     Disconnected,
@@ -64,6 +65,7 @@ from .typing import (
     ServerSecretPermanentKey,
     ServerSecretSessionKey,
     SignBox,
+    Task,
 )
 
 __all__ = (
@@ -257,6 +259,7 @@ class PathClientTasks:
         'task_loop',
         'receive_loop',
         'keep_alive_loop',
+        'active_task',
     )
 
     def __init__(self) -> None:
@@ -264,6 +267,7 @@ class PathClientTasks:
         self.task_loop = None  # type: Optional[asyncio.Task[None]]
         self.receive_loop = None  # type: Optional[asyncio.Task[None]]
         self.keep_alive_loop = None  # type: Optional[asyncio.Task[None]]
+        self.active_task = None  # type: Optional[asyncio.Future[None]]
 
     @property
     def tasks(self) -> Sequence[Optional['asyncio.Task[None]']]:
@@ -406,7 +410,7 @@ class PathClient:
 
         # Queue for tasks to be run on the client (relay messages, closing, ...)
         self._task_queue = \
-            asyncio.Queue(loop=self._loop)  # type: asyncio.Queue[Awaitable[None]]
+            asyncio.Queue(loop=self._loop)  # type: asyncio.Queue[Task]
         self._task_queue_state = _TaskQueueState.open
 
     def __str__(self) -> str:
@@ -442,7 +446,7 @@ class PathClient:
 
         Return the close code.
         """
-        return self._connection_closed_future
+        return asyncio.shield(self._connection_closed_future, loop=self._loop)
 
     @property
     def id(self) -> Address:
@@ -723,9 +727,9 @@ class PathClient:
                 or (ignore_closed and self._task_queue_state == _TaskQueueState.closed)):
             await self._task_queue.put(awaitable)
         else:
-            self._cancel_awaitable(awaitable, mark_as_done=False)
+            util.cancel_awaitable(awaitable, self.log)
 
-    async def dequeue_task(self) -> Awaitable[None]:
+    async def dequeue_task(self) -> Task:
         """
         Dequeue and return a coroutine or task from the task queue of
         the client.
@@ -735,14 +739,14 @@ class PathClient:
         """
         return await self._task_queue.get()
 
-    def task_done(self, awaitable: Awaitable[None]) -> None:
+    def task_done(self, awaitable: Task) -> None:
         """
         Mark a previously dequeued task as processed.
 
         Raises :exc:`InternalError` if called more times than there
         were tasks placed in the queue.
         """
-        self.log.debug('Done task {}', awaitable)
+        self.log.debug('Completed task {}', awaitable)
         try:
             self._task_queue.task_done()
         except ValueError:
@@ -764,6 +768,10 @@ class PathClient:
         # Update state
         self._task_queue_state = _TaskQueueState.closed
         self.log.debug('Closed task queue')
+
+        # Ask the task loop to stop when done processing all previous tasks
+        # (if we have a queue looper).
+        self.stop_task_queue(immediate=False)
 
     def cancel_task_queue(self) -> None:
         """
@@ -788,55 +796,45 @@ class PathClient:
         self.log.debug('Cancelling {} queued tasks', self._task_queue.qsize())
         while True:
             try:
-                coroutine_or_task = self._task_queue.get_nowait()
+                task = self._task_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            self._cancel_awaitable(coroutine_or_task, mark_as_done=True)
-
-    def _cancel_awaitable(
-            self,
-            awaitable: Awaitable[None],
-            mark_as_done: bool = False,
-    ) -> None:
-        """
-        Cancel a coroutine or a :class:`asyncio.Task`.
-
-        Arguments:
-            - `coroutine_or_task`: The coroutine or
-              :class:`asyncio.Task` to be cancelled.
-            - `mark_as_done`: Whether to mark the task as *processed*
-              on the task queue. Defaults to `False`.
-        """
-        if asyncio.iscoroutine(awaitable):
-            coroutine = cast('Coroutine[Any, Any, None]', awaitable)
-            self.log.debug('Closing queued coroutine {}', coroutine)
-            coroutine.close()
-            if mark_as_done:
-                self.task_done(coroutine)
-        else:
-            task = cast('asyncio.Task[None]', awaitable)
-            if mark_as_done:
-                task.add_done_callback(self.task_done)
-            # Note: We need to check for .cancelled first since a task is also marked
-            #       .done when it is cancelled.
-            if task.cancelled():
-                self.log.debug('Already cancelled task {}', task)
-            elif task.done():
-                exc = task.exception()
-                if exc is not None:
-                    message = 'Ignoring exception of queued task {}: {}'
-                    self.log.debug(message, task, repr(exc))
-                else:
-                    message = 'Ignoring completion of queued task {}'
-                    self.log.debug(message, task)
+            if task is TaskLoopStopSentinel:
+                self.task_done(task)
             else:
-                self.log.debug('Cancelling queued task {}', task)
-                task.cancel()
+                coroutine_or_task = cast(Awaitable[None], task)
+                util.cancel_awaitable(coroutine_or_task, self.log, self.task_done)
+
+        # Ask the task loop to stop immediately (if we have a queue looper)
+        # Note: If the stop sentinel had been enqueued formerly, it would have been
+        #       dequeued in the block above, so we need to re-enqueue it.
+        self.stop_task_queue(immediate=True)
+
+    def stop_task_queue(self, immediate: bool = False) -> None:
+        """
+        Stop the task queue looper.
+        """
+        if self.tasks.task_loop is not None and not self.tasks.task_loop.done():
+            if immediate:
+                self._task_queue.put_nowait(TaskLoopStopSentinel)
+            else:
+                self._loop.create_task(self._task_queue.put(TaskLoopStopSentinel))
+
+    def task_queue_done(self) -> bool:
+        """
+        Return whether the task queue is done (i.e. has no pending
+        tasks and is either closed or cancelled).
+        """
+        return (self._task_queue_state >= _TaskQueueState.closed and
+                self._task_queue.qsize() == 0)
 
     async def join_task_queue(self) -> None:
         """
         Block until all tasks of the task queue have been processed.
         """
+        self.log.debug(
+            'Joining task queue (state={}, #tasks={})',
+            self._task_queue_state, self._task_queue.qsize())
         await self._task_queue.join()
 
     async def send(self, message: OutgoingMessageMixin) -> None:

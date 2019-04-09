@@ -333,6 +333,49 @@ class TestServer:
                     if 'closed while waiting for pong' in record.message]) == 1
 
     @pytest.mark.asyncio
+    async def test_cancelled_task(
+            self, event_loop, sleep, log_handler, initiator_key, server, client_factory
+    ):
+        """
+        Check that the server handles a cancelled task/coroutine correctly.
+        """
+        # Initiator handshake
+        initiator, _ = await client_factory(initiator_handshake=True)
+        connection_closed_future = server.wait_connection_closed_marker()
+
+        # Get path instance of server and initiator's PathClient instance
+        path = server.paths.get(initiator_key.pk)
+        path_client = path.get_initiator()
+
+        # Enqueue task and cancel immediately
+        task = event_loop.create_task(sleep(60.0))
+        await path_client.enqueue_task(task)
+        task.cancel()
+
+        async def coroutine(future_):
+            await future_
+
+        # Enqueue coroutine waiting for a future and cancel the future
+        # immediately.
+        future = asyncio.Future(loop=event_loop)
+        await path_client.enqueue_task(coroutine(future))
+        future.cancel()
+
+        # Close on the task loop
+        await path_client.enqueue_task(initiator.close())
+
+        # Expect a normal closure (seen on the server side)
+        close_code = await connection_closed_future()
+        assert close_code == 1000
+        await server.wait_connections_closed()
+
+        # Ensure the task has been picked up as cancelled
+        # Note: Either 2 or 3 depending on whether the `.close` is marked as done before
+        #       the ConnectionClosed exception is being dispatched or afterwards.
+        assert len([record for record in log_handler.records
+                    if 'Active task cancelled' in record.message]) in {2, 3}
+
+    @pytest.mark.asyncio
     async def test_misbehaving_coroutine(
             self, mocker, event_loop, sleep, log_ignore_filter, log_handler,
             initiator_key, server, client_factory
@@ -341,7 +384,7 @@ class TestServer:
         Check that the server handles a misbehaving coroutine
         correctly.
         """
-        log_ignore_filter(lambda record: 'queue did not close' in record.message)
+        log_ignore_filter(lambda record: 'queue did not complete' in record.message)
 
         # Initiator handshake
         initiator, _ = await client_factory(initiator_handshake=True)
@@ -354,25 +397,25 @@ class TestServer:
         path = server.paths.get(initiator_key.pk)
         path_client = path.get_initiator()
 
-        async def bad_coroutine(cancelled_future):
+        async def bad_coroutine(future):
             try:
                 await sleep(60.0)
             except asyncio.CancelledError:
-                cancelled_future.set_result(None)
+                future.set_result(None)
                 await sleep(60.0)
                 raise
 
         async def enqueue_bad_coroutine():
-            cancelled_future = asyncio.Future(loop=event_loop)
-            await path_client.enqueue_task(bad_coroutine(cancelled_future))
-            return cancelled_future
+            future = asyncio.Future(loop=event_loop)
+            await path_client.enqueue_task(bad_coroutine(future))
+            return future
 
         # Enqueue misbehaving coroutine
         # Note: We need to add two of these since one of them will be dequeued
         #       immediately and waited for which runs in a different code
         #       section.
-        active_coroutine_cancelled_future = await enqueue_bad_coroutine()
-        queued_coroutine_cancelled_future = await enqueue_bad_coroutine()
+        active_coroutine_future = await enqueue_bad_coroutine()
+        queued_coroutine_future = await enqueue_bad_coroutine()
 
         # Close and wait
         await initiator.ws_client.close()
@@ -383,25 +426,25 @@ class TestServer:
         await server.wait_connections_closed()
 
         # The active coroutine was activated and thus will be cancelled
-        assert active_coroutine_cancelled_future.result() is None
+        assert active_coroutine_future.result() is None
         # Since the active coroutine does not re-raise the cancellation, it should
         # never be marked as cancelled by the task loop.
         assert len([record for record in log_handler.records
-                    if 'Cancelling active task' in record.message]) == 0
+                    if 'Active task cancelled' in record.message]) == 0
 
         # The queued coroutine was never waited for and it has not been added as a task
         # to the event loop either. Thus, it will not be cancelled.
-        assert not queued_coroutine_cancelled_future.done()
+        assert not queued_coroutine_future.done()
         # The queued task will be cancelled.
         assert len([record for record in log_handler.records
-                    if 'Cancelling 1 queued tasks' in record.message]) == 1
+                    if 'Cancelling 2 queued tasks' in record.message]) == 1
         # Ensure it has been picked up as a coroutine
         assert len([record for record in log_handler.records
-                    if 'Closing queued coroutine' in record.message]) == 1
+                    if 'Closing coroutine' in record.message]) == 1
 
         # Check log messages
         assert len([record for record in log_handler.records
-                    if 'queue did not close' in record.message]) == 1
+                    if 'queue did not complete' in record.message]) == 1
 
     @pytest.mark.asyncio
     async def test_misbehaving_task(
@@ -411,7 +454,7 @@ class TestServer:
         """
         Check that the server handles a misbehaving task correctly.
         """
-        log_ignore_filter(lambda record: 'queue did not close' in record.message)
+        log_ignore_filter(lambda record: 'queue did not complete' in record.message)
 
         # Initiator handshake
         initiator, _ = await client_factory(initiator_handshake=True)
@@ -424,26 +467,26 @@ class TestServer:
         path = server.paths.get(initiator_key.pk)
         path_client = path.get_initiator()
 
-        async def bad_coroutine(cancelled_future):
+        async def bad_coroutine(future):
             try:
                 await sleep(60.0)
             except asyncio.CancelledError:
-                cancelled_future.set_result(None)
+                future.set_result(None)
                 await sleep(60.0)
                 raise
 
         async def enqueue_bad_task():
-            cancelled_future = asyncio.Future(loop=event_loop)
+            future = asyncio.Future(loop=event_loop)
             await path_client.enqueue_task(
-                event_loop.create_task(bad_coroutine(cancelled_future)))
-            return cancelled_future
+                event_loop.create_task(bad_coroutine(future)))
+            return future
 
         # Enqueue misbehaving task
         # Note: We need to add two of these since one of them will be dequeued
         #       immediately and waited for which runs in a different code
         #       section.
-        active_task_cancelled_future = await enqueue_bad_task()
-        queued_task_cancelled_future = await enqueue_bad_task()
+        active_task_future = await enqueue_bad_task()
+        queued_task_future = await enqueue_bad_task()
 
         # Close and wait
         await initiator.ws_client.close()
@@ -454,25 +497,25 @@ class TestServer:
         await server.wait_connections_closed()
 
         # The active task will be implicitly cancelled by cancellation of the task loop
-        assert active_task_cancelled_future.result() is None
+        assert active_task_future.result() is None
         # Since the active task does not re-raise the cancellation, it should never be
         # marked as cancelled by the task loop.
         assert len([record for record in log_handler.records
-                    if 'Cancelling active task' in record.message]) == 0
+                    if 'Active task cancelled' in record.message]) == 0
 
         # The queued task has been scheduled on the event loop and thus will be
         # cancelled by the task queue cancellation.
-        assert queued_task_cancelled_future.result() is None
+        assert queued_task_future.result() is None
         # The queued task will be cancelled.
         assert len([record for record in log_handler.records
-                    if 'Cancelling 1 queued tasks' in record.message]) == 1
+                    if 'Cancelling 2 queued tasks' in record.message]) == 1
         # Ensure it has been picked up as a task
         assert len([record for record in log_handler.records
-                    if 'Cancelling queued task' in record.message]) == 1
+                    if 'Cancelling task' in record.message]) == 2
 
         # Check log messages
         assert len([record for record in log_handler.records
-                    if 'queue did not close' in record.message]) == 1
+                    if 'queue did not complete' in record.message]) == 1
 
     @pytest.mark.asyncio
     async def test_event_emitted(self, initiator_key, server, client_factory):
@@ -565,7 +608,7 @@ class TestServer:
         """
         Ensure the server handles closing the task queue correctly
         when a client is being dropped by another client after it has
-        been added to a patch but before the handshake completed.
+        been added to a path but before the handshake completed.
         """
         # Mock the client's send method to wait a little longer after having sent a
         # 'server-auth' message. This simulates a 'server-auth' send taking a little

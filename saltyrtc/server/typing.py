@@ -8,6 +8,7 @@ from typing import (
     NewType,
     Optional,
     Tuple,
+    Type,
     TypeVar,
     Union,
 )
@@ -16,9 +17,7 @@ import libnacl.public
 
 if TYPE_CHECKING:
     # noinspection PyUnresolvedReferences
-    from .common import ClientAddress  # noqa
-    # noinspection PyUnresolvedReferences
-    from .common import MessageType  # noqa
+    from .common import TaskLoopStopSentinel  # noqa
     # noinspection PyUnresolvedReferences
     from .events import Event  # noqa
 
@@ -51,6 +50,7 @@ __all__ = (
     'ServerSecretSessionKey',
     'MessageBox',
     'SignBox',
+    'Task',
     'LogbookLevel',
     'LoggingLevel',
 )
@@ -152,6 +152,8 @@ ServerSecretSessionKey = NewType('ServerSecretSessionKey', libnacl.public.Secret
 MessageBox = NewType('MessageBox', libnacl.public.Box)
 # Box for "signing" the keys in the 'server-auth' message
 SignBox = NewType('SignBox', libnacl.public.Box)
+# A task for the task loop
+Task = Union[Awaitable[None], Type['TaskLoopStopSentinel']]
 
 
 # Util

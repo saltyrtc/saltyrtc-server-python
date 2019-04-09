@@ -102,15 +102,19 @@ jobs:
           command: pip install .[dev]
       - run:
           name: Run Flake8
+          when: always
           command: flake8 .
       - run:
           name: Run isort
+          when: always
           command: isort -rc -c . || (isort -rc -df . && exit 1)
       - run:
           name: Run Mypy
+          when: always
           command: MYPYPATH=${PWD}/stubs mypy saltyrtc examples
       - run:
           name: Run checkdocs
+          when: always
           command: python setup.py checkdocs
 
   build-docker:
