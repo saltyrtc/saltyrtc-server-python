@@ -8,7 +8,6 @@ from typing import (
     NewType,
     Optional,
     Tuple,
-    Type,
     TypeVar,
     Union,
 )
@@ -17,7 +16,7 @@ import libnacl.public
 
 if TYPE_CHECKING:
     # noinspection PyUnresolvedReferences
-    from .common import TaskLoopStopSentinel  # noqa
+    import logbook  # noqa
     # noinspection PyUnresolvedReferences
     from .events import Event  # noqa
 
@@ -50,7 +49,9 @@ __all__ = (
     'ServerSecretSessionKey',
     'MessageBox',
     'SignBox',
-    'Task',
+    'Job',
+    'Result',
+    'Logger',
     'LogbookLevel',
     'LoggingLevel',
 )
@@ -152,13 +153,22 @@ ServerSecretSessionKey = NewType('ServerSecretSessionKey', libnacl.public.Secret
 MessageBox = NewType('MessageBox', libnacl.public.Box)
 # Box for "signing" the keys in the 'server-auth' message
 SignBox = NewType('SignBox', libnacl.public.Box)
-# A task for the task loop
-Task = Union[Awaitable[None], Type['TaskLoopStopSentinel']]
+# A job of the job queue
+Job = Awaitable[None]
+
+
+# Task
+# ----
+
+# A consolidated result
+Result = NewType('Result', BaseException)
 
 
 # Util
 # ----
 
+# :mod:`logbook` Logger abstraction
+Logger = Any
 # A :mod:`logbook` log level
 LogbookLevel = NewType('LogbookLevel', int)
 # A :mod:`logging` log level

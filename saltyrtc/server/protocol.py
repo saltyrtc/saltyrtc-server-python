@@ -1,5 +1,4 @@
 import asyncio
-import enum
 import os
 import struct
 # noinspection PyUnresolvedReferences
@@ -10,7 +9,6 @@ from typing import (
     Awaitable,
     Iterable,
     Optional,
-    Sequence,
     Type,
     TypeVar,
     Union,
@@ -36,7 +34,6 @@ from .common import (
     CloseCode,
     OverflowSentinel,
     ResponderAddress,
-    TaskLoopStopSentinel,
 )
 from .exception import (
     Disconnected,
@@ -50,6 +47,13 @@ from .message import (
     OutgoingMessageMixin,
     unpack,
 )
+from .task import (
+    FinalJob,
+    JobQueue,
+    Tasks,
+)
+# noinspection PyUnresolvedReferences
+from .typing import Result  # noqa
 from .typing import (
     ClientCookie,
     ClientPublicKey,
@@ -65,12 +69,10 @@ from .typing import (
     ServerSecretPermanentKey,
     ServerSecretSessionKey,
     SignBox,
-    Task,
 )
 
 __all__ = (
     'Path',
-    'PathClientTasks',
     'PathClient',
 )
 
@@ -78,16 +80,15 @@ __all__ = (
 SNT = TypeVar('SNT', bound=SequenceNumber)
 
 
-@enum.unique
-class _TaskQueueState(enum.IntEnum):
-    open = 1
-    closed = 2
-    cancelled = 3
-
-
 class Path:
-    __slots__ = ('_initiator', '_responders',
-                 'log', 'initiator_key', 'number', 'attached')
+    __slots__ = (
+        '_initiator',
+        '_responders',
+        'log',
+        'initiator_key',
+        'number',
+        'attached'
+    )
 
     def __init__(
             self,
@@ -253,77 +254,6 @@ class Path:
         self.log.debug('Removed {}', 'initiator' if is_initiator else 'responder')
 
 
-class PathClientTasks:
-    __slots__ = (
-        '_cancelled',
-        'task_loop',
-        'receive_loop',
-        'keep_alive_loop',
-        'active_task',
-    )
-
-    def __init__(self) -> None:
-        self._cancelled = False
-        self.task_loop = None  # type: Optional[asyncio.Task[None]]
-        self.receive_loop = None  # type: Optional[asyncio.Task[None]]
-        self.keep_alive_loop = None  # type: Optional[asyncio.Task[None]]
-        self.active_task = None  # type: Optional[Task]
-
-    @property
-    def tasks(self) -> Sequence[Optional['asyncio.Task[None]']]:
-        """
-        Return all tasks (including those who are set to `None`) as a
-        tuple.
-        """
-        return (
-            self.task_loop,
-            self.receive_loop,
-            self.keep_alive_loop,
-        )
-
-    def set(
-            self,
-            task_loop: 'asyncio.Task[None]',
-            receive_loop: Optional['asyncio.Task[None]'],
-            keep_alive_loop: Optional['asyncio.Task[None]'],
-    ) -> None:
-        """
-        Set path client tasks.
-
-        .. note:: All tasks (but the task loop) will be immediately
-                  cancelled if requested by another client prior to
-                  this method being called.
-        """
-        assert self.task_loop is None
-
-        self.task_loop = task_loop
-        self.receive_loop = receive_loop
-        self.keep_alive_loop = keep_alive_loop
-
-        # Cancel?
-        if self._cancelled:
-            self.cancel_all_but_task_loop(force=True)
-
-    @property
-    def valid(self) -> Iterable['asyncio.Task[None]']:
-        """
-        Return all valid tasks (i.e. those who are not set to `None`)
-        as an iterable.
-        """
-        return (task for task in self.tasks if task is not None)
-
-    def cancel_all_but_task_loop(self, force: bool = False) -> None:
-        """
-        Cancel all valid tasks but the task queue.
-        """
-        if self._cancelled and not force:
-            return
-        for task in self.valid:
-            if task != self.task_loop:
-                task.cancel()
-        self._cancelled = True
-
-
 class PathClient:
     __slots__ = (
         '_loop',
@@ -347,9 +277,8 @@ class PathClient:
         'type',
         'keep_alive_timeout',
         'keep_alive_pings',
+        'jobs',
         'tasks',
-        '_task_queue',
-        '_task_queue_state',
     )
 
     @staticmethod
@@ -382,7 +311,7 @@ class PathClient:
         self._state = ClientState.restricted
         self._connection = connection  # type: websockets.WebSocketServerProtocol
         connection_closed_future = \
-            asyncio.Future(loop=self._loop)  # type: asyncio.Future[int]
+            asyncio.Future(loop=self._loop)  # type: asyncio.Future[Disconnected]
         self._connection_closed_future = connection_closed_future
         self._client_key = initiator_key  # type: ClientPublicKey
         self._server_permanent_key = None  # type: Optional[ServerSecretPermanentKey]
@@ -401,17 +330,16 @@ class PathClient:
         self.type = None  # type: Optional[AddressType]
         self.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
         self.keep_alive_pings = 0
-        self.tasks = PathClientTasks()
+        # Note: Ugly hacky cast below
+        result_future = cast('asyncio.Future[Result]', connection_closed_future)
+        final_job = FinalJob(result_future, loop=self._loop)
+        self.jobs = JobQueue(self.log, self._loop, final_job)  # type: JobQueue
+        self.tasks = Tasks(self.log, self._loop)
 
         # Schedule connection closed future
         def _connection_closed(_: Any) -> None:
-            connection_closed_future.set_result(connection.close_code)
+            connection_closed_future.set_result(Disconnected(connection.close_code))
         self._connection.connection_lost_waiter.add_done_callback(_connection_closed)
-
-        # Queue for tasks to be run on the client (relay messages, closing, ...)
-        self._task_queue = \
-            asyncio.Queue(loop=self._loop)  # type: asyncio.Queue[Task]
-        self._task_queue_state = _TaskQueueState.open
 
     def __str__(self) -> str:
         type_ = 'undetermined' if self.type is None else str(self.type)
@@ -440,7 +368,7 @@ class PathClient:
         self._state = state
 
     @property
-    def connection_closed_future(self) -> 'asyncio.Future[int]':
+    def connection_closed_future(self) -> 'asyncio.Future[Disconnected]':
         """
         Resolves once the connection has been closed.
 
@@ -696,148 +624,6 @@ class PathClient:
         """
         return self.state == ClientState.authenticated and self.type != destination_type
 
-    async def enqueue_task(
-            self,
-            awaitable: Awaitable[None],
-            ignore_closed: bool = False,
-    ) -> None:
-        """
-        Enqueue a coroutine or task into the task queue of the
-        client.
-
-        .. important:: Only the following tasks shall be enqueued:
-                       - Messages from the server towards this client.
-                       - Messages from other clients **towards** this
-                         client (i.e. relayed messages).
-                       - Delayed close operations towards this client.
-
-        .. note:: Coroutines will be closed and :class:`asyncio.Task`s
-                  will be cancelled when the task queue has been closed
-                  (unless `ignore_closed` has been set to `True`) or
-                  cancelled. The coroutine or task must be prepared for
-                  that.
-
-        Arguments:
-            - `awaitable`: A coroutine or a :class:`asyncio.Task`.
-            - `ignore_closed`: Whether the coroutine or
-              :class:`asyncio.Task` should be enqueued even if the task
-              queue has been closed.
-        """
-        if (self._task_queue_state == _TaskQueueState.open
-                or (ignore_closed and self._task_queue_state == _TaskQueueState.closed)):
-            await self._task_queue.put(awaitable)
-        else:
-            util.cancel_awaitable(awaitable, self.log)
-
-    async def dequeue_task(self) -> Task:
-        """
-        Dequeue and return a coroutine or task from the task queue of
-        the client.
-
-        .. warning:: Shall only be called from the client's
-           :class:`Protocol` instance.
-        """
-        return await self._task_queue.get()
-
-    def task_done(self, awaitable: Task) -> None:
-        """
-        Mark a previously dequeued task as processed.
-
-        Raises :exc:`InternalError` if called more times than there
-        were tasks placed in the queue.
-        """
-        self.log.debug('Completed task {}', awaitable)
-        try:
-            self._task_queue.task_done()
-        except ValueError:
-            raise InternalError('More tasks marked as done as were enqueued')
-
-    def close_task_queue(self) -> None:
-        """
-        Close the task queue to prevent further enqueues. Will do
-        nothing in case the task queue has already been closed or
-        cancelled.
-
-        .. note:: Unlike :func:`~PathClient.cancel_task_queue`, this does
-                  not cancel any pending tasks.
-        """
-        # Ignore if already closed or cancelled
-        if self._task_queue_state >= _TaskQueueState.closed:
-            return
-
-        # Update state
-        self._task_queue_state = _TaskQueueState.closed
-        self.log.debug('Closed task queue')
-
-        # Ask the task loop to stop when done processing all previous tasks
-        # (if we have a queue looper).
-        self.stop_task_queue(immediate=False)
-
-    def cancel_task_queue(self) -> None:
-        """
-        Cancel all pending tasks of the task queue and prevent further
-        enqueues. Will do nothing in case the task queue has already
-        been cancelled.
-        """
-        # Ignore if already cancelled
-        if self._task_queue_state >= _TaskQueueState.cancelled:
-            return
-
-        # Cancel all pending tasks
-        #
-        # Add a 'done' callback to each task in order to mark the task queue as 'closed'
-        # after all functions, which may want to handle the cancellation, have handled
-        # that cancellation.
-        #
-        # This for example prevents a 'disconnect' message from being sent before a
-        # 'send-error' message has been sent, see:
-        # https://github.com/saltyrtc/saltyrtc-server-python/issues/77
-        self._task_queue_state = _TaskQueueState.cancelled
-        self.log.debug('Cancelling {} queued tasks', self._task_queue.qsize())
-        while True:
-            try:
-                task = self._task_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            if task is TaskLoopStopSentinel:
-                self.task_done(task)
-            else:
-                coroutine_or_task = cast(Awaitable[None], task)
-                util.cancel_awaitable(coroutine_or_task, self.log, self.task_done)
-
-        # Ask the task loop to stop immediately (if we have a queue looper)
-        # Note: If the stop sentinel had been enqueued formerly, it would have been
-        #       dequeued in the block above, so we need to re-enqueue it.
-        self.stop_task_queue(immediate=True)
-
-    def stop_task_queue(self, immediate: bool = False) -> None:
-        """
-        Ask the task queue looper to stop eventually.
-        """
-        if (self.tasks.active_task is not None and
-                self.tasks.active_task is not TaskLoopStopSentinel):
-            if immediate:
-                self._task_queue.put_nowait(TaskLoopStopSentinel)
-            else:
-                self._loop.create_task(self._task_queue.put(TaskLoopStopSentinel))
-
-    def task_queue_done(self) -> bool:
-        """
-        Return whether the task queue is done (i.e. has no pending
-        tasks and is either closed or cancelled).
-        """
-        return (self._task_queue_state >= _TaskQueueState.closed and
-                self._task_queue.qsize() == 0)
-
-    async def join_task_queue(self) -> None:
-        """
-        Block until all tasks of the task queue have been processed.
-        """
-        self.log.debug(
-            'Joining task queue (state={}, #tasks={})',
-            self._task_queue_state, self._task_queue.qsize())
-        await self._task_queue.join()
-
     async def send(self, message: OutgoingMessageMixin) -> None:
         """
         Disconnected
@@ -855,7 +641,7 @@ class PathClient:
             await self._connection.send(data)
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while sending')
-            self.close_task_queue()
+            self.jobs.close()
             raise Disconnected(exc.code) from exc
 
     async def receive(self) -> IncomingMessageMixin:
@@ -872,7 +658,7 @@ class PathClient:
             data = await self._connection.recv()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while receiving')
-            self.close_task_queue()
+            self.jobs.close()
             raise Disconnected(exc.code) from exc
         self.log.debug('Received message')
 
@@ -895,7 +681,7 @@ class PathClient:
             pong_future = await self._connection.ping()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while pinging')
-            self.close_task_queue()
+            self.jobs.close()
             raise Disconnected(exc.code) from exc
         return self._wait_pong(pong_future)
 
@@ -907,7 +693,7 @@ class PathClient:
             await pong_future
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while waiting for pong')
-            self.close_task_queue()
+            self.jobs.close()
             raise Disconnected(exc.code) from exc
 
     async def close(self, code: int = 1000) -> None:
@@ -918,20 +704,17 @@ class PathClient:
         Arguments:
             - `close`: The close code.
         """
-        # Close the task queue to ensure no further tasks can be
+        # Close the job queue to ensure no further jobs can be
         # enqueued while the client is in the closing process.
-        self.close_task_queue()
+        self.jobs.close()
 
         # Note: We are not sending a reason for security reasons.
         await self._connection.close(code=code)
 
-    def drop(self, code: CloseCode) -> 'asyncio.Task[None]':
+    def drop(self, code: CloseCode) -> None:
         """
         Drop this client. Will enqueue the closing procedure and cancel
-        the receive loop as well as the keep alive loop of the client.
-
-        Return the enqueue operation in form of a
-        :class:`asyncio.Task`.
+        all tasks of the client.
 
         .. important:: This should only be called by clients dropping
                        another client or when the server is closing.
@@ -939,30 +722,28 @@ class PathClient:
         Arguments:
             - `close`: The close code.
         """
-        # Enqueue the close procedure on our own task queue.
+        # Schedule the closing procedure.
         # Note: The closing procedure would interrupt further send operations, thus we
         #       MUST enqueue it as a coroutine and NOT wrap in a Future. That way, it
         #       will not initiate the closing procedure before this client has executed
-        #       all other pending tasks.
+        #       all other pending jobs.
         self.log.debug('Scheduling delayed closing procedure', code)
         close_coroutine = self.close(code=code.value)
-        enqueue_task = self._loop.create_task(
-            self.enqueue_task(close_coroutine, ignore_closed=True))
 
-        # Close the task queue to ensure no further tasks can be
+        # Close the job queue to ensure no further jobs can be
         # enqueued while the client is in the closing process.
-        self.close_task_queue()
+        self.jobs.close(close_coroutine)
 
-        # Cancel all loops for the client but the task queue.
+        # Cancel all tasks of the client.
         # Note: This will ensure that all messages forwarded towards the client to be
-        #       dropped will still be forwarded. But the client to be dropped will not be
-        #       able to send any more messages towards the server or relay messages
-        #       towards other clients.
-        self.log.debug('Cancelling all running tasks but the task loop')
-        self.tasks.cancel_all_but_task_loop()
+        #       dropped will still be forwarded as the job queue runner will continue
+        #       processing jobs. But the client to be dropped will not be able to send
+        #       any more messages towards the server or relay messages towards other
+        #       clients.
+        self.log.debug('Cancelling all running tasks')
+        self.tasks.cancel(cast('asyncio.Future[Result]', self._connection_closed_future))
 
-        # Mark as dropped
-        # noinspection PyAttributeOutsideInit
-        self.state = ClientState.dropped
+        # Mark as dropped (if authenticated)
+        if self.state == ClientState.authenticated:
+            self.state = ClientState.dropped
         self.log.debug('Client dropped, close code: {}', code)
-        return enqueue_task

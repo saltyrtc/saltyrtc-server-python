@@ -10,6 +10,7 @@ from .exception import *  # noqa
 from .message import *  # noqa
 from .protocol import *  # noqa
 from .server import *  # noqa
+from .task import *  # noqa
 from .util import *  # noqa
 
 __all__ = tuple(itertools.chain(
@@ -20,6 +21,7 @@ __all__ = tuple(itertools.chain(
     message.__all__,  # noqa
     protocol.__all__,  # noqa
     server.__all__,  # noqa
+    task.__all__,  # noqa
     util.__all__,  # noqa
 ))
 

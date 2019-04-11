@@ -23,6 +23,7 @@ import libnacl.public
 
 from .typing import (
     LogbookLevel,
+    Logger,
     LoggingLevel,
     NoReturn,
     ServerSecretPermanentKey,
@@ -292,9 +293,9 @@ def load_permanent_key(key: str) -> ServerSecretPermanentKey:
 
 
 def cancel_awaitable(
-        awaitable: Awaitable[None],
-        log: 'logbook.Logger',
-        done_cb: Optional[Callable[[Awaitable[None]], Any]] = None
+        awaitable: Awaitable[Any],
+        log: Logger,
+        done_cb: Optional[Callable[[Awaitable[Any]], Any]] = None
 ) -> None:
     """
     Cancel a coroutine or a :class:`asyncio.Task`.
@@ -315,6 +316,7 @@ def cancel_awaitable(
     else:
         task = cast('asyncio.Task[None]', awaitable)
         if done_cb is not None:
+            # noinspection PyTypeChecker
             task.add_done_callback(done_cb)
         # Note: We need to check for .cancelled first since a task is also marked
         #       .done when it is cancelled.

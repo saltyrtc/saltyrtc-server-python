@@ -299,7 +299,7 @@ def server_factory(request, event_loop, server_permanent_keys):
     Return a factory to create :class:`saltyrtc.Server` instances.
     """
     # Enable asyncio debug logging
-    os.environ['PYTHONASYNCIODEBUG'] = '1'
+    event_loop.set_debug(True)
 
     # Enable logging
     util.enable_logging(level=logbook.DEBUG, redirect_loggers={
@@ -392,7 +392,7 @@ def evaluate_log(log_handler):
     errors = [record for record in log_handler.records
               if (record.level >= log_handler._error_level
                   and not log_handler._ignore_filter(record))]
-    assert(len(errors) == 0)
+    assert len(errors) == 0
 
 
 @pytest.fixture

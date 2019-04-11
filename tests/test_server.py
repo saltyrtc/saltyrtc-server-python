@@ -63,30 +63,35 @@ class TestServer:
         assert len([record for record in log_handler.records if _filter(record)]) == 2
 
     @pytest.mark.asyncio
-    async def test_task_cancelled_connection_open(
+    async def test_tasks_cancelled_connection_open(
             self, mocker, log_ignore_filter, log_handler, sleep, server, client_factory
     ):
         """
-        Ensure the server handles a task being cancelled early while
+        Ensure the server handles all tasks being cancelled early while
         the connection is still running.
         """
         def _filter(record):
-            return 'has been cancelled' in record.message \
+            return 'All tasks have been cancelled' in record.message \
                    or (record.exception_message is not None
-                       and 'has been cancelled' in record.exception_message)
+                       and 'All tasks have been cancelled' in record.exception_message)
         log_ignore_filter(_filter)
 
-        # Mock the initiator receive loop and cancel itself after a brief timeout
+        async def _cancel_task(task):
+            await sleep(0.05)
+            task.cancel()
+
+        # Mock the initiator receive loop and keep-alive loop.
+        # Cancel them after a brief timeout.
         class _MockProtocol(ServerProtocol):
             async def initiator_receive_loop(self):
                 receive_loop = self._loop.create_task(super().initiator_receive_loop())
-
-                async def _cancel_loop():
-                    await sleep(0.1)
-                    receive_loop.cancel()
-
-                self._loop.create_task(_cancel_loop())
+                self._loop.create_task(_cancel_task(receive_loop))
                 await receive_loop
+
+            async def keep_alive_loop(self):
+                keep_alive_loop = self._loop.create_task(super().keep_alive_loop())
+                self._loop.create_task(_cancel_task(keep_alive_loop))
+                await keep_alive_loop
 
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
@@ -97,52 +102,7 @@ class TestServer:
         await server.wait_connections_closed()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.internal_error
-        assert len([record for record in log_handler.records if _filter(record)]) == 2
-
-    @pytest.mark.asyncio
-    async def test_task_returned_connection_closed(
-            self, mocker, event_loop, log_handler, sleep, server, client_factory
-    ):
-        """
-        Ensure the server does gracefully handle a task returning when
-        the connection is already closed.
-        """
-        # Mock the initiator receive loop to be able to notify when it returns
-        receive_loop_closed_future = asyncio.Future(loop=event_loop)
-
-        class _MockProtocol(ServerProtocol):
-            async def initiator_receive_loop(self):
-                connection_closed_future = self.client._connection_closed_future
-                self.client._connection_closed_future = asyncio.Future(loop=self._loop)
-
-                # ZZzzzZZzz
-                await sleep(0.1)
-
-                # Replace the future with the previous one to prevent an exception
-                async def _revert_future():
-                    await sleep(0.05)
-                    self.client._connection_closed_future = connection_closed_future
-                self._loop.create_task(_revert_future())
-
-                # Resolve the connection closed future and the loop future
-                self.client._connection_closed_future.set_result(1337)
-                receive_loop_closed_future.set_result(sleep(0.1))
-
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
-
-        # Initiator handshake
-        initiator, _ = await client_factory(initiator_handshake=True)
-
-        # Wait for the receive loop to return (and the waiter it returns)
-        waiter = await receive_loop_closed_future
-        await waiter
-
-        # Bye
-        await initiator.ws_client.close()
-        await server.wait_connections_closed()
-        partials = ('Task done', 'result=None')
-        assert len([record for record in log_handler.records
-                    if all(partial in record.message for partial in partials)]) == 1
+        assert len([record for record in log_handler.records if _filter(record)]) == 1
 
     @pytest.mark.asyncio
     async def test_disconnect_during_receive(
@@ -202,21 +162,21 @@ class TestServer:
     ):
         """
         Check that the server handles a disconnect correctly when a
-        task (that awaits a send operation) is awaited.
+        job (that awaits a send operation) is awaited.
         """
         close_future = asyncio.Future(loop=event_loop)
 
-        # Mock the loops to stay quiet and enqueue a relay task
+        # Mock the loops to stay quiet and enqueue a relay job
         class _MockProtocol(ServerProtocol):
             async def initiator_receive_loop(self):
                 await close_future
 
-                async def _send_task():
+                async def _send_job():
                     message = RelayMessage(
                         SERVER_ADDRESS, self.client.id, b'\x00', b'\x00' * 24)
                     await self.client.send(message)
 
-                await self.client.enqueue_task(_send_task())
+                await self.client.jobs.enqueue(_send_job())
                 await sleep(60.0)
 
             async def keep_alive_loop(self):
@@ -231,9 +191,13 @@ class TestServer:
 
         # Expect disconnect during send in the log
         await server.wait_connections_closed()
-        partials = ['closed while sending', 'Stopping active task', 'Task done']
         assert len([record for record in log_handler.records
-                    if any(partial in record.message for partial in partials)]) == 3
+                    if 'closed while sending' in record.message]) == 1
+        assert len([record for record in log_handler.records
+                    if 'Job returned due to connection closed (code: 1000)'
+                    in record.message]) == 1
+        assert len([record for record in log_handler.records
+                    if 'Task was cancelled' in record.message]) == 2
 
     @pytest.mark.asyncio
     async def test_disconnect_keep_alive_ping(
@@ -248,8 +212,9 @@ class TestServer:
         class _MockProtocol(ServerProtocol):
             async def initiator_receive_loop(self):
                 # Wait until closed (and a little further)
-                await self.client.connection_closed_future
+                result = await self.client.connection_closed_future
                 await sleep(0.1)
+                raise result
 
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
@@ -275,7 +240,7 @@ class TestServer:
 
         async def _mock_ping(*args):
             await ready_future
-            await ping(*args)
+            return await ping(*args)
 
         mocker.patch.object(path_client._connection, 'ping', _mock_ping)
 
@@ -285,8 +250,8 @@ class TestServer:
         ready_future.set_result(None)
 
         # Expect a normal closure (seen on the server side)
-        close_code = await connection_closed_future()
-        assert close_code == 1000
+        disconnected = await connection_closed_future()
+        assert disconnected.reason == 1000
         await server.wait_connections_closed()
         assert len([record for record in log_handler.records
                     if 'closed while pinging' in record.message]) == 1
@@ -303,7 +268,7 @@ class TestServer:
         class _MockProtocol(ServerProtocol):
             async def initiator_receive_loop(self):
                 # Wait until closed
-                await self.client.connection_closed_future
+                raise await self.client.connection_closed_future
 
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
@@ -326,18 +291,18 @@ class TestServer:
         await ws_client.close()
 
         # Expect a normal closure (seen on the server side)
-        close_code = await connection_closed_future()
-        assert close_code == 1000
+        disconnected = await connection_closed_future()
+        assert disconnected.reason == 1000
         await server.wait_connections_closed()
         assert len([record for record in log_handler.records
                     if 'closed while waiting for pong' in record.message]) == 1
 
     @pytest.mark.asyncio
-    async def test_cancelled_task(
+    async def test_cancelled_job(
             self, event_loop, sleep, log_handler, initiator_key, server, client_factory
     ):
         """
-        Check that the server handles a cancelled task/coroutine correctly.
+        Check that the server handles a cancelled job correctly.
         """
         # Initiator handshake
         initiator, _ = await client_factory(initiator_handshake=True)
@@ -347,10 +312,10 @@ class TestServer:
         path = server.paths.get(initiator_key.pk)
         path_client = path.get_initiator()
 
-        # Enqueue task and cancel immediately
-        task = event_loop.create_task(sleep(60.0))
-        await path_client.enqueue_task(task)
-        task.cancel()
+        # Enqueue job and cancel immediately
+        job = event_loop.create_task(sleep(60.0))
+        await path_client.jobs.enqueue(job)
+        job.cancel()
 
         async def coroutine(future_):
             await future_
@@ -358,27 +323,28 @@ class TestServer:
         # Enqueue coroutine waiting for a future and cancel the future
         # immediately.
         future = asyncio.Future(loop=event_loop)
-        await path_client.enqueue_task(coroutine(future))
+        await path_client.jobs.enqueue(coroutine(future))
         future.cancel()
 
-        # Close on the task loop
-        await path_client.enqueue_task(initiator.close())
+        # Close on the job queue
+        await path_client.jobs.enqueue(initiator.close())
 
         # Expect a normal closure (seen on the server side)
-        close_code = await connection_closed_future()
-        assert close_code == 1000
+        disconnected = await connection_closed_future()
+        assert disconnected.reason == 1000
         await server.wait_connections_closed()
 
-        # Ensure the task has been picked up as cancelled
+        # Ensure the job has been picked up as cancelled
         # Note: Either 2 or 3 depending on whether the `.close` is marked as done before
         #       the ConnectionClosed exception is being dispatched or afterwards.
         assert len([record for record in log_handler.records
-                    if 'Active task cancelled' in record.message]) in {2, 3}
+                    if 'Active job cancelled' in record.message]) in {2, 3}
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('raise_2nd_cancel', [0, 1])
     async def test_misbehaving_coroutine(
             self, mocker, event_loop, sleep, log_ignore_filter, log_handler,
-            initiator_key, server, client_factory
+            initiator_key, server, client_factory, raise_2nd_cancel
     ):
         """
         Check that the server handles a misbehaving coroutine
@@ -390,24 +356,32 @@ class TestServer:
         initiator, _ = await client_factory(initiator_handshake=True)
         connection_closed_future = server.wait_connection_closed_marker()
 
-        # Mock the task queue join timeout
-        mocker.patch('saltyrtc.server.server._TASK_QUEUE_JOIN_TIMEOUT', 0.1)
+        # Mock the job queue join timeout
+        mocker.patch('saltyrtc.server.server._JOB_QUEUE_JOIN_TIMEOUT', 0.1)
 
         # Get path instance of server and initiator's PathClient instance
         path = server.paths.get(initiator_key.pk)
         path_client = path.get_initiator()
 
         async def bad_coroutine(future):
+            # Ignore first cancellation
             try:
                 await sleep(60.0)
             except asyncio.CancelledError:
                 future.set_result(None)
+
+            # Ignore second cancellation (due to the .join() operation timing out, which
+            # cancels the job queue runner and thus cancels the currently awaited job,
+            # which is this job).
+            try:
                 await sleep(60.0)
-                raise
+            except asyncio.CancelledError:
+                if raise_2nd_cancel:
+                    raise
 
         async def enqueue_bad_coroutine():
             future = asyncio.Future(loop=event_loop)
-            await path_client.enqueue_task(bad_coroutine(future))
+            await path_client.jobs.enqueue(bad_coroutine(future))
             return future
 
         # Enqueue misbehaving coroutine
@@ -421,23 +395,30 @@ class TestServer:
         await initiator.ws_client.close()
 
         # Expect a normal closure (seen on the server side)
-        close_code = await connection_closed_future()
-        assert close_code == 1000
+        disconnected = await connection_closed_future()
+        assert disconnected.reason == 1000
         await server.wait_connections_closed()
 
         # The active coroutine was activated and thus will be cancelled
         assert active_coroutine_future.result() is None
-        # Since the active coroutine does not re-raise the cancellation, it should
-        # never be marked as cancelled by the task loop.
+
+        # The active coroutine's cancellation will only be picked up by the job queue
+        # runner in case a cancellation is ignored more than once.
+        #
+        # Note: The first cancellation is obvious and can be traced back to the
+        #       cancellation of the job queue.
+        #       The second cancellation happens due to the .join() operation timeout
+        #       being cancelled. The job queue runner is being cancelled and thus the
+        #       currently awaited job will be cancelled as well.
         assert len([record for record in log_handler.records
-                    if 'Active task cancelled' in record.message]) == 0
+                    if 'Active job cancelled' in record.message]) == raise_2nd_cancel
 
         # The queued coroutine was never waited for and it has not been added as a task
         # to the event loop either. Thus, it will not be cancelled.
         assert not queued_coroutine_future.done()
-        # The queued task will be cancelled.
+        # The queued jobs will be cancelled.
         assert len([record for record in log_handler.records
-                    if 'Cancelling 2 queued tasks' in record.message]) == 1
+                    if 'Cancelling 2 queued jobs' in record.message]) == 1
         # Ensure it has been picked up as a coroutine
         assert len([record for record in log_handler.records
                     if 'Closing coroutine' in record.message]) == 1
@@ -447,9 +428,10 @@ class TestServer:
                     if 'queue did not complete' in record.message]) == 1
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('raise_2nd_cancel', [0, 1])
     async def test_misbehaving_task(
             self, mocker, event_loop, sleep, log_ignore_filter, log_handler,
-            initiator_key, server, client_factory
+            initiator_key, server, client_factory, raise_2nd_cancel
     ):
         """
         Check that the server handles a misbehaving task correctly.
@@ -460,24 +442,32 @@ class TestServer:
         initiator, _ = await client_factory(initiator_handshake=True)
         connection_closed_future = server.wait_connection_closed_marker()
 
-        # Mock the task queue join timeout
-        mocker.patch('saltyrtc.server.server._TASK_QUEUE_JOIN_TIMEOUT', 0.1)
+        # Mock the job queue join timeout
+        mocker.patch('saltyrtc.server.server._JOB_QUEUE_JOIN_TIMEOUT', 0.1)
 
         # Get path instance of server and initiator's PathClient instance
         path = server.paths.get(initiator_key.pk)
         path_client = path.get_initiator()
 
         async def bad_coroutine(future):
+            # Ignore first cancellation
             try:
                 await sleep(60.0)
             except asyncio.CancelledError:
                 future.set_result(None)
+
+            # Ignore second cancellation (due to the .join() operation timing out, which
+            # cancels the job queue runner and thus cancels the currently awaited job,
+            # which is this job).
+            try:
                 await sleep(60.0)
-                raise
+            except asyncio.CancelledError:
+                if raise_2nd_cancel:
+                    raise
 
         async def enqueue_bad_task():
             future = asyncio.Future(loop=event_loop)
-            await path_client.enqueue_task(
+            await path_client.jobs.enqueue(
                 event_loop.create_task(bad_coroutine(future)))
             return future
 
@@ -492,23 +482,31 @@ class TestServer:
         await initiator.ws_client.close()
 
         # Expect a normal closure (seen on the server side)
-        close_code = await connection_closed_future()
-        assert close_code == 1000
+        disconnected = await connection_closed_future()
+        assert disconnected.reason == 1000
         await server.wait_connections_closed()
 
-        # The active task will be implicitly cancelled by cancellation of the task loop
+        # The active job will be implicitly cancelled by cancellation of the job queue
+        # runner.
         assert active_task_future.result() is None
-        # Since the active task does not re-raise the cancellation, it should never be
-        # marked as cancelled by the task loop.
-        assert len([record for record in log_handler.records
-                    if 'Active task cancelled' in record.message]) == 0
 
-        # The queued task has been scheduled on the event loop and thus will be
-        # cancelled by the task queue cancellation.
-        assert queued_task_future.result() is None
-        # The queued task will be cancelled.
+        # The active task's cancellation will only be picked up by the job queue
+        # runner in case a cancellation is ignored more than once.
+        #
+        # Note: The first cancellation is obvious and can be traced back to the
+        #       cancellation of the job queue.
+        #       The second cancellation happens due to the .join() operation timeout
+        #       being cancelled. The job queue runner is being cancelled and thus the
+        #       currently awaited job will be cancelled as well.
         assert len([record for record in log_handler.records
-                    if 'Cancelling 2 queued tasks' in record.message]) == 1
+                    if 'Active job cancelled' in record.message]) == raise_2nd_cancel
+
+        # The queued jobs have been scheduled on the event loop and thus will be
+        # cancelled by the job queue cancellation.
+        assert queued_task_future.result() is None
+        # The queued job will be cancelled.
+        assert len([record for record in log_handler.records
+                    if 'Cancelling 2 queued jobs' in record.message]) == 1
         # Ensure it has been picked up as a task
         assert len([record for record in log_handler.records
                     if 'Cancelling task' in record.message]) == 2
@@ -571,7 +569,7 @@ class TestServer:
         procedure has been started.
 
         This test exists to prevent a regression. Previously it was
-        possible to enqueue tasks on a client whose task queue has
+        possible to enqueue jobs on a client whose job queue has
         already been closed.
         """
         # Initiator handshake
@@ -606,7 +604,7 @@ class TestServer:
             self, mocker, event_loop, server, client_factory
     ):
         """
-        Ensure the server handles closing the task queue correctly
+        Ensure the server handles closing the job queue correctly
         when a client is being dropped by another client after it has
         been added to a path but before the handshake completed.
         """
@@ -621,12 +619,9 @@ class TestServer:
                 await super().handshake()
                 await client_dropped_future
 
-            def _drop_client(
-                    self, client: PathClient, code: CloseCode
-            ) -> 'asyncio.Task[None]':
-                task = super()._drop_client(client, code)
+            def _drop_client(self, client: PathClient, code: CloseCode) -> None:
+                super()._drop_client(client, code)
                 client_dropped_future.set_result(None)
-                return task
 
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 

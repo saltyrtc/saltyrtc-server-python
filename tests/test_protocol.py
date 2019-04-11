@@ -1378,9 +1378,8 @@ class TestProtocol:
         # been initiated
         class _MockProtocol(ServerProtocol):
             def _drop_client(self, *args, **kwargs):
-                result = super()._drop_client(*args, **kwargs)
+                super()._drop_client(*args, **kwargs)
                 done_future.set_result(None)
-                return result
 
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
@@ -1407,7 +1406,7 @@ class TestProtocol:
             await done_future
 
         # Enqueue long-blocking task
-        await path_client.enqueue_task(blocking_task())
+        await path_client.jobs.enqueue(blocking_task())
 
         # Drop responder
         await initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
