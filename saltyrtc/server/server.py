@@ -546,7 +546,8 @@ class ServerProtocol:
             #       task of the task loop.
             for pending_task in pending:
                 if pending_task == client.tasks.task_loop:
-                    if client.tasks.active_task is not None:
+                    if (client.tasks.active_task is not None and
+                            client.tasks.active_task is not TaskLoopStopSentinel):
                         util.cancel_awaitable(client.tasks.active_task, client.log)
                 else:
                     client.log.debug('Cancelling pending task {}', pending_task)
@@ -703,6 +704,7 @@ class ServerProtocol:
         while True:
             # Get a task from the queue
             task = await client.dequeue_task()
+            client.tasks.active_task = task
             if task is TaskLoopStopSentinel:
                 client.task_done(task)
                 break
@@ -710,7 +712,6 @@ class ServerProtocol:
             # Wait and handle exceptions
             future = asyncio.ensure_future(cast(Awaitable[None], task), loop=self._loop)
             client.log.debug('Waiting for task to complete {}', future)
-            client.tasks.active_task = future
             try:
                 await future
             except Exception as exc:

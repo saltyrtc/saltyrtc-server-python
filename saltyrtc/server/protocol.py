@@ -267,7 +267,7 @@ class PathClientTasks:
         self.task_loop = None  # type: Optional[asyncio.Task[None]]
         self.receive_loop = None  # type: Optional[asyncio.Task[None]]
         self.keep_alive_loop = None  # type: Optional[asyncio.Task[None]]
-        self.active_task = None  # type: Optional[asyncio.Future[None]]
+        self.active_task = None  # type: Optional[Task]
 
     @property
     def tasks(self) -> Sequence[Optional['asyncio.Task[None]']]:
@@ -812,9 +812,10 @@ class PathClient:
 
     def stop_task_queue(self, immediate: bool = False) -> None:
         """
-        Stop the task queue looper.
+        Ask the task queue looper to stop eventually.
         """
-        if self.tasks.task_loop is not None and not self.tasks.task_loop.done():
+        if (self.tasks.active_task is not None and
+                self.tasks.active_task is not TaskLoopStopSentinel):
             if immediate:
                 self._task_queue.put_nowait(TaskLoopStopSentinel)
             else:
