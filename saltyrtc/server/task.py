@@ -416,25 +416,33 @@ class Tasks:
         self._log.debug('Task done (#tasks={}, #running={}), {}',
                         len(self._tasks), self._tasks_remaining, task)
 
-        # We don't care about cancelled tasks unless it's the last one and no exception
-        # has been set.
-        if task.cancelled():
+        # A cancelled task can still contain an exception, so we try to
+        # fetch that first to avoid having the event loop's exception
+        # handler yelling at us.
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            # We don't care about cancelled tasks unless it's the last one and no
+            # exception has been set.
             self._log.debug('Task was cancelled')
             if self._tasks_remaining == 0 and not self._result_set:
                 error = 'All tasks have been cancelled prior to an exception'
                 self._set_result(Result(InternalError(error)))
                 self._cancelled = True
             return
-
-        # Tasks may not ever return without an exception
-        exc = task.exception()
-        if exc is None:
-            exc = InternalError('Task returned unexpectedly')
-        result = Result(exc)
+        except asyncio.InvalidStateError as exc_:
+            # Err... what the... ?
+            self._log.exception('Task done but not done... what the...', exc_)
+            exc = exc_
+        else:
+            # Tasks may not ever return without an exception
+            if exc is None:
+                result = task.result()
+                exc = InternalError('Task returned unexpectedly with {}', result)
 
         # Store the result and cancel all running tasks
         _log_exception(self._log, 'Task', exc)
-        self._set_result(result)
+        self._set_result(Result(exc))
         self._cancel()
 
     def _set_result(self, result: Union[Result, 'asyncio.Future[Result]']) -> None:

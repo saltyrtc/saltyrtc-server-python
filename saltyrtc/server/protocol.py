@@ -688,6 +688,7 @@ class PathClient:
         """
         Disconnected
         """
+        self.log.debug('Waiting for pong')
         try:
             await pong_future
         except websockets.ConnectionClosed as exc:
