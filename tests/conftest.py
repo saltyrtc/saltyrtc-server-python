@@ -33,6 +33,10 @@ class CalledProcessError(subprocess.CalledProcessError):
 
 
 def pytest_addoption(parser):
+    # 'repeat' parameter
+    help_ = 'Number of times to repeat each test'
+    parser.addoption('--repeat', action='store', help=help_)
+
     # 'loop' parameter
     help_ = 'Use a different event loop, supported: asyncio, uvloop'
     parser.addoption('--loop', action='store', help=help_)
@@ -40,6 +44,13 @@ def pytest_addoption(parser):
     # 'timeout' parameter
     help_ = 'Use a specific timeout in seconds (float) for tests'
     parser.addoption('--timeout', action='store', help=help_)
+
+
+def pytest_generate_tests(metafunc):
+    if metafunc.config.option.repeat is not None:
+        count = int(metafunc.config.option.repeat)
+        metafunc.fixturenames.append('repeat')
+        metafunc.parametrize('repeat', range(count))
 
 
 def pytest_report_header(config):
