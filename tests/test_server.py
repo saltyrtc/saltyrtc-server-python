@@ -449,7 +449,7 @@ class TestServer:
         path = server.paths.get(initiator_key.pk)
         path_client = path.get_initiator()
 
-        async def bad_coroutine(future):
+        async def bad_coroutine(future, first):
             # Ignore first cancellation
             try:
                 await sleep(60.0)
@@ -459,24 +459,25 @@ class TestServer:
             # Ignore second cancellation (due to the .join() operation timing out, which
             # cancels the job queue runner and thus cancels the currently awaited job,
             # which is this job).
-            try:
-                await sleep(60.0)
-            except asyncio.CancelledError:
-                if raise_2nd_cancel:
-                    raise
+            if first:
+                try:
+                    await sleep(60.0)
+                except asyncio.CancelledError:
+                    if raise_2nd_cancel:
+                        raise
 
-        async def enqueue_bad_task():
+        async def enqueue_bad_task(first):
             future = asyncio.Future(loop=event_loop)
             await path_client.jobs.enqueue(
-                event_loop.create_task(bad_coroutine(future)))
+                event_loop.create_task(bad_coroutine(future, first)))
             return future
 
         # Enqueue misbehaving task
         # Note: We need to add two of these since one of them will be dequeued
         #       immediately and waited for which runs in a different code
         #       section.
-        active_task_future = await enqueue_bad_task()
-        queued_task_future = await enqueue_bad_task()
+        active_task_future = await enqueue_bad_task(True)
+        queued_task_future = await enqueue_bad_task(False)
 
         # Close and wait
         await initiator.ws_client.close()
