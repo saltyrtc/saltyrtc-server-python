@@ -6,7 +6,6 @@ from typing import Coroutine  # noqa
 from typing import Dict  # noqa
 from typing import (
     Any,
-    Awaitable,
     Iterable,
     Optional,
     Type,
@@ -672,7 +671,7 @@ class PathClient:
         self.log.trace('server << {}', message)
         return message
 
-    async def ping(self) -> Awaitable[None]:
+    async def ping(self) -> 'asyncio.Future[None]':
         """
         Disconnected
         """
@@ -683,9 +682,9 @@ class PathClient:
             self.log.debug('Connection closed while pinging')
             self.jobs.close()
             raise Disconnected(exc.code) from exc
-        return self._wait_pong(pong_future)
+        return cast('asyncio.Future[None]', pong_future)
 
-    async def _wait_pong(self, pong_future: 'asyncio.Future[None]') -> None:
+    async def wait_pong(self, pong_future: 'asyncio.Future[None]') -> None:
         """
         Disconnected
         """

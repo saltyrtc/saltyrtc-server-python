@@ -759,7 +759,8 @@ class ServerProtocol:
             pong_future = await client.ping()
             try:
                 await asyncio.wait_for(
-                    pong_future, client.keep_alive_timeout, loop=self._loop)
+                    client.wait_pong(pong_future), client.keep_alive_timeout,
+                    loop=self._loop)
             except asyncio.TimeoutError:
                 client.log.debug('Ping timed out')
                 raise PingTimeoutError(str(client))
