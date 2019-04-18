@@ -50,7 +50,7 @@ def _log_exception(log: Logger, name: str, exc: BaseException) -> None:
     elif isinstance(exc, SignalingError):
         log.debug('{} returned due to protocol error: {}', name, exc)
     else:
-        log.error('{} returned due to exception: {}', name, exc)
+        log.error('{} returned due to exception: {} {}', name, repr(exc), exc)
 
 
 class FinalJob:
@@ -241,6 +241,7 @@ class JobQueue:
         """
         if self._state < JobQueueState.cancelled:
             self._state = JobQueueState.cancelled
+            self._log.debug('Cancelled job queue')
         if self._active_job is not None:
             self._log.debug('Cancelling active job')
             # Note: We explicitly DO NOT add the 'job done' callback here since the job
@@ -301,10 +302,12 @@ class JobQueue:
             # Handle final job
             if job is self._final_job:
                 self._state = JobQueueState.completed
+                self._log.debug('Completed job queue, waiting for final job {}',
+                                self._final_job.result_future)
                 try:
                     result = await self._final_job.result_future
                 except Exception as exc:
-                    self._log.warning('Final job raised {}', exc)
+                    self._log.warning('Final job raised: {} {}', repr(exc), exc)
                     result = Result(InternalError('Final job raised'))
                     result.__cause__ = exc
                 self._job_done(job)
