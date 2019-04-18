@@ -315,21 +315,21 @@ def cancel_awaitable(
             done_cb(coroutine)
     else:
         task = cast('asyncio.Task[None]', awaitable)
+        # A cancelled task can still contain an exception, so we try to
+        # fetch that first to avoid having the event loop's exception
+        # handler yelling at us.
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            log.debug('Already cancelled task {}', task)
+        except asyncio.InvalidStateError:
+            log.debug('Cancelling task {}', task)
+            task.cancel()
+        else:
+            if exc is not None:
+                log.debug('Ignoring completion of task {} with {}', task, task.result())
+            else:
+                log.debug('Ignoring exception of task {}: {}', task, repr(exc))
         if done_cb is not None:
             # noinspection PyTypeChecker
             task.add_done_callback(done_cb)
-        # Note: We need to check for .cancelled first since a task is also marked
-        #       .done when it is cancelled.
-        if task.cancelled():
-            log.debug('Already cancelled task {}', task)
-        elif task.done():
-            exc = task.exception()
-            if exc is not None:
-                message = 'Ignoring exception of task {}: {}'
-                log.debug(message, task, repr(exc))
-            else:
-                message = 'Ignoring completion of task {}'
-                log.debug(message, task)
-        else:
-            log.debug('Cancelling task {}', task)
-            task.cancel()

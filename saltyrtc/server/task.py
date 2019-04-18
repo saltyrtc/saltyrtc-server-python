@@ -280,7 +280,6 @@ class JobQueue:
         # Enqueue any last minute jobs and ask the job queue runner to stop
         # Warning: put_nowait can raise if we limit the queue size!
         for job in jobs:
-
             self._queue.put_nowait(job)
         self._queue.put_nowait(self._final_job)
 
@@ -434,11 +433,10 @@ class Tasks:
             # Err... what the... ?
             self._log.exception('Task done but not done... what the...', exc_)
             exc = exc_
-        else:
-            # Tasks may not ever return without an exception
-            if exc is None:
-                result = task.result()
-                exc = InternalError('Task returned unexpectedly with {}', result)
+        # Tasks may not ever return without an exception
+        if exc is None:
+            result = task.result()
+            exc = InternalError('Task returned unexpectedly with {}', result)
 
         # Store the result and cancel all running tasks
         _log_exception(self._log, 'Task', exc)

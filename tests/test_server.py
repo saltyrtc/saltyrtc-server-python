@@ -312,7 +312,7 @@ class TestServer:
         path = server.paths.get(initiator_key.pk)
         path_client = path.get_initiator()
 
-        # Enqueue job and cancel immediately
+        # Enqueue task and cancel immediately
         job = event_loop.create_task(sleep(60.0))
         await path_client.jobs.enqueue(job)
         job.cancel()
@@ -329,6 +329,17 @@ class TestServer:
         # Close on the job queue
         await path_client.jobs.enqueue(initiator.close())
 
+        # Enqueue task and cancel immediately
+        job = event_loop.create_task(sleep(60.0))
+        await path_client.jobs.enqueue(job)
+        job.cancel()
+
+        # Enqueue coroutine waiting for a future and cancel the future
+        # immediately.
+        future = asyncio.Future(loop=event_loop)
+        await path_client.jobs.enqueue(coroutine(future))
+        future.cancel()
+
         # Expect a normal closure (seen on the server side)
         disconnected = await connection_closed_future()
         assert disconnected.reason == 1000
@@ -339,6 +350,10 @@ class TestServer:
         #       the ConnectionClosed exception is being dispatched or afterwards.
         assert len([record for record in log_handler.records
                     if 'Active job cancelled' in record.message]) in {2, 3}
+        assert len([record for record in log_handler.records
+                    if 'Already cancelled task' in record.message]) == 1
+        assert len([record for record in log_handler.records
+                    if 'Closing coroutine' in record.message]) == 1
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('raise_2nd_cancel', [0, 1])
