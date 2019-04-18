@@ -292,13 +292,25 @@ class JobQueue:
         """
         while True:
             # Get a job from the queue
-            job = await self._queue.get()
+            try:
+                job = await self._queue.get()
+            except asyncio.CancelledError:
+                self._log.error('Job queue runner cancelled')
+                return
+
+            # Handle final job
             if job is self._final_job:
                 self._state = JobQueueState.completed
-                result = await self._final_job.result_future
+                try:
+                    result = await self._final_job.result_future
+                except Exception as exc:
+                    self._log.warning('Final job raised {}', exc)
+                    result = Result(InternalError('Final job raised'))
+                    result.__cause__ = exc
                 self._job_done(job)
                 result_handler(result)
-                break
+                self._log.debug('Job queue runner done')
+                return
 
             # Wait until complete and handle exceptions
             future = asyncio.ensure_future(cast(Awaitable[None], job), loop=self._loop)
@@ -306,7 +318,7 @@ class JobQueue:
             self._active_job = future
             try:
                 await future
-            except BaseException as exc:
+            except Exception as exc:
                 self._active_job = None
                 if isinstance(exc, asyncio.CancelledError):
                     self._log.debug('Active job cancelled {}', future)
@@ -320,9 +332,6 @@ class JobQueue:
             else:
                 self._active_job = None
                 self._job_done(future)
-
-        # Bye
-        self._log.debug('Job queue runner done')
 
 
 class Tasks:
@@ -448,7 +457,7 @@ class Tasks:
             self._log.debug('Tasks result: {}, cancelling all remaining', type(result))
             self._result_set = True
             if isinstance(result, BaseException):
-                self._result_future.set_result(result)
+                self._result_future.set_result(Result(result))
             else:
                 result.add_done_callback(
                     lambda future: self._result_future.set_result(future.result()))
