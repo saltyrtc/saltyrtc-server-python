@@ -329,10 +329,7 @@ class PathClient:
         self.type = None  # type: Optional[AddressType]
         self.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
         self.keep_alive_pings = 0
-        # Note: Ugly hacky cast below
-        result_future = cast('asyncio.Future[Result]', connection_closed_future)
-        final_job = FinalJob(result_future, loop=self._loop)
-        self.jobs = JobQueue(self.log, self._loop, final_job)  # type: JobQueue
+        self.jobs = JobQueue(self.log, self._loop)  # type: JobQueue
         self.tasks = Tasks(self.log, self._loop)
 
         # Schedule connection closed future
@@ -640,8 +637,9 @@ class PathClient:
             await self._connection.send(data)
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while sending')
-            self.jobs.close()
-            raise Disconnected(exc.code) from exc
+            disconnected = Disconnected(exc.code)
+            self.jobs.close(Result(disconnected))
+            raise disconnected from exc
 
     async def receive(self) -> IncomingMessageMixin:
         """
@@ -657,8 +655,9 @@ class PathClient:
             data = await self._connection.recv()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while receiving')
-            self.jobs.close()
-            raise Disconnected(exc.code) from exc
+            disconnected = Disconnected(exc.code)
+            self.jobs.close(Result(disconnected))
+            raise disconnected from exc
         self.log.debug('Received message')
 
         # Ensure binary
@@ -680,8 +679,9 @@ class PathClient:
             pong_future = await self._connection.ping()
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while pinging')
-            self.jobs.close()
-            raise Disconnected(exc.code) from exc
+            disconnected = Disconnected(exc.code)
+            self.jobs.close(Result(disconnected))
+            raise disconnected from exc
         return cast('asyncio.Future[None]', pong_future)
 
     async def wait_pong(self, pong_future: 'asyncio.Future[None]') -> None:
@@ -693,8 +693,9 @@ class PathClient:
             await pong_future
         except websockets.ConnectionClosed as exc:
             self.log.debug('Connection closed while waiting for pong')
-            self.jobs.close()
-            raise Disconnected(exc.code) from exc
+            disconnected = Disconnected(exc.code)
+            self.jobs.close(Result(disconnected))
+            raise disconnected from exc
 
     async def close(self, code: int = 1000) -> None:
         """
@@ -706,7 +707,7 @@ class PathClient:
         """
         # Close the job queue to ensure no further jobs can be
         # enqueued while the client is in the closing process.
-        self.jobs.close()
+        self.jobs.close(Result(Disconnected(code)))
 
         # Note: We are not sending a reason for security reasons.
         await self._connection.close(code=code)
@@ -732,7 +733,7 @@ class PathClient:
 
         # Close the job queue to ensure no further jobs can be
         # enqueued while the client is in the closing process.
-        self.jobs.close(close_coroutine)
+        self.jobs.close(Result(Disconnected(code)), close_coroutine)
 
         # Cancel all tasks of the client.
         # Note: This will ensure that all messages forwarded towards the client to be

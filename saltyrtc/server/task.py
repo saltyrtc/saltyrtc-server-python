@@ -56,14 +56,10 @@ def _log_exception(log: Logger, name: str, exc: BaseException) -> None:
 class FinalJob:
     """
     The job queue runner will stop if this has been dequeued from
-    the job queue and the inner awaitable has returned a result.
+    the job queue.
     """
-    def __init__(
-            self,
-            result_future: 'asyncio.Future[Result]',
-            loop: asyncio.AbstractEventLoop,
-    ):
-        self.result_future = asyncio.shield(result_future, loop=loop)
+    def __init__(self, result: Result):
+        self.result = result
 
 
 @enum.unique
@@ -97,14 +93,12 @@ class JobQueue:
         '_queue',
         '_runner',
         '_active_job',
-        '_final_job',
     )
 
     def __init__(
             self,
             log: Logger,
-            loop: asyncio.AbstractEventLoop,
-            final_job: FinalJob,
+            loop: asyncio.AbstractEventLoop
     ) -> None:
         self._log = log
         self._loop = loop
@@ -115,7 +109,6 @@ class JobQueue:
         # Job runner
         self._runner = None  # type: Optional[asyncio.Task[None]]
         self._active_job = None  # type: Optional[Job]
-        self._final_job = final_job
 
     async def enqueue(self, job: Job) -> None:
         """
@@ -139,7 +132,7 @@ class JobQueue:
         else:
             util.cancel_awaitable(job, self._log)
 
-    def close(self, *jobs: Job) -> None:
+    def close(self, result: Result, *jobs: Job) -> None:
         """
         Close the job queue to prevent further enqueues. Will do
         nothing in case the job queue has already been closed or
@@ -167,9 +160,9 @@ class JobQueue:
         self._log.debug('Closed job queue')
 
         # Ask the job queue runner to stop when done processing all previous jobs.
-        self._stop(*jobs)
+        self._stop(result, *jobs)
 
-    def cancel(self) -> None:
+    def cancel(self, result: Result) -> None:
         """
         Cancel all pending jobs of the job queue and prevent further
         enqueues. Will do nothing in case the job queue has already
@@ -185,7 +178,7 @@ class JobQueue:
         # Ask the job queue runner to stop asap.
         # Note: If the final job had been enqueued formerly, it would have been
         #       dequeued in the block above, so we need to re-enqueue it.
-        self._stop()
+        self._stop(result)
 
     async def join(self) -> None:
         """
@@ -254,7 +247,7 @@ class JobQueue:
                 job = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-            if job is self._final_job:
+            if isinstance(job, FinalJob):
                 self._job_done(job, silent=True)
             else:
                 awaitable = cast(Awaitable[None], job)
@@ -274,7 +267,7 @@ class JobQueue:
         except ValueError:
             raise InternalError('More jobs marked as done as were enqueued')
 
-    def _stop(self, *jobs: Job) -> None:
+    def _stop(self, result: Result, *jobs: Job) -> None:
         """
         Ask the job queue runner to stop eventually.
         """
@@ -282,7 +275,7 @@ class JobQueue:
         # Warning: put_nowait can raise if we limit the queue size!
         for job in jobs:
             self._queue.put_nowait(job)
-        self._queue.put_nowait(self._final_job)
+        self._queue.put_nowait(FinalJob(result))
 
     async def _run(self, result_handler: Callable[[Result], None]) -> None:
         """
@@ -300,18 +293,11 @@ class JobQueue:
                 return
 
             # Handle final job
-            if job is self._final_job:
+            if isinstance(job, FinalJob):
                 self._state = JobQueueState.completed
-                self._log.debug('Completed job queue, waiting for final job {}',
-                                self._final_job.result_future)
-                try:
-                    result = await self._final_job.result_future
-                except Exception as exc:
-                    self._log.warning('Final job raised: {} {}', repr(exc), exc)
-                    result = Result(InternalError('Final job raised'))
-                    result.__cause__ = exc
+                self._log.debug('Completed job queue')
                 self._job_done(job)
-                result_handler(result)
+                result_handler(job.result)
                 self._log.debug('Job queue runner done')
                 return
 
@@ -328,8 +314,9 @@ class JobQueue:
                 else:
                     self._log.debug('Stopping active job {}', future)
                     _log_exception(self._log, 'Job', exc)
-                    self.cancel()
-                    result_handler(Result(exc))
+                    result = Result(exc)
+                    self.cancel(result)
+                    result_handler(result)
                 # noinspection PyTypeChecker
                 future.add_done_callback(self._job_done)
             else:

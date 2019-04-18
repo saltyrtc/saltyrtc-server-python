@@ -438,8 +438,9 @@ class ServerProtocol:
             # Encountered an exception during the handshake.
             # Note: We already know the result (the exception), so we can cancel both
             #       job queue and tasks.
-            client.jobs.cancel()
-            client.tasks.cancel(Result(exc))
+            result = Result(exc)
+            client.jobs.cancel(result)
+            client.tasks.cancel(result)
         else:
             # Check if the client is still connected to the path or has already been
             # dropped.
@@ -488,7 +489,7 @@ class ServerProtocol:
         #       the task back into the event loop allowing other tasks to get the
         #       client's path instance from the path while it is already effectively
         #       disconnected.
-        client.jobs.cancel()
+        client.jobs.cancel(result)
         try:
             path.remove_client(client)
         except KeyError:
