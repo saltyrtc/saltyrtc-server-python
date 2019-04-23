@@ -392,7 +392,12 @@ class ServerProtocol:
         if self.client is not None:
             # We need to use 'drop' in order to prevent the server from sending a
             # 'disconnect' message for each client.
-            self._drop_client(self.client, code)
+            try:
+                self._drop_client(self.client, code)
+            except KeyError:
+                # We can safely ignore this since clients will be removed immediately
+                # from the path in case they are being dropped by another client.
+                pass
 
     def get_path_client(
             self,

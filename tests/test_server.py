@@ -652,3 +652,162 @@ class TestServer:
         await connection_closed_future()
         await second_initiator.close()
         await server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    async def test_relay_cancellation_active(
+            self, mocker, event_loop, sleep, pack_nonce, cookie_factory, server,
+            client_factory, initiator_key
+    ):
+        """
+        Ensure the server detects cancellation of itself when running a
+        relay task.
+
+        In this case, the relay task of the initiator is the currently
+        active job of the responder.
+        """
+        sending_in_progress_future = asyncio.Future(loop=event_loop)
+        cancelled_future = asyncio.Future(loop=event_loop)
+
+        # Responder handshake
+        responder, r = await client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        class _MockProtocol(ServerProtocol):
+            async def keep_alive_loop(self):
+                await sending_in_progress_future
+                raise exception.PingTimeoutError('Meh!')
+
+            async def initiator_receive_loop(self):
+                try:
+                    return await super().initiator_receive_loop()
+                except asyncio.CancelledError:
+                    cancelled_future.set_result(None)
+                    raise
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # Initiator handshake
+        initiator, i = await client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # new-initiator
+        await responder.recv()
+
+        # Get initiator's PathClient instance
+        path = server.paths.get(initiator_key.pk)
+        path_client = path.get_responder(r['id'])
+        _send = path_client._connection.send
+
+        # Mock responder instance: Block forwarding on send
+        async def _mock_send(*_):
+            mocker.patch.object(path_client._connection, 'send', _send)
+            await sleep(0.1)
+            sending_in_progress_future.set_result(None)
+            await sleep(5.0)
+            cancelled_future.set_exception(asyncio.TimeoutError())
+
+        mocker.patch.object(path_client._connection, 'send', _mock_send)
+
+        # Send a relay message: initiator --> responder
+        nonce = pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn'])
+        await initiator.send(nonce, b'\xfe' * 2**15, box=None)
+        i['ccsn'] += 1
+
+        # Wait for the sending procedure to be started, then wait for the keep-alive loop
+        # to time out.
+        await sending_in_progress_future
+
+        # Expect the initiator's receive loop to be cancelled
+        await cancelled_future
+
+        # Responder: Receive 'disconnected' message
+        message, *_ = await responder.recv()
+        assert message == {'type': 'disconnected', 'id': i['id']}
+
+        # Bye
+        await responder.close()
+        await server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    async def test_relay_cancellation_queued(
+            self, mocker, event_loop, sleep, pack_nonce, cookie_factory, server,
+            client_factory, initiator_key
+    ):
+        """
+        Ensure the server detects cancellation of itself when running a
+        relay task.
+
+        In this case, the relay task of the initiator is a queued job
+        for the responder.
+        """
+        sending_in_progress_future = asyncio.Future(loop=event_loop)
+        cancelled_future = asyncio.Future(loop=event_loop)
+
+        # Responder handshake
+        responder, r = await client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        class _MockProtocol(ServerProtocol):
+            async def keep_alive_loop(self):
+                await sending_in_progress_future
+                raise exception.PingTimeoutError('Meh!')
+
+            async def initiator_receive_loop(self):
+                try:
+                    return await super().initiator_receive_loop()
+                except asyncio.CancelledError:
+                    cancelled_future.set_result(None)
+                    raise
+
+        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+
+        # Initiator handshake
+        initiator, i = await client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # new-initiator
+        await responder.recv()
+
+        # Get initiator's PathClient instance
+        path = server.paths.get(initiator_key.pk)
+        path_client = path.get_responder(r['id'])
+        _send = path_client._connection.send
+
+        # Mock responder instance: Block forwarding on send
+        async def _mock_send(*_):
+            mocker.patch.object(path_client._connection, 'send', _send)
+            await sleep(0.1)
+            sending_in_progress_future.set_result(None)
+            await sleep(5.0)
+            cancelled_future.set_exception(asyncio.TimeoutError())
+
+        mocker.patch.object(path_client._connection, 'send', _mock_send)
+
+        # Schedule a blocking job to keep the send job behind
+        async def blocking_job():
+            await asyncio.shield(cancelled_future, loop=event_loop)
+        await path_client.jobs.enqueue(blocking_job())
+
+        # Send a relay message: initiator --> responder
+        nonce = pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn'])
+        await initiator.send(nonce, b'\xfe' * 2**15, box=None)
+        i['ccsn'] += 1
+
+        # Wait for the sending procedure to be started, then wait for the keep-alive loop
+        # to time out.
+        await sending_in_progress_future
+
+        # Expect the initiator's receive loop to be cancelled
+        await cancelled_future
+
+        # Responder: Receive 'disconnected' message
+        message, *_ = await responder.recv()
+        assert message == {'type': 'disconnected', 'id': i['id']}
+
+        # Bye
+        await responder.close()
+        await server.wait_connections_closed()
