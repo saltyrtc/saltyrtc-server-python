@@ -740,7 +740,11 @@ class ServerProtocol:
             log_message = 'Sending relayed message to 0x{:02x} timed out'
             source.log.info(log_message, destination_id)
             await send_error_message()
-        except Exception:
+        except Exception as exc:
+            # Handle cancellation of the client
+            if isinstance(exc, asyncio.CancelledError) and source.tasks.have_result:
+                raise
+
             # An exception has been triggered while sending the message.
             # Note: We don't care about the actual exception as the job
             #       queue runner will also trigger that exception on the

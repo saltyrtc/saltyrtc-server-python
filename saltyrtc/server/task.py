@@ -338,7 +338,7 @@ class Tasks:
         '_log',
         '_loop',
         '_cancelled',
-        '_result_set',
+        '_have_result',
         '_result_future',
         '_tasks',
         '_tasks_remaining',
@@ -352,11 +352,15 @@ class Tasks:
         self._log = log
         self._loop = loop
         self._cancelled = False
-        self._result_set = False
+        self._have_result = False
         self._result_future = \
             asyncio.Future(loop=self._loop)  # type: asyncio.Future[Result]
         self._tasks = None  # type: Optional[Set[asyncio.Task[None]]]
         self._tasks_remaining = 0
+
+    @property
+    def have_result(self) -> bool:
+        return self._have_result
 
     def start(self, coroutines: Set[Coroutine[Any, Any, None]]) -> None:
         """
@@ -428,7 +432,7 @@ class Tasks:
             # We don't care about cancelled tasks unless it's the last one and no
             # exception has been set.
             self._log.debug('Task was cancelled')
-            if self._tasks_remaining == 0 and not self._result_set:
+            if self._tasks_remaining == 0 and not self._have_result:
                 error = 'All tasks have been cancelled prior to an exception'
                 self._set_result(Result(InternalError(error)))
                 self._cancelled = True
@@ -448,9 +452,9 @@ class Tasks:
         self._cancel()
 
     def _set_result(self, result: Union[Result, 'asyncio.Future[Result]']) -> None:
-        if not self._result_set:
+        if not self._have_result:
             self._log.debug('Tasks result: {}, cancelling all remaining', type(result))
-            self._result_set = True
+            self._have_result = True
             if isinstance(result, BaseException):
                 self._result_future.set_result(Result(result))
             else:
