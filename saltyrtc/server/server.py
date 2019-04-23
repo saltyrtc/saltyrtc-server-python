@@ -1,5 +1,6 @@
 import asyncio
 import binascii
+import functools
 import ssl
 from collections import OrderedDict
 from typing import Awaitable  # noqa
@@ -243,7 +244,11 @@ class ServerProtocol:
             self._server.register(self)
 
         # Start handler task
-        self.handler_task = self._loop.create_task(handler_coroutine)
+        log_handler = functools.partial(
+            self._log.exception, 'Unhandled exception in protocol handler:')
+        # noinspection PyTypeChecker
+        self.handler_task = self._loop.create_task(
+            util.log_exception(handler_coroutine, log_handler))
 
     async def handler(self) -> None:
         client, path = self.client, self.path
@@ -301,7 +306,11 @@ class ServerProtocol:
         # Note: This ensures the client is closed soon even if the job queue is holding
         #       us up.
         if not isinstance(close_awaitable, asyncio.Future):
-            close_awaitable = self._loop.create_task(close_awaitable)
+            log_handler = functools.partial(
+                self._log.exception, 'Unhandled exception in closing procedure:')
+            # noinspection PyTypeChecker
+            close_awaitable = self._loop.create_task(
+                util.log_exception(close_awaitable, log_handler))
 
         # Wait until all queued jobs have been processed and the job queue runner
         # returned.
@@ -1009,15 +1018,21 @@ class Server:
         """
         for callback in self._events.get_callbacks(event):
             coroutine = callback(event, path, data)
-            asyncio.ensure_future(coroutine, loop=self._loop)
+            log_handler = functools.partial(
+                self._log.exception, 'Unhandled exception in event handler:')
+            # noinspection PyTypeChecker
+            self._loop.create_task(util.log_exception(coroutine, log_handler))
 
     def close(self) -> None:
         """
         Close open connections and the server.
         """
         if self._close_task is None:
+            log_handler = functools.partial(
+                self._log.exception, 'Exception while closing:')
+            # noinspection PyTypeChecker
             self._close_task = self._loop.create_task(
-                self._close_after_all_protocols_closed())
+                util.log_exception(self._close_after_all_protocols_closed(), log_handler))
 
     async def wait_closed(self) -> None:
         """

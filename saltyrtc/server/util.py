@@ -15,6 +15,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    TypeVar,
     cast,
 )
 
@@ -38,7 +39,11 @@ __all__ = (
     'create_ssl_context',
     'load_permanent_key',
     'cancel_awaitable',
+    'log_exception',
 )
+
+# Do not export!
+T = TypeVar('T')
 
 
 # noinspection PyPropertyDefinition
@@ -333,3 +338,26 @@ def cancel_awaitable(
         if done_cb is not None:
             # noinspection PyTypeChecker
             task.add_done_callback(done_cb)
+
+
+async def log_exception(
+        awaitable: Awaitable[T],
+        log_handler: Callable[[Exception], None],
+) -> T:
+    """
+    Forward the stack trace of an awaitable's uncaught exception to a
+    log handler.
+
+    .. note:: This will not forward :exc:`asyncio.CancelledError`.
+
+    Arguments:
+         - `awaitable`: A coroutine, task or future.
+         - `log_handler`: A callable logging the exception.
+    """
+    try:
+        return await awaitable
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        log_handler(exc)
+        raise

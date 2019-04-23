@@ -6,11 +6,11 @@ import enum
 import os
 import signal
 import stat
-from typing import Any  # noqa
 from typing import Coroutine  # noqa
 from typing import List  # noqa
 from typing import Optional  # noqa
 from typing import Sequence  # noqa
+from typing import Any
 
 import click
 import libnacl.public

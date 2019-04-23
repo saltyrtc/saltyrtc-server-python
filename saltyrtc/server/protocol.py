@@ -2,7 +2,6 @@ import asyncio
 import os
 import struct
 # noinspection PyUnresolvedReferences
-from typing import Coroutine  # noqa
 from typing import Dict  # noqa
 from typing import (
     Any,
@@ -47,7 +46,6 @@ from .message import (
     unpack,
 )
 from .task import (
-    FinalJob,
     JobQueue,
     Tasks,
 )

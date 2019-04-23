@@ -60,7 +60,7 @@ class TestServer:
         await server.wait_connections_closed()
         assert not initiator.ws_client.open
         assert initiator.ws_client.close_code == CloseCode.internal_error
-        assert len([record for record in log_handler.records if _filter(record)]) == 2
+        assert len([record for record in log_handler.records if _filter(record)]) == 1
 
     @pytest.mark.asyncio
     async def test_tasks_cancelled_connection_open(

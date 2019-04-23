@@ -1,14 +1,13 @@
 import asyncio
 import enum
+import functools
 from typing import (
     Any,
-    Awaitable,
     Callable,
     Coroutine,
     Optional,
     Set,
     Union,
-    cast,
 )
 
 from . import util
@@ -45,12 +44,12 @@ def _log_exception(log: Logger, name: str, exc: BaseException) -> None:
                   name, exc)
     elif isinstance(exc, ServerKeyError):
         log.debug('{} returned due to server key error: {}', name, exc)
-    elif isinstance(exc, InternalError):
-        log.error('{} returned due to an internal error: {}', name, exc)
     elif isinstance(exc, SignalingError):
         log.debug('{} returned due to protocol error: {}', name, exc)
+    elif isinstance(exc, InternalError):
+        log.exception('{} returned due to an internal error:', name, exc)
     else:
-        log.error('{} returned due to exception: {} {}', name, repr(exc), exc)
+        log.exception('{} returned due to exception: {}', name, repr(exc), exc)
 
 
 class FinalJob:
@@ -217,7 +216,11 @@ class JobQueue:
 
         # Start
         self._log.debug('Job queue runner started')
-        self._runner = self._loop.create_task(self._run(result_handler))
+        log_handler = functools.partial(
+            self._log.exception, 'Unhandled exception in job queue runner:')
+        # noinspection PyTypeChecker
+        self._runner = self._loop.create_task(
+            util.log_exception(self._run(result_handler), log_handler))
 
     def _cancel(self) -> None:
         """
@@ -250,8 +253,7 @@ class JobQueue:
             if isinstance(job, FinalJob):
                 self._job_done(job, silent=True)
             else:
-                awaitable = cast(Awaitable[None], job)
-                util.cancel_awaitable(awaitable, self._log, done_cb=self._job_done)
+                util.cancel_awaitable(job, self._log, done_cb=self._job_done)
 
     def _job_done(self, job: Union[Job, FinalJob], silent: bool = False) -> None:
         """
@@ -302,7 +304,7 @@ class JobQueue:
                 return
 
             # Wait until complete and handle exceptions
-            future = asyncio.ensure_future(cast(Awaitable[None], job), loop=self._loop)
+            future = asyncio.ensure_future(job, loop=self._loop)
             self._log.debug('Waiting for job to complete {}', future)
             self._active_job = future
             try:
@@ -372,7 +374,10 @@ class Tasks:
             raise InternalError('Tasks already started')
 
         # Bind done callbacks
-        tasks = {self._loop.create_task(coroutine) for coroutine in coroutines}
+        log_handler = functools.partial(_log_exception, self._log, 'Task')
+        # noinspection PyTypeChecker
+        tasks = {self._loop.create_task(util.log_exception(coroutine, log_handler))
+                 for coroutine in coroutines}
         for task in tasks:
             self._tasks_remaining += 1
             task.add_done_callback(self._task_done_handler)
@@ -435,10 +440,10 @@ class Tasks:
         # Tasks may not ever return without an exception
         if exc is None:
             result = task.result()
-            exc = InternalError('Task returned unexpectedly with {}', result)
+            exc = InternalError('Task returned unexpectedly with {}: {}'.format(
+                type(result), result))
 
         # Store the result and cancel all running tasks
-        _log_exception(self._log, 'Task', exc)
         self._set_result(Result(exc))
         self._cancel()
 
