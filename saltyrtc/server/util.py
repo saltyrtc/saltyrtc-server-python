@@ -313,7 +313,7 @@ def cancel_awaitable(
           `coroutine_or_task` is a coroutine.
     """
     if asyncio.iscoroutine(awaitable):
-        coroutine = cast('Coroutine[Any, Any, None]', awaitable)
+        coroutine = cast(Coroutine[Any, Any, None], awaitable)
         log.debug('Closing coroutine {}', coroutine)
         coroutine.close()
         if done_cb is not None:
