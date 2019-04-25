@@ -1,6 +1,11 @@
 Changelog
 *********
 
+`4.2.0`_ (2019-04-25)
+---------------------
+
+- Internal refactoring of task and job handling
+
 `4.1.1`_ (2019-04-09)
 ---------------------
 
@@ -105,6 +110,7 @@ support the `disconnected` message before upgrading.
 .. _#90: https://github.com/saltyrtc/saltyrtc-server-python/issues/90
 .. _SaltyRTC 1.0 Protocol: https://github.com/saltyrtc/saltyrtc-meta/blob/protocol-1.0/Protocol.md
 
+.. _4.2.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v4.1.1...v4.2.0
 .. _4.1.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v4.1.0...v4.1.1
 .. _4.1.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v4.0.1...v4.1.0
 .. _4.0.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v4.0.0...v4.0.1
