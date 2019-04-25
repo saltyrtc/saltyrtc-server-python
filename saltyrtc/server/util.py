@@ -15,6 +15,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    TypeVar,
     cast,
 )
 
@@ -23,6 +24,7 @@ import libnacl.public
 
 from .typing import (
     LogbookLevel,
+    Logger,
     LoggingLevel,
     NoReturn,
     ServerSecretPermanentKey,
@@ -37,7 +39,11 @@ __all__ = (
     'create_ssl_context',
     'load_permanent_key',
     'cancel_awaitable',
+    'log_exception',
 )
+
+# Do not export!
+T = TypeVar('T')
 
 
 # noinspection PyPropertyDefinition
@@ -292,9 +298,9 @@ def load_permanent_key(key: str) -> ServerSecretPermanentKey:
 
 
 def cancel_awaitable(
-        awaitable: Awaitable[None],
-        log: 'logbook.Logger',
-        done_cb: Optional[Callable[[Awaitable[None]], Any]] = None
+        awaitable: Awaitable[Any],
+        log: Logger,
+        done_cb: Optional[Callable[[Awaitable[Any]], Any]] = None
 ) -> None:
     """
     Cancel a coroutine or a :class:`asyncio.Task`.
@@ -307,27 +313,51 @@ def cancel_awaitable(
           `coroutine_or_task` is a coroutine.
     """
     if asyncio.iscoroutine(awaitable):
-        coroutine = cast('Coroutine[Any, Any, None]', awaitable)
+        coroutine = cast(Coroutine[Any, Any, None], awaitable)
         log.debug('Closing coroutine {}', coroutine)
         coroutine.close()
         if done_cb is not None:
             done_cb(coroutine)
     else:
         task = cast('asyncio.Task[None]', awaitable)
-        if done_cb is not None:
-            task.add_done_callback(done_cb)
-        # Note: We need to check for .cancelled first since a task is also marked
-        #       .done when it is cancelled.
-        if task.cancelled():
-            log.debug('Already cancelled task {}', task)
-        elif task.done():
+        # A cancelled task can still contain an exception, so we try to
+        # fetch that first to avoid having the event loop's exception
+        # handler yelling at us.
+        try:
             exc = task.exception()
-            if exc is not None:
-                message = 'Ignoring exception of task {}: {}'
-                log.debug(message, task, repr(exc))
-            else:
-                message = 'Ignoring completion of task {}'
-                log.debug(message, task)
-        else:
+        except asyncio.CancelledError:
+            log.debug('Already cancelled task {}', task)
+        except asyncio.InvalidStateError:
             log.debug('Cancelling task {}', task)
             task.cancel()
+        else:
+            if exc is not None:
+                log.debug('Ignoring completion of task {} with {}', task, task.result())
+            else:
+                log.debug('Ignoring exception of task {}: {}', task, repr(exc))
+        if done_cb is not None:
+            # noinspection PyTypeChecker
+            task.add_done_callback(done_cb)
+
+
+async def log_exception(
+        awaitable: Awaitable[T],
+        log_handler: Callable[[Exception], None],
+) -> T:
+    """
+    Forward the stack trace of an awaitable's uncaught exception to a
+    log handler.
+
+    .. note:: This will not forward :exc:`asyncio.CancelledError`.
+
+    Arguments:
+         - `awaitable`: A coroutine, task or future.
+         - `log_handler`: A callable logging the exception.
+    """
+    try:
+        return await awaitable
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        log_handler(exc)
+        raise

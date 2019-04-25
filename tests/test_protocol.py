@@ -1224,7 +1224,7 @@ class TestProtocol:
             self, pack_nonce, cookie_factory, server, client_factory
     ):
         """
-        Ensure a relay messages are being dispatched in case the client
+        Ensure relay messages are being dispatched in case the client
         closes after having sent a couple of relay messages.
         """
         # Initiator handshake
@@ -1378,9 +1378,8 @@ class TestProtocol:
         # been initiated
         class _MockProtocol(ServerProtocol):
             def _drop_client(self, *args, **kwargs):
-                result = super()._drop_client(*args, **kwargs)
+                super()._drop_client(*args, **kwargs)
                 done_future.set_result(None)
-                return result
 
         mocker.patch.object(server, '_protocol_class', _MockProtocol)
 
@@ -1407,7 +1406,7 @@ class TestProtocol:
             await done_future
 
         # Enqueue long-blocking task
-        await path_client.enqueue_task(blocking_task())
+        await path_client.jobs.enqueue(blocking_task())
 
         # Drop responder
         await initiator.send(pack_nonce(i['cck'], 0x01, 0x00, i['ccsn']), {
@@ -1501,6 +1500,58 @@ class TestProtocol:
         # Receive 'disconnected' message
         message, *_ = await initiator.recv()
         assert message == {'type': 'disconnected', 'id': r['id']}
+
+        # Bye
+        await initiator.close()
+        await responder.close()
+        await server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    async def test_relay_timeout(
+            self, mocker, sleep, initiator_key, pack_nonce,
+            cookie_factory, server, client_factory
+    ):
+        """
+        Ensure the server responds with a 'send-error' message when a
+        relay times out.
+        """
+        # Mock the job queue join timeout
+        mocker.patch('saltyrtc.server.server.RELAY_TIMEOUT', 0.1)
+
+        # Initiator handshake
+        initiator, i = await client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Responder handshake
+        responder, r = await client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        # new-responder
+        await initiator.recv()
+
+        # Get responder's PathClient instance
+        path = server.paths.get(initiator_key.pk)
+        path_client = path.get_responder(r['id'])
+        send = path_client._connection.send
+
+        # Mock responder instance: Slow-motion sending
+        async def _mock_send(*args, **kwargs):
+            await sleep(0.2)
+            return await send(*args, **kwargs)
+
+        mocker.patch.object(path_client._connection, 'send', _mock_send)
+
+        # Send relay message: initiator --> responder
+        nonce = pack_nonce(i['rcck'], i['id'], r['id'], i['rccsn'])
+        await initiator.send(nonce, b'\xfe' * 2**15, box=None)
+        i['rccsn'] += 1
+
+        # Receive send-error message: initiator <-- initiator
+        message, *_ = await initiator.recv()
+        assert message['type'] == 'send-error'
+        assert len(message['id']) == 8
 
         # Bye
         await initiator.close()

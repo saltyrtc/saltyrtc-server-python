@@ -86,7 +86,7 @@ class DowngradeError(SignalingError):
 class Disconnected(Exception):
     """
     The client disconnected from the server or has been disconnected by
-    the server.
+    the server (e.g. by a drop request).
 
     ..note:: This does not derive from :class:`SignalingError` since it
              is not considered an *error*.

@@ -1,5 +1,6 @@
 import asyncio
 import binascii
+import functools
 import ssl
 from collections import OrderedDict
 from typing import Awaitable  # noqa
@@ -36,7 +37,6 @@ from .common import (
     CloseCode,
     ResponderAddress,
     SubProtocol,
-    TaskLoopStopSentinel,
 )
 from .events import (
     Event,
@@ -78,8 +78,10 @@ from .typing import (
     InitiatorPublicPermanentKey,
     ListOrTuple,
     MessageId,
+    NoReturn,
     PathHex,
     ResponderPublicSessionKey,
+    Result,
     ServerCookie,
     ServerPublicPermanentKey,
     ServerSecretPermanentKey,
@@ -93,7 +95,7 @@ __all__ = (
 )
 
 # Constants
-_TASK_QUEUE_JOIN_TIMEOUT = 10.0
+_JOB_QUEUE_JOIN_TIMEOUT = 10.0
 
 # Do not export!
 ST = TypeVar('ST', bound='Server')
@@ -242,7 +244,11 @@ class ServerProtocol:
             self._server.register(self)
 
         # Start handler task
-        self.handler_task = self._loop.create_task(handler_coroutine)
+        log_handler = functools.partial(
+            self._log.exception, 'Unhandled exception in protocol handler:')
+        # noinspection PyTypeChecker
+        self.handler_task = self._loop.create_task(
+            util.log_exception(handler_coroutine, log_handler))
 
     async def handler(self) -> None:
         client, path = self.client, self.path
@@ -252,7 +258,6 @@ class ServerProtocol:
         # Handle client until disconnected or an exception occurred
         hex_path = PathHex(binascii.hexlify(path.initiator_key).decode('ascii'))
         close_future = asyncio.Future(loop=self._loop)  # type: asyncio.Future[None]
-
         try:
             await self.handle_client()
         except Disconnected as exc:
@@ -298,22 +303,28 @@ class ServerProtocol:
             close_awaitable = close_future
 
         # Schedule closing of the client
-        # Note: This ensures the client is closed soon even if the task queue is holding
+        # Note: This ensures the client is closed soon even if the job queue is holding
         #       us up.
         if not isinstance(close_awaitable, asyncio.Future):
-            close_awaitable = self._loop.create_task(close_awaitable)
+            log_handler = functools.partial(
+                self._log.exception, 'Unhandled exception in closing procedure:')
+            # noinspection PyTypeChecker
+            close_awaitable = self._loop.create_task(
+                util.log_exception(close_awaitable, log_handler))
 
-        # Wait until all queued tasks have been processed and the task loop returned.
+        # Wait until all queued jobs have been processed and the job queue runner
+        # returned.
+        #
         # Note: This ensure that a send-error message (and potentially other messages)
         #       are enqueued towards other clients before the disconnect message.
         try:
             await asyncio.wait_for(
-                client.join_task_queue(), _TASK_QUEUE_JOIN_TIMEOUT, loop=self._loop)
+                client.jobs.join(), _JOB_QUEUE_JOIN_TIMEOUT, loop=self._loop)
         except asyncio.TimeoutError:
             client.log.error(
-                'Task queue did not complete after {} seconds', _TASK_QUEUE_JOIN_TIMEOUT)
+                'Job queue did not complete within {} seconds', _JOB_QUEUE_JOIN_TIMEOUT)
         else:
-            client.log.debug('Task queue completed')
+            client.log.debug('Job queue completed')
 
         # Send disconnected message if client was authenticated
         if client.state == ClientState.authenticated:
@@ -324,11 +335,11 @@ class ServerProtocol:
                 for responder_id in responder_ids:
                     responder = path.get_responder(responder_id)
 
-                    # Create message and add send coroutine to task queue of the responder
+                    # Create message and add send coroutine to job queue of the responder
                     message = DisconnectedMessage.create(
                         responder_id, INITIATOR_ADDRESS)
                     responder.log.debug('Enqueueing disconnected message')
-                    coroutines.append(responder.enqueue_task(responder.send(message)))
+                    coroutines.append(responder.jobs.enqueue(responder.send(message)))
                 try:
                     await asyncio.gather(*coroutines, loop=self._loop)
                 except Exception as exc:
@@ -342,13 +353,13 @@ class ServerProtocol:
                 except KeyError:
                     pass  # No initiator present
                 else:
-                    # Create message and add send coroutine to task queue of the
+                    # Create message and add send coroutine to job queue of the
                     # initiator
                     message = DisconnectedMessage.create(
                         INITIATOR_ADDRESS, ResponderAddress(client.id))
                     initiator.log.debug('Enqueueing disconnected message')
                     try:
-                        await initiator.enqueue_task(initiator.send(message))
+                        await initiator.jobs.enqueue(initiator.send(message))
                     except Exception as exc:
                         description = 'Error while dispatching disconnected message' \
                                       'to initiator:'
@@ -368,7 +379,7 @@ class ServerProtocol:
         self._server.unregister(self)
         client.log.debug('Worker stopped')
 
-    async def close(self, code: CloseCode) -> None:
+    def close(self, code: CloseCode) -> None:
         """
         Close the underlying connection and stop the protocol.
 
@@ -381,7 +392,12 @@ class ServerProtocol:
         if self.client is not None:
             # We need to use 'drop' in order to prevent the server from sending a
             # 'disconnect' message for each client.
-            await self._drop_client(self.client, code)
+            try:
+                self._drop_client(self.client, code)
+            except KeyError:
+                # We can safely ignore this since clients will be removed immediately
+                # from the path in case they are being dropped by another client.
+                pass
 
     def get_path_client(
             self,
@@ -424,150 +440,80 @@ class ServerProtocol:
         path, client = self.path, self.client
         assert path is not None
         assert client is not None
+        tasks = set()  # type: Set[Coroutine[Any, Any, None]]
 
         # Do handshake
         client.log.debug('Starting handshake')
-        await self.handshake()
+        try:
+            await self.handshake()
+        except Exception as exc:
+            client.log.info('Handshake aborted')
 
-        # Check if the client is still connected to the path or has already been dropped.
-        # Note: This can happen when the client is being picked up and dropped by another
-        #       client while running the handshake. To prevent other race conditions, we
-        #       have to add the client instance to the path early during the handshake.
-        is_connected = path.has_client(client)
-        if is_connected:
-            client.log.info('Handshake completed')
+            # Encountered an exception during the handshake.
+            # Note: We already know the result (the exception), so we can cancel both
+            #       job queue and tasks.
+            result = Result(exc)
+            client.jobs.cancel(result)
+            client.tasks.cancel(result)
         else:
-            client.log.info('Handshake completed but client already dropped')
-
-        # Task: Execute enqueued tasks
-        client.log.debug('Starting to poll for enqueued tasks')
-        task_loop = self.task_loop()
-
-        # Task: Poll for messages
-        hex_path = PathHex(binascii.hexlify(path.initiator_key).decode('ascii'))
-        receive_loop = None  # type: Optional[Coroutine[Any, Any, None]]
-        if client.type == AddressType.initiator:
-            self._server.notify_initiator_connected(hex_path)
+            # Check if the client is still connected to the path or has already been
+            # dropped.
+            #
+            # Note: This can happen when the client is being picked up and dropped by
+            #       another client while running the handshake. To prevent other race
+            #       conditions, we have to add the client instance to the path early
+            #       during the handshake.
+            is_connected = path.has_client(client)
             if is_connected:
-                client.log.debug('Starting runner for initiator')
-                receive_loop = self.initiator_receive_loop()
-        elif client.type == AddressType.responder:
-            self._server.notify_responder_connected(hex_path)
+                client.log.info('Handshake completed')
+            else:
+                client.log.info('Handshake completed but client already dropped')
+
+            # Task: Poll for messages
+            hex_path = PathHex(binascii.hexlify(path.initiator_key).decode('ascii'))
+            if client.type == AddressType.initiator:
+                self._server.notify_initiator_connected(hex_path)
+                if is_connected:
+                    client.log.debug('Starting runner for initiator')
+                    tasks.add(self.initiator_receive_loop())
+            elif client.type == AddressType.responder:
+                self._server.notify_responder_connected(hex_path)
+                if is_connected:
+                    client.log.debug('Starting runner for responder')
+                    tasks.add(self.responder_receive_loop())
+            else:
+                raise ValueError('Invalid address type: {}'.format(client.type))
+
+            # Task: Keep alive
             if is_connected:
-                client.log.debug('Starting runner for responder')
-                receive_loop = self.responder_receive_loop()
-        else:
-            raise ValueError('Invalid address type: {}'.format(client.type))
+                client.log.debug('Starting keep-alive task')
+                tasks.add(self.keep_alive_loop())
 
-        # Task: Keep alive
-        keep_alive_loop = None  # type: Optional[Coroutine[Any, Any, None]]
-        if is_connected:
-            client.log.debug('Starting keep-alive task')
-            keep_alive_loop = self.keep_alive_loop()
-
-        # Set the tasks
-        client.tasks.set(
-            self._loop.create_task(task_loop),
-            None if receive_loop is None else self._loop.create_task(receive_loop),
-            None if keep_alive_loop is None else self._loop.create_task(keep_alive_loop),
-        )
-
-        # If already disconnected, schedule stopping of the task loop
-        if not is_connected:
-            client.stop_task_queue(immediate=True)
+        # Start the tasks and the job queue runner
+        client.jobs.start(client.tasks.cancel)
+        client.tasks.start(tasks)
 
         # Wait until complete
-        #
-        # Note: We also add the task loop into this list to catch any errors that bubble
-        #       up in tasks of this client.
-        #
-        # Warning: This is probably the most brittle piece of code in the server.
-        #          It is an absolute disaster and I hate myself for having done it this
-        #          way. My sincere apologies if you have to touch this.
-        tasks = set(client.tasks.valid)  # type: Set[Awaitable[None]]
-        while True:
-            done, pending = await asyncio.wait(
-                tasks, loop=self._loop, return_when=asyncio.FIRST_COMPLETED)
-            is_connected = path.has_client(client)
-            exc = None  # type: Optional[BaseException]
-            for task in done:
-                client.log.debug('Task done {}, connected={}', task, is_connected)
+        # Note: This method ensures us that all tasks have been cancelled
+        #       when it returns.
+        result = await client.tasks.await_result()
 
-                # Determine the exception to be raised
-                # Note: The first task will set the exception that will be raised.
-                if task.cancelled():
-                    if task != client.tasks.task_loop and not is_connected:
-                        # If the client has been dropped, we need to wait for the task
-                        # loop to return. So, remove the task from the list and continue.
-                        tasks.remove(task)
-                        break
-                    if exc is None:
-                        exc = InternalError('A vital task has been cancelled')
-                    client.log.error('Task {} has been cancelled', task)
-                    continue
+        # Cancel pending jobs and remove client from path
+        # Note: Removing the client needs to be done here since the re-raise hands
+        #       the task back into the event loop allowing other tasks to get the
+        #       client's path instance from the path while it is already effectively
+        #       disconnected.
+        client.jobs.cancel(result)
+        try:
+            path.remove_client(client)
+        except KeyError:
+            # We can safely ignore this since clients will be removed immediately
+            # from the path in case they are being dropped by another client.
+            pass
+        self._server.paths.clean(path)
 
-                task_exc = task.exception()
-                if task_exc is None:
-                    connection_closed_future = client.connection_closed_future
-
-                    # Tasks are allowed to return when the connection has been closed.
-                    # Note: This can happen in case a task returned due to the
-                    #       connection becoming closed. Since this doesn't raise an
-                    #       exception, we need to do it ourselves.
-                    if connection_closed_future.done():
-                        task_exc = Disconnected(connection_closed_future.result())
-                    else:
-                        # The task loop is allowed to return early if the task queue has
-                        # been closed or cancelled and all tasks have been processed
-                        if task == client.tasks.task_loop:
-                            if client.task_queue_done():
-                                tasks.remove(task)
-                                continue
-                            task_exc = InternalError(
-                                'Task loop {} returned unexpectedly', task)
-                        else:
-                            # All other tasks are not allowed to return early
-                            client.log.error('Task {} returned unexpectedly', task)
-                            task_exc = InternalError('A task returned unexpectedly')
-
-                if exc is None:
-                    exc = task_exc
-
-            # Continue if we have no exception
-            # Note: This happens when the task loop returns early after it has been
-            #       stopped.
-            #       This may also happen in case the client has been dropped and we need
-            #       to wait for the task loop to return.
-            if exc is None:
-                continue
-
-            # Cancel pending tasks
-            # Note: This excludes the task loop but cancels the currently awaited
-            #       task of the task loop.
-            for pending_task in pending:
-                if pending_task == client.tasks.task_loop:
-                    if client.tasks.active_task is not None:
-                        util.cancel_awaitable(client.tasks.active_task, client.log)
-                else:
-                    client.log.debug('Cancelling pending task {}', pending_task)
-                    pending_task.cancel()
-
-            # Cancel the task queue and remove client from path
-            # Note: Removing the client needs to be done here since the re-raise hands
-            #       the task back into the event loop allowing other tasks to get the
-            #       client's path instance from the path while it is already effectively
-            #       disconnected.
-            client.cancel_task_queue()
-            try:
-                path.remove_client(client)
-            except KeyError:
-                # We can safely ignore this since clients will be removed immediately
-                # from the path in case they are being dropped by another client.
-                pass
-            self._server.paths.clean(path)
-
-            # Finally, raise the exception
-            raise exc
+        # Done! Raise the result
+        raise result
 
     async def handshake(self) -> None:
         """
@@ -622,10 +568,9 @@ class ServerProtocol:
         # Authenticated
         previous_initiator = path.set_initiator(initiator)
         if previous_initiator is not None:
-            # Drop previous initiator using its task queue
+            # Drop previous initiator using its job queue
             path.log.debug('Dropping previous initiator {}', previous_initiator)
             previous_initiator.log.debug('Dropping (another initiator connected)')
-            # noinspection PyAsyncCall
             self._drop_client(previous_initiator, CloseCode.drop_by_initiator)
 
         # Send new-initiator message if any responder is present
@@ -634,10 +579,10 @@ class ServerProtocol:
         for responder_id in responder_ids:
             responder = path.get_responder(responder_id)
 
-            # Create message and add send coroutine to task queue of the responder
+            # Create message and add send coroutine to job queue of the responder
             new_initiator = NewInitiatorMessage.create(responder_id)
             responder.log.debug('Enqueueing new-initiator message')
-            coroutines.append(responder.enqueue_task(responder.send(new_initiator)))
+            coroutines.append(responder.jobs.enqueue(responder.send(new_initiator)))
         await asyncio.gather(*coroutines, loop=self._loop)
 
         # Send server-auth
@@ -684,10 +629,10 @@ class ServerProtocol:
         except KeyError:
             pass
         else:
-            # Create message and add send coroutine to task queue of the initiator
+            # Create message and add send coroutine to job queue of the initiator
             new_responder = NewResponderMessage.create(id_)
             initiator.log.debug('Enqueueing new-responder message')
-            await initiator.enqueue_task(initiator.send(new_responder))
+            await initiator.jobs.enqueue(initiator.send(new_responder))
 
         # Send server-auth
         server_auth = ServerAuthMessage.create(
@@ -697,42 +642,11 @@ class ServerProtocol:
         responder.log.debug('Sending server-auth without responder ids')
         await responder.send(server_auth)
 
-    async def task_loop(self) -> None:
-        client = self.client
-        assert client is not None
-        while True:
-            # Get a task from the queue
-            task = await client.dequeue_task()
-            if task is TaskLoopStopSentinel:
-                client.task_done(task)
-                break
-
-            # Wait and handle exceptions
-            future = asyncio.ensure_future(cast(Awaitable[None], task), loop=self._loop)
-            client.log.debug('Waiting for task to complete {}', future)
-            client.tasks.active_task = future
-            try:
-                await future
-            except Exception as exc:
-                need_raise = True
-                if isinstance(exc, asyncio.CancelledError):
-                    client.log.debug('Active task cancelled {}', future)
-                    need_raise = False
-                else:
-                    client.log.debug('Stopping active task {}', future)
-                future.add_done_callback(client.task_done)
-                if need_raise:
-                    raise
-            else:
-                client.task_done(future)
-
-        client.log.debug('Task loop returned')
-
-    async def initiator_receive_loop(self) -> None:
+    async def initiator_receive_loop(self) -> NoReturn:
         path, initiator = self.path, self.client
         assert path is not None
         assert initiator is not None
-        while not initiator.connection_closed_future.done():
+        while True:
             # Receive relay message or drop-responder
             message = await initiator.receive()
 
@@ -757,22 +671,21 @@ class ServerProtocol:
                     log_message = 'Responder {} already dropped, nothing to do'
                     path.log.debug(log_message, message.responder_id)
                 else:
-                    # Drop responder using its task queue
+                    # Drop responder using its job queue
                     path.log.debug(
                         'Dropping responder {}, reason: {}', responder, message.reason)
                     responder.log.debug(
                         'Dropping (requested by initiator), reason: {}', message.reason)
-                    # noinspection PyAsyncCall
                     self._drop_client(responder, CloseCode(message.reason))
             else:
                 error = "Expected relay message or 'drop-responder', got '{}'"
                 raise MessageFlowError(error.format(message.type))
 
-    async def responder_receive_loop(self) -> None:
+    async def responder_receive_loop(self) -> NoReturn:
         path, responder = self.path, self.client
         assert path is not None
         assert responder is not None
-        while not responder.connection_closed_future.done():
+        while True:
             # Receive relay message
             message = await responder.receive()
 
@@ -805,10 +718,10 @@ class ServerProtocol:
 
         async def send_error_message() -> None:
             assert source is not None
-            # Create message and add send coroutine to task queue of the source
+            # Create message and add send coroutine to job queue of the source
             error = SendErrorMessage.create(ClientAddress(source.id), message_id)
             source.log.info('Relaying failed, enqueuing send-error')
-            await source.enqueue_task(source.send(error))
+            await source.jobs.enqueue(source.send(error))
 
         # Destination not connected? Send 'send-error' to source
         if destination is None:
@@ -818,10 +731,10 @@ class ServerProtocol:
             await send_error_message()
             return
 
-        # Add send task to task queue of the destination
+        # Add send task to job queue of the destination
         task = self._loop.create_task(destination.send(message))
         destination.log.debug('Enqueueing relayed message from 0x{:02x}', source.id)
-        await destination.enqueue_task(task)
+        await destination.jobs.enqueue(task)
 
         # noinspection PyBroadException
         try:
@@ -832,10 +745,14 @@ class ServerProtocol:
             log_message = 'Sending relayed message to 0x{:02x} timed out'
             source.log.info(log_message, destination_id)
             await send_error_message()
-        except Exception:
+        except Exception as exc:
+            # Handle cancellation of the client
+            if isinstance(exc, asyncio.CancelledError) and source.tasks.have_result:
+                raise
+
             # An exception has been triggered while sending the message.
-            # Note: We don't care about the actual exception as the task
-            #       loop will also trigger that exception on the
+            # Note: We don't care about the actual exception as the job
+            #       queue runner will also trigger that exception on the
             #       destination client's handler who will log what happened.
             log_message = 'Sending relayed message failed, receiver 0x{:02x} is gone'
             source.log.info(log_message, destination_id)
@@ -844,14 +761,14 @@ class ServerProtocol:
             source.log.debug('Sending relayed message to 0x{:02x} successful',
                              destination.id)
 
-    async def keep_alive_loop(self) -> None:
+    async def keep_alive_loop(self) -> NoReturn:
         """
         Disconnected
         PingTimeoutError
         """
         client = self.client
         assert client is not None
-        while not client.connection_closed_future.done():
+        while True:
             # Wait
             # noinspection PyTypeChecker
             await asyncio.sleep(client.keep_alive_interval, loop=self._loop)
@@ -861,7 +778,8 @@ class ServerProtocol:
             pong_future = await client.ping()
             try:
                 await asyncio.wait_for(
-                    pong_future, client.keep_alive_timeout, loop=self._loop)
+                    client.wait_pong(pong_future), client.keep_alive_timeout,
+                    loop=self._loop)
             except asyncio.TimeoutError:
                 client.log.debug('Ping timed out')
                 raise PingTimeoutError(str(client))
@@ -939,11 +857,10 @@ class ServerProtocol:
         if chosen != self.subprotocol.value:
             raise DowngradeError('Subprotocol downgrade detected')
 
-    def _drop_client(self, client: PathClient, code: CloseCode) -> 'asyncio.Task[None]':
+    def _drop_client(self, client: PathClient, code: CloseCode) -> None:
         """
         Mark the client as closed, schedule the closing procedure on
-        the client's task queue, remove it from the path and return the
-        drop operation in form of a :class:`asyncio.Task`.
+        the client's job queue and remove it from the path.
 
         .. important:: This should only be called by clients dropping
                        another client or when the server is closing.
@@ -953,14 +870,12 @@ class ServerProtocol:
             - `close`: The close code.
         """
         # Drop the client
-        drop_task = client.drop(code)
+        client.drop(code)
 
         # Remove the client from the path
         path = self.path
         assert path is not None
         path.remove_client(client)
-
-        return drop_task
 
 
 class Paths:
@@ -1112,15 +1027,21 @@ class Server:
         """
         for callback in self._events.get_callbacks(event):
             coroutine = callback(event, path, data)
-            asyncio.ensure_future(coroutine, loop=self._loop)
+            log_handler = functools.partial(
+                self._log.exception, 'Unhandled exception in event handler:')
+            # noinspection PyTypeChecker
+            self._loop.create_task(util.log_exception(coroutine, log_handler))
 
     def close(self) -> None:
         """
         Close open connections and the server.
         """
         if self._close_task is None:
+            log_handler = functools.partial(
+                self._log.exception, 'Exception while closing:')
+            # noinspection PyTypeChecker
             self._close_task = self._loop.create_task(
-                self._close_after_all_protocols_closed())
+                util.log_exception(self._close_after_all_protocols_closed(), log_handler))
 
     async def wait_closed(self) -> None:
         """
@@ -1138,9 +1059,8 @@ class Server:
         if len(self.protocols) > 0:
             async def _close_and_wait() -> None:
                 # Wait until all connections have been scheduled to be closed
-                close_tasks = [protocol.close(CloseCode.going_away)
-                               for protocol in self.protocols]
-                await asyncio.gather(*close_tasks, loop=self._loop)
+                for protocol in self.protocols:
+                    protocol.close(CloseCode.going_away)
 
                 # Wait until all protocols have returned
                 handler_tasks = [protocol.handler_task for protocol in self.protocols]
