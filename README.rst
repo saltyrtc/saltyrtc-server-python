@@ -62,12 +62,47 @@ Command Line Usage
 ******************
 
 The script ``saltyrtc-server`` will be automatically installed and
-provides a command line interface for the server. Run the following
-command to see usage information:
+provides a command line interface for the server.
+
+Run the following command to see detailed usage information:
 
 .. code-block:: bash
 
     saltyrtc-server --help
+
+All command line options are also available as environment variables by
+prefixing them with `SALTYRTC_SERVER_` and the upper case command name,
+followed by the option name in upper case. For example:
+`SALTYRTC_SERVER_SERVE_PORT=8765`.
+
+Quick Start
+-----------
+
+Generate a new *private permanent key*:
+
+.. code-block:: bash
+
+    saltyrtc-server generate /path/to/permanent-key
+
+Run the following command to start the server on any address with port `8765`:
+
+.. code-block:: bash
+
+    saltyrtc-server serve \
+        -p 8765 \
+        -tc /path/to/x509-certificate \
+        -tk /path/to/key \
+        -k /path/to/permanent-key
+
+Alternatively, provide the options via environment variables:
+
+.. code-block:: bash
+
+    export SALTYRTC_SERVER_SERVE_PORT=8765 \
+           SALTYRTC_SERVER_SERVE_TLSCERT=/path/to/x509-certificate \
+           SALTYRTC_SERVER_SERVE_TLSKEY=/path/to/key \
+           SALTYRTC_SERVER_SERVE_KEY=/path/to/permanent-key
+    saltyrtc-server serve
 
 Contributing
 ************
