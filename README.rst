@@ -104,6 +104,28 @@ Alternatively, provide the options via environment variables:
            SALTYRTC_SERVER_SERVE_KEY=/path/to/permanent-key
     saltyrtc-server serve
 
+Docker
+------
+
+You can also use our `official Docker images`_ to run the server:
+
+.. code-block:: bash
+
+    docker run \
+        -v /path/to/cert-and-keys:/var/saltyrtc \
+        -p 8765:8765
+        -it saltyrtc/saltyrtc-server-python:<tag> serve \
+        -p 8765 \
+        -tc /var/saltyrtc/x509-certificate \
+        -tk /var/saltyrtc/key \
+        -k /var/saltyrtc/permanent-key
+
+The above command maps port `8765` of the server within the container to port
+`8765` on the host machine.
+
+Of course it is also possible to use environment variables to provide the
+options, as explained in the previous section.
+
 Contributing
 ************
 
@@ -149,6 +171,7 @@ contacts:
 .. _venv: https://docs.python.org/3/library/venv.html
 .. _virtualenvwrapper: https://virtualenvwrapper.readthedocs.io/
 .. _libsodium: https://download.libsodium.org/doc/installation/
+.. _official Docker images: https://hub.docker.com/r/saltyrtc/saltyrtc-server-python
 
 .. |CircleCI| image:: https://circleci.com/gh/saltyrtc/saltyrtc-server-python.svg?style=shield
    :target: https://circleci.com/gh/saltyrtc/saltyrtc-server-python
