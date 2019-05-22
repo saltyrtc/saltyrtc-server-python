@@ -24,9 +24,16 @@ server {
     server_name saltyrtc.example.com;
 
     # TLS
-    add_header Strict-Transport-Security max-age=2592000;
     ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
+    ssl_certificate_key /path/to/key.key;
+    ssl_trusted_certificate /path/to/cacert.pem;
+    ssl_protocols <add sane protocols here>
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers <add sane ciphers here>
+
+    # Security headers
+    # WARNING: Make sure to understand how HSTS works before including the Strict-Transport-Security headery!
+    add_header Strict-Transport-Security "max-age=31536000";
 
     # Logging
     access_log /var/log/nginx/saltyrtc.example.com.access.log;
