@@ -62,12 +62,69 @@ Command Line Usage
 ******************
 
 The script ``saltyrtc-server`` will be automatically installed and
-provides a command line interface for the server. Run the following
-command to see usage information:
+provides a command line interface for the server.
+
+Run the following command to see detailed usage information:
 
 .. code-block:: bash
 
     saltyrtc-server --help
+
+All command line options are also available as environment variables by
+prefixing them with `SALTYRTC_SERVER_` and the upper case command name,
+followed by the option name in upper case. For example:
+`SALTYRTC_SERVER_SERVE_PORT=8765`.
+
+Quick Start
+-----------
+
+Generate a new *private permanent key*:
+
+.. code-block:: bash
+
+    saltyrtc-server generate /path/to/permanent-key
+
+Run the following command to start the server on any address with port `8765`:
+
+.. code-block:: bash
+
+    saltyrtc-server serve \
+        -p 8765 \
+        -tc /path/to/x509-certificate \
+        -tk /path/to/key \
+        -k /path/to/permanent-key
+
+Alternatively, provide the options via environment variables:
+
+.. code-block:: bash
+
+    export SALTYRTC_SERVER_SERVE_PORT=8765 \
+           SALTYRTC_SERVER_SERVE_TLSCERT=/path/to/x509-certificate \
+           SALTYRTC_SERVER_SERVE_TLSKEY=/path/to/key \
+           SALTYRTC_SERVER_SERVE_KEY=/path/to/permanent-key
+    saltyrtc-server serve
+
+Docker
+------
+
+You can also use our `official Docker images`_ to run the server:
+
+.. code-block:: bash
+
+    docker run \
+        -v /path/to/cert-and-keys:/var/saltyrtc \
+        -p 8765:8765
+        -it saltyrtc/saltyrtc-server-python:<tag> serve \
+        -p 8765 \
+        -tc /var/saltyrtc/x509-certificate \
+        -tk /var/saltyrtc/key \
+        -k /var/saltyrtc/permanent-key
+
+The above command maps port `8765` of the server within the container to port
+`8765` on the host machine.
+
+Of course it is also possible to use environment variables to provide the
+options, as explained in the previous section.
 
 Contributing
 ************
@@ -114,6 +171,7 @@ contacts:
 .. _venv: https://docs.python.org/3/library/venv.html
 .. _virtualenvwrapper: https://virtualenvwrapper.readthedocs.io/
 .. _libsodium: https://download.libsodium.org/doc/installation/
+.. _official Docker images: https://hub.docker.com/r/saltyrtc/saltyrtc-server-python
 
 .. |CircleCI| image:: https://circleci.com/gh/saltyrtc/saltyrtc-server-python.svg?style=shield
    :target: https://circleci.com/gh/saltyrtc/saltyrtc-server-python
