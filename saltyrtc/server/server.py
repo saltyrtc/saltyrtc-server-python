@@ -345,8 +345,16 @@ class ServerProtocol:
         else:
             client.log.debug('Job queue completed')
 
-        # Send disconnected message if client was authenticated
-        if client.state == ClientState.authenticated:
+        # Send disconnected message if the path is not empty and client was authenticated
+        if path.empty:
+            description = 'Skipping potential disconnected message as the path has ' \
+                          'already been detached'
+            client.log.debug(description)
+        elif client.state != ClientState.authenticated:
+            client.log.debug(
+                'Skipping potential disconnected message due to {} state',
+                client.state.name)
+        else:
             # Initiator: Send to all responders
             if client.type == AddressType.initiator:
                 responder_ids = path.get_responder_ids()
@@ -385,10 +393,6 @@ class ServerProtocol:
                         client.log.exception(description, exc)
             else:
                 client.log.error('Invalid address type: {}', client.type)
-        else:
-            client.log.debug(
-                'Skipping potential disconnected message due to {} state',
-                client.state.name)
 
         # Wait for the connection to be closed
         await close_awaitable
@@ -417,6 +421,10 @@ class ServerProtocol:
                 # We can safely ignore this since clients will be removed immediately
                 # from the path in case they are being dropped by another client.
                 pass
+            except ValueError:
+                # We can also safely ignore this since a client may have already removed
+                # itself from the path.
+                pass
 
     def get_path_client(
             self,
@@ -440,6 +448,9 @@ class ServerProtocol:
 
         # Create client instance
         client = PathClient(connection, path.number, initiator_key, loop=self._loop)
+
+        # Attach client to path as 'pending'
+        path.add_pending(client)
 
         # Return path and client
         return path, client
@@ -888,6 +899,11 @@ class ServerProtocol:
         Arguments:
             - `client`: The client to be dropped.
             - `close`: The close code.
+
+        Raises:
+            - :exc:`KeyError` in case the client is not attached to the
+              path.
+            - :exc:`ValueError` in case the path has been detached.
         """
         # Drop the client
         client.drop(code)
@@ -914,7 +930,10 @@ class Paths:
         return self.paths[initiator_key]
 
     def clean(self, path: Path) -> None:
-        if path.attached and path.empty:
+        if not path.attached:
+            self._log.error('Path {} has already been detached', path.number)
+            return
+        if path.empty:
             path.attached = False
             try:
                 del self.paths[path.initiator_key]
@@ -922,6 +941,7 @@ class Paths:
                 self._log.error('Path {} has already been removed', path.number)
             else:
                 self._log.debug('Removed empty path: {}', path.number)
+            path.clear()
 
 
 class Server:

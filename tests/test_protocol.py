@@ -1747,6 +1747,8 @@ class TestProtocol:
         # Add fake clients to path
         clients = [_FakePathClient() for _ in range(0x02, 0x100)]
         for client in clients:
+            path.add_pending(client)
+        for client in clients:
             path.add_responder(client)
 
         # Now the path is full
