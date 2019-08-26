@@ -29,8 +29,8 @@ long_description = '\n\n'.join((read('README.rst'), read('CHANGELOG.rst')))
 
 # Check python version
 py_version = sys.version_info[:3]
-if py_version < (3, 5, 3):
-    raise Exception("SaltyRTC requires Python >= 3.5.3")
+if py_version < (3, 6, 1):
+    raise Exception("SaltyRTC requires Python >= 3.6.1")
 
 # Logging requirements
 logging_require = [
@@ -53,8 +53,8 @@ tests_require = [
     'pytest-asyncio>=0.9.0',
     'pytest-cov>=2.5.1',
     'pytest-mock>=1.10.0',
-    'flake8>=3.5.0',
-    'isort>=4.3.4',
+    'flake8>=3.7.8',
+    'isort>=4.3.21',
     'collective.checkdocs>=0.2',
     'Pygments>=2.2.0',  # required by checkdocs
     'ordered-set>=3.0.1',  # required by TestServer class
@@ -68,7 +68,7 @@ setup(
     install_requires=[
         'libnacl>=1.5.0,<2',
         'click>=6.7',  # doesn't seem to follow semantic versioning (see #57)
-        'websockets>=7.0,<8',
+        'websockets>=8.0,<9',
         'u-msgpack-python>=2.3,<3',
     ],
     tests_require=tests_require,
@@ -101,7 +101,6 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Natural Language :: English',
         'Operating System :: OS Independent',
-        'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Topic :: Communications',
