@@ -6,7 +6,6 @@ from typing import (
 
 from .base import BaseKey
 
-
 class PublicKey(BaseKey):
     def __init__(self, pk: bytes) -> None: ...
 

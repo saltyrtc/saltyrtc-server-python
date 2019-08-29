@@ -23,6 +23,7 @@ from typing import (
 )
 
 import websockets
+from websockets.typing import Subprotocol
 
 from . import util
 from .common import (
@@ -139,8 +140,8 @@ async def serve(
           an instance from.
         - `ws_kwargs`: Additional keyword arguments passed to
           :func:`websockets.server.serve`. Note that the fields `ssl`,
-          `host`, `port`, `loop`, `subprotocols` and `ping_interval`
-          will be overridden.
+          `host`, `port`, `loop`, `subprotocols`, `ping_interval` and
+          `select_subprotocol` will be overridden.
 
           If the `compression` field is not explicitly set,
           compression will be disabled (since the data to be compressed
@@ -178,6 +179,7 @@ async def serve(
     ws_kwargs.setdefault('compression', None)
     ws_kwargs['ping_interval'] = None  # Disable the keep-alive of the transport library
     ws_kwargs['subprotocols'] = server.subprotocols
+    ws_kwargs['select_subprotocol'] = server.protocol_class.select_subprotocol
 
     # Start WS server
     ws_server = await websockets.serve(server.handler, **ws_kwargs)
@@ -201,6 +203,23 @@ class ServerProtocol:
         'client',
         'handler_task'
     )
+
+    @classmethod
+    def select_subprotocol(
+            cls,
+            client_subprotocols: Sequence[Subprotocol],
+            server_subprotocols: Sequence[Subprotocol],
+    ) -> Optional[Subprotocol]:
+        # Determine common subprotocols
+        subprotocols = set(client_subprotocols) & set(server_subprotocols)
+        if len(subprotocols) == 0:
+            return None
+
+        # Sort by combined index
+        def _priority(subprotocol: Subprotocol) -> int:
+            return (client_subprotocols.index(subprotocol) +
+                    server_subprotocols.index(subprotocol))
+        return sorted(subprotocols, key=_priority)[0]
 
     def __init__(
             self,
@@ -852,8 +871,9 @@ class ServerProtocol:
         client.log.debug(
             'Checking for subprotocol downgrade, client: {}, server: {}',
             client_subprotocols, self._server.subprotocols)
-        chosen = websockets.WebSocketServerProtocol.select_subprotocol(
-            client_subprotocols, self._server.subprotocols)
+        chosen = self.select_subprotocol(
+            cast(Sequence[Subprotocol], client_subprotocols),
+            cast(Sequence[Subprotocol], self._server.subprotocols))
         if chosen != self.subprotocol.value:
             raise DowngradeError('Subprotocol downgrade detected')
 
@@ -919,10 +939,10 @@ class Server:
         self._loop = asyncio.get_event_loop() if loop is None else loop
 
         # Protocol class
-        self._protocol_class = ServerProtocol
+        self.protocol_class = ServerProtocol  # type: Type[ServerProtocol]
 
         # WebSocket server instance
-        self._server = None
+        self._server = None  # type: Optional[websockets.server.WebSocketServer]
 
         # Validate & store keys
         if keys is None:
@@ -944,6 +964,7 @@ class Server:
 
     @property
     def server(self) -> websockets.server.WebSocketServer:
+        assert self._server is not None
         return self._server
 
     @server.setter
@@ -978,7 +999,7 @@ class Server:
                 None, DisconnectedData(CloseCode.subprotocol_error.value))
         else:
             assert subprotocol is not None
-            protocol = self._protocol_class(
+            protocol = self.protocol_class(
                 self, subprotocol, connection, ws_path, loop=self._loop)
             await protocol.handler_task
 

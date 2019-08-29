@@ -51,7 +51,7 @@ class TestServer:
                 # ZZzzzZZzz
                 await sleep(0.1)
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # Initiator handshake
         initiator, _ = await client_factory(initiator_handshake=True)
@@ -93,7 +93,7 @@ class TestServer:
                 self._loop.create_task(_cancel_task(keep_alive_loop))
                 await keep_alive_loop
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # Initiator handshake
         initiator, _ = await client_factory(initiator_handshake=True)
@@ -117,7 +117,7 @@ class TestServer:
             async def keep_alive_loop(self):
                 await sleep(60.0)
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # Initiator handshake & disconnect immediately
         initiator, _ = await client_factory(initiator_handshake=True)
@@ -144,7 +144,7 @@ class TestServer:
                 await close_future
                 return await super().handshake()
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # Connect & disconnect immediately
         ws_client = await ws_client_factory()
@@ -182,7 +182,7 @@ class TestServer:
             async def keep_alive_loop(self):
                 await sleep(60.0)
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # Initiator handshake & disconnect immediately
         initiator, _ = await client_factory(initiator_handshake=True)
@@ -216,7 +216,7 @@ class TestServer:
                 await sleep(0.1)
                 raise result
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # Connect client to server
         ws_client = await ws_client_factory()
@@ -270,7 +270,7 @@ class TestServer:
                 # Wait until closed
                 raise await self.client.connection_closed_future
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # Create client and patch it to not answer pings
         ws_client = await ws_client_factory()
@@ -327,7 +327,13 @@ class TestServer:
         future.cancel()
 
         # Close on the job queue
-        await path_client.jobs.enqueue(initiator.close())
+        async def _wait_definitely_closed():
+            await initiator.close()
+            # Note: We need this since the 'close' coroutine may return before the
+            #       `Disconnected` exception has been thrown within the server.
+            await sleep(0.1)
+
+        await path_client.jobs.enqueue(_wait_definitely_closed())
 
         # Enqueue task and cancel immediately
         job = event_loop.create_task(sleep(60.0))
@@ -603,7 +609,7 @@ class TestServer:
                     await connection_closed_future()
                     raise
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # Responder handshake
         responder, _ = await client_factory(responder_handshake=True)
@@ -639,7 +645,7 @@ class TestServer:
                 super()._drop_client(client, code)
                 client_dropped_future.set_result(None)
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # First initiator handshake
         first_initiator, _ = await client_factory(initiator_handshake=True)
@@ -685,7 +691,7 @@ class TestServer:
                     cancelled_future.set_result(None)
                     raise
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # Initiator handshake
         initiator, i = await client_factory(initiator_handshake=True)
@@ -762,7 +768,7 @@ class TestServer:
                     cancelled_future.set_result(None)
                     raise
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # Initiator handshake
         initiator, i = await client_factory(initiator_handshake=True)

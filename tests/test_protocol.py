@@ -1381,7 +1381,7 @@ class TestProtocol:
                 super()._drop_client(*args, **kwargs)
                 done_future.set_result(None)
 
-        mocker.patch.object(server, '_protocol_class', _MockProtocol)
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
 
         # Initiator handshake
         initiator, i = await client_factory(initiator_handshake=True)

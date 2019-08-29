@@ -60,22 +60,6 @@ jobs:
       - EVENT_LOOP: uvloop
       - TIMEOUT: "2.0"
 
-  test-python-3_5-asyncio:
-    <<: *shared
-    docker:
-      - image: saltyrtc/circleci-image-python:python-3.5
-    environment:
-      - EVENT_LOOP: asyncio
-      - TIMEOUT: "2.0"
-
-  test-python-3_5-uvloop:
-    <<: *shared
-    docker:
-      - image: saltyrtc/circleci-image-python:python-3.5
-    environment:
-      - EVENT_LOOP: uvloop
-      - TIMEOUT: "2.0"
-
   lint:
     docker:
       - image: saltyrtc/circleci-image-python:python-3.7
@@ -160,8 +144,6 @@ workflows:
       - test-python-3_7-uvloop
       - test-python-3_6-asyncio
       - test-python-3_6-uvloop
-      - test-python-3_5-asyncio
-      - test-python-3_5-uvloop
   docker:
     jobs:
       - build-docker:
