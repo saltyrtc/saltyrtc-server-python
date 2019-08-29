@@ -540,6 +540,10 @@ class ServerProtocol:
             # We can safely ignore this since clients will be removed immediately
             # from the path in case they are being dropped by another client.
             pass
+        except ValueError:
+            # We can also safely ignore this since a client may have already removed
+            # itself from the path.
+            pass
         self._server.paths.clean(path)
 
         # Done! Raise the result
