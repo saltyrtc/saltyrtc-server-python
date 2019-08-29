@@ -3,6 +3,7 @@ import os
 import struct
 # noinspection PyUnresolvedReferences
 from typing import Dict  # noqa
+from typing import Set  # noqa
 from typing import (
     Any,
     Iterable,
@@ -79,6 +80,7 @@ SNT = TypeVar('SNT', bound=SequenceNumber)
 
 class Path:
     __slots__ = (
+        '_pending',
         '_initiator',
         '_responders',
         'log',
@@ -93,6 +95,7 @@ class Path:
             number: int,
             attached: bool = True,
     ) -> None:
+        self._pending = set()  # type: Set[PathClient]
         self._initiator = None  # type: Optional[PathClient]
         self._responders = {}  # type: Dict[ResponderAddress, PathClient]
         self.log = util.get_logger('path.{}'.format(number))
@@ -105,7 +108,24 @@ class Path:
         """
         Return whether the path is empty.
         """
-        return self._initiator is None and len(self._responders) == 0
+        return (len(self._pending) == 0 and
+                self._initiator is None and
+                len(self._responders) == 0)
+
+    def add_pending(self, client: 'PathClient') -> None:
+        """
+        Add a :class:`PathClient` as pending to the set of pending
+        clients.
+
+        Arguments:
+            - `client`: A :class:`PathClient` instance.
+
+        Raises :exc:`ValueError` in case of a state violation on the
+        :class:`PathClient`.
+        """
+        if not self.attached:
+            raise ValueError('Patch has been detached!')
+        self._pending.add(client)
 
     def has_client(self, client: 'PathClient') -> bool:
         """
@@ -114,7 +134,13 @@ class Path:
 
         Arguments:
             - `client`: The :class:`PathClient` instance to look for.
+
+        Raises :exc:`ValueError` in case of a state violation on the
+        :class:`PathClient`.
         """
+        if not self.attached:
+            raise ValueError('Patch has been detached!')
+
         # Note: No need to check for an unassigned ID since the server's ID will never
         #       be available in the slots.
         id_ = client.id
@@ -137,8 +163,13 @@ class Path:
         """
         Return the initiator's :class:`PathClient` instance.
 
-        Raises :exc:`KeyError` if there is no initiator.
+        Raises:
+            - :exc:`KeyError` if there is no initiator.
+            - :exc:`ValueError` in case of a state violation on the
+              :class:`PathClient`.
         """
+        if not self.attached:
+            raise ValueError('Patch has been detached!')
         if self._initiator is None:
             raise KeyError('No initiator present')
         return self._initiator
@@ -150,11 +181,21 @@ class Path:
         Arguments:
             - `initiator`: A :class:`PathClient` instance.
 
-        Raises :exc:`ValueError` in case of a state violation on the
-        :class:`PathClient`.
+        Raises:
+            - :exc:`KeyError` in case the initiator was not in the set
+              of pending clients.
+            - :exc:`ValueError` in case of a state violation on the
+              :class:`PathClient`.
 
         Return the previously set initiator or `None`.
         """
+        if not self.attached:
+            raise ValueError('Patch has been detached!')
+
+        # Remove initiator from 'pending' set
+        self._pending.remove(initiator)
+
+        # Update initiator
         previous_initiator = self._initiator
         self._initiator = initiator
         self.log.debug('Set initiator {}', initiator)
@@ -173,15 +214,25 @@ class Path:
         Arguments:
             - `id_`: The identifier of the responder.
 
-        Raises :exc:`KeyError`: If `id_` cannot be associated to a
-        :class:`PathClient` instance.
+        Raises:
+            - :exc:`KeyError`: If `id_` cannot be associated to a
+              :class:`PathClient` instance.
+            - :exc:`ValueError` in case of a state violation on the
+              :class:`PathClient`.
         """
+        if not self.attached:
+            raise ValueError('Patch has been detached!')
         return self._responders[id_]
 
     def get_responder_ids(self) -> Iterable[ResponderAddress]:
         """
         Return an iterable of responder identifiers (slots).
+
+        Raises :exc:`ValueError` in case of a state violation on the
+        :class:`PathClient`.
         """
+        if not self.attached:
+            raise ValueError('Patch has been detached!')
         return self._responders.keys()
 
     def add_responder(self, responder: 'PathClient') -> ResponderAddress:
@@ -193,17 +244,26 @@ class Path:
 
         Raises:
             - :exc:`SlotsFullError` if no free slot exists on the path.
+            - :exc:`KeyError` in case the responder was not in the set
+              of pending clients.
             - :exc:`ValueError` in case of a state violation on the
-              :class:`PathClient`.
+              :class:`PathClient` or in case the responder was not in
+              the list of pending clients.
 
         Return the assigned slot identifier.
         """
+        if not self.attached:
+            raise ValueError('Patch has been detached!')
+
         # Calculate slot id
         id_ = len(self._responders) + 0x02
         try:
             id_ = ResponderAddress(id_)
         except ValueError as exc:
             raise SlotsFullError('No free slot on path') from exc
+
+        # Remove responder from 'pending' set
+        self._pending.remove(responder)
 
         # Set responder
         self._responders[id_] = responder
@@ -226,12 +286,30 @@ class Path:
         Arguments:
              - `client`: The :class:`PathClient` instance.
 
-        Raises :exc:`KeyError` in case the client provided an
-        invalid slot identifier.
+        Raises:
+            - :exc:`KeyError` in case the client provided an invalid
+              slot identifier, or the client should have been but was
+              not in the set of pending clients.
+            - :exc:`ValueError` in case of a state violation on the
+              :class:`PathClient`.
         """
+        if not self.attached:
+            raise ValueError('Patch has been detached!')
+
         if client.state == ClientState.restricted:
-            # Client has never been authenticated. Nothing to do.
+            # Client has never been authenticated, so it should be in
+            # the 'pending' set
+            self._pending.remove(client)
             return
+
+        # Client should not be in the 'pending' set!
+        try:
+            self._pending.remove(client)
+        except KeyError:
+            pass
+        else:
+            self.log.error(
+                'Client {} in state {} was in the pending set!', client, client.state)
 
         # Remove initiator or responder
         id_ = client.id
@@ -249,6 +327,24 @@ class Path:
                 raise KeyError('Invalid responder id: {}'.format(id_))
             del self._responders[id_]
         self.log.debug('Removed {}', 'initiator' if is_initiator else 'responder')
+
+    def clear(self) -> None:
+        """
+        Clear an empty path.
+        """
+        if len(self._pending) != 0:
+            self.log.error(
+                'Clearing path that has pending clients: {}',
+                self._pending)
+        self._pending.clear()
+        if self._initiator is not None:
+            self.log.error(
+                'Clearing path that has an attached initiator: {}', self._initiator)
+        self._initiator = None
+        if len(self._responders) != 0:
+            self.log.error(
+                'Clearing path that has attached responders: {}', self._responders)
+        self._responders.clear()
 
 
 class PathClient:

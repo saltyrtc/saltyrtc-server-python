@@ -817,3 +817,158 @@ class TestServer:
         # Bye
         await responder.close()
         await server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    async def test_reuse_of_attached_paths(
+            self, mocker, event_loop, cookie_factory, server, client_factory,
+            initiator_key
+    ):
+        """
+        Ensure the server does reuse a still attached :class:`Path`
+        instance.
+        """
+        first_initiator_detached_future = asyncio.Future(loop=event_loop)
+        second_initiator_connected_future = asyncio.Future(loop=event_loop)
+
+        # Mock the initiator's client handler to wait before raising an exception
+        class _MockProtocol(ServerProtocol):
+            async def handle_client(self):
+                try:
+                    await super().handle_client()
+                except Exception:
+                    if not first_initiator_detached_future.done():
+                        first_initiator_detached_future.set_result(None)
+
+                    # Hold back the exception until the second initiator is connected
+                    await second_initiator_connected_future
+                    raise
+
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
+
+        # Initiator handshake
+        initiator, i = await client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Ensure normal path state
+        path = server.paths.get(initiator_key.pk)
+        initiator_path_client = path.get_initiator()
+        assert path.attached
+        assert not path.empty
+        assert path.has_client(initiator_path_client)
+
+        # Responder handshake
+        responder, r = await client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        # Expect both initiator and responder to be connected to the same path instance
+        assert path.get_responder(r['id'])
+        assert path.attached
+        assert not path.empty
+
+        # Close the initiator's connection
+        event_loop.create_task(initiator.close())
+        await first_initiator_detached_future
+
+        # Expect the initiator to be removed from the path and the path to be attached
+        assert path.attached
+        assert not path.empty
+        with pytest.raises(KeyError):
+            path.get_initiator()
+        assert not path.has_client(initiator_path_client)
+
+        # Second initiator handshake
+        initiator, i = await client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Ensure the second initiator is connected to the same path instance
+        assert server.paths.get(initiator_key.pk) == path
+        assert path.attached
+        assert not path.empty
+
+        # Release first initiator's protocol instance
+        second_initiator_connected_future.set_result(None)
+
+        # Bye
+        await initiator.close()
+        await responder.close()
+        await server.wait_connections_closed()
+
+    @pytest.mark.asyncio
+    async def test_no_reuse_of_detached_paths(
+            self, mocker, event_loop, cookie_factory, server, client_factory,
+            initiator_key
+    ):
+        """
+        Ensure the server does not reuse a detached :class:`Path`
+        instance.
+        """
+        initiator_detached_future = asyncio.Future(loop=event_loop)
+        responder_connected_future = asyncio.Future(loop=event_loop)
+
+        # Mock the initiator's client handler to wait before raising an exception
+        class _MockProtocol(ServerProtocol):
+            async def handle_client(self):
+                try:
+                    await super().handle_client()
+                except Exception:
+                    if not initiator_detached_future.done():
+                        initiator_detached_future.set_result(None)
+
+                    # Hold back the exception until the responder has been connected
+                    await responder_connected_future
+                    raise
+
+        mocker.patch.object(server, 'protocol_class', _MockProtocol)
+
+        # Initiator handshake
+        initiator, i = await client_factory(initiator_handshake=True)
+        i['rccsn'] = 98798981
+        i['rcck'] = cookie_factory()
+
+        # Ensure normal path state
+        path = server.paths.get(initiator_key.pk)
+        initiator_path_client = path.get_initiator()
+        assert path.attached
+        assert not path.empty
+        assert path.has_client(initiator_path_client)
+
+        # Close the initiator's connection
+        event_loop.create_task(initiator.close())
+        await initiator_detached_future
+
+        # Expect the initiator to be removed from the path and the path to be detached
+        assert path not in server.paths.paths
+        assert not path.attached
+        assert path.empty
+        with pytest.raises(ValueError) as exc_info:
+            path.has_client(initiator_path_client)
+        assert 'Patch has been detached!' in str(exc_info.value)
+
+        # Responder handshake
+        responder, r = await client_factory(responder_handshake=True)
+        r['iccsn'] = 2 ** 23
+        r['icck'] = cookie_factory()
+
+        # Ensure the responder is connected to a different path instance
+        new_path = server.paths.get(initiator_key.pk)
+        responder_path_client = new_path.get_responder(r['id'])
+        assert path != new_path
+        assert new_path.attached
+        assert not new_path.empty
+        assert new_path.has_client(responder_path_client)
+        assert not new_path.has_client(initiator_path_client)
+        assert not path.attached
+        assert path.empty
+        with pytest.raises(ValueError) as exc_info:
+            path.has_client(responder_path_client)
+        assert 'Patch has been detached!' in str(exc_info.value)
+
+        # Release initiator protocol instance
+        responder_connected_future.set_result(None)
+
+        # Bye
+        await responder.close()
+        await server.wait_connections_closed()
