@@ -124,7 +124,7 @@ class Path:
         :class:`PathClient`.
         """
         if not self.attached:
-            raise ValueError('Patch has been detached!')
+            raise ValueError('Path has been detached!')
         self._pending.add(client)
 
     def has_client(self, client: 'PathClient') -> bool:
@@ -139,7 +139,7 @@ class Path:
         :class:`PathClient`.
         """
         if not self.attached:
-            raise ValueError('Patch has been detached!')
+            raise ValueError('Path has been detached!')
 
         # Note: No need to check for an unassigned ID since the server's ID will never
         #       be available in the slots.
@@ -169,7 +169,7 @@ class Path:
               :class:`PathClient`.
         """
         if not self.attached:
-            raise ValueError('Patch has been detached!')
+            raise ValueError('Path has been detached!')
         if self._initiator is None:
             raise KeyError('No initiator present')
         return self._initiator
@@ -190,7 +190,7 @@ class Path:
         Return the previously set initiator or `None`.
         """
         if not self.attached:
-            raise ValueError('Patch has been detached!')
+            raise ValueError('Path has been detached!')
 
         # Remove initiator from 'pending' set
         self._pending.remove(initiator)
@@ -221,7 +221,7 @@ class Path:
               :class:`PathClient`.
         """
         if not self.attached:
-            raise ValueError('Patch has been detached!')
+            raise ValueError('Path has been detached!')
         return self._responders[id_]
 
     def get_responder_ids(self) -> Iterable[ResponderAddress]:
@@ -232,7 +232,7 @@ class Path:
         :class:`PathClient`.
         """
         if not self.attached:
-            raise ValueError('Patch has been detached!')
+            raise ValueError('Path has been detached!')
         return self._responders.keys()
 
     def add_responder(self, responder: 'PathClient') -> ResponderAddress:
@@ -253,7 +253,7 @@ class Path:
         Return the assigned slot identifier.
         """
         if not self.attached:
-            raise ValueError('Patch has been detached!')
+            raise ValueError('Path has been detached!')
 
         # Calculate slot id
         id_ = len(self._responders) + 0x02
@@ -294,7 +294,7 @@ class Path:
               :class:`PathClient`.
         """
         if not self.attached:
-            raise ValueError('Patch has been detached!')
+            raise ValueError('Path has been detached!')
 
         if client.state == ClientState.restricted:
             # Client has never been authenticated, so it should be in

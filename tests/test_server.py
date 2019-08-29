@@ -945,7 +945,7 @@ class TestServer:
         assert path.empty
         with pytest.raises(ValueError) as exc_info:
             path.has_client(initiator_path_client)
-        assert 'Patch has been detached!' in str(exc_info.value)
+        assert 'Path has been detached!' in str(exc_info.value)
 
         # Responder handshake
         responder, r = await client_factory(responder_handshake=True)
@@ -964,7 +964,7 @@ class TestServer:
         assert path.empty
         with pytest.raises(ValueError) as exc_info:
             path.has_client(responder_path_client)
-        assert 'Patch has been detached!' in str(exc_info.value)
+        assert 'Path has been detached!' in str(exc_info.value)
 
         # Release initiator protocol instance
         responder_connected_future.set_result(None)
