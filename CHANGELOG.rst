@@ -1,6 +1,13 @@
 Changelog
 *********
 
+`5.0.0`_ (2019-08-29)
+---------------------
+
+- Bump the Python version requirement to 3.6.1
+- Upgrade dependencies
+- Fix a race condition that leads to path duplication
+
 `4.2.0`_ (2019-04-25)
 ---------------------
 
@@ -110,6 +117,7 @@ support the `disconnected` message before upgrading.
 .. _#90: https://github.com/saltyrtc/saltyrtc-server-python/issues/90
 .. _SaltyRTC 1.0 Protocol: https://github.com/saltyrtc/saltyrtc-meta/blob/protocol-1.0/Protocol.md
 
+.. _5.0.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v4.2.0...v5.0.0
 .. _4.2.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v4.1.1...v4.2.0
 .. _4.1.1: https://github.com/saltyrtc/saltyrtc-server-python/compare/v4.1.0...v4.1.1
 .. _4.1.0: https://github.com/saltyrtc/saltyrtc-server-python/compare/v4.0.1...v4.1.0
