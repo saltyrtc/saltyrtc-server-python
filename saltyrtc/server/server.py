@@ -540,7 +540,14 @@ class ServerProtocol:
             # We can safely ignore this since clients will be removed immediately
             # from the path in case they are being dropped by another client.
             pass
-        self._server.paths.clean(path)
+        except ValueError:
+            # We can also safely ignore this since a client may have already removed
+            # itself from the path.
+            pass
+
+        # Clean the path (if still attached)
+        if path.attached:
+            self._server.paths.clean(path)
 
         # Done! Raise the result
         raise result
@@ -930,9 +937,6 @@ class Paths:
         return self.paths[initiator_key]
 
     def clean(self, path: Path) -> None:
-        if not path.attached:
-            self._log.error('Path {} has already been detached', path.number)
-            return
         if path.empty:
             path.attached = False
             try:
