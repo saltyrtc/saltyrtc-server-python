@@ -107,7 +107,7 @@ def _message_representation(
         encrypted_str = 'encrypted={}, '.format(encrypted)
     else:
         encrypted_str = ''
-    return '{}({}nonce={}, data={})'.format(
+    return '{}({}nonce={}, data={!r})'.format(
         class_name, encrypted_str, nonce_str, payload)
 
 

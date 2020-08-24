@@ -64,7 +64,7 @@ T = TypeVar('T')  # Any type
 try:
     from typing import NoReturn
 except ImportError:
-    NoReturn = None
+    NoReturn = None  # type: ignore
 
 
 # Helpers

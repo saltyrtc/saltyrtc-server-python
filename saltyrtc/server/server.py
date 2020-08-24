@@ -949,9 +949,11 @@ class Paths:
 
 
 class Server:
+    # TODO: The type annotation could be constrained even more, so that only
+    #       valid subprotocols may be stored.
     subprotocols = [
         SubProtocol.saltyrtc_v1.value
-    ]  # type: ClassVar[Sequence[SubProtocol]]
+    ]  # type: ClassVar[Sequence[str]]
 
     def __init__(
             self,
