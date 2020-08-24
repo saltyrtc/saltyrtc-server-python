@@ -42,7 +42,7 @@ if platform.python_implementation() == 'PyPy':
     mypy_require = []
 else:
     mypy_require = [
-        'mypy==0.700',
+        'mypy==0.780',
     ]
 
 # Test requirements
