@@ -951,7 +951,7 @@ class Paths:
 class Server:
     subprotocols = [
         SubProtocol.saltyrtc_v1.value
-    ]  # type: ClassVar[Sequence[SubProtocol]]
+    ]  # type: ClassVar[Sequence[str]]
 
     def __init__(
             self,
