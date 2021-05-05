@@ -49,9 +49,9 @@ else:
 #       is not necessary here.
 tests_require = [
     'pytest>=3.7.3,<4',
-    'pytest-asyncio>=0.9.0',
-    'pytest-cov>=2.5.1',
-    'pytest-mock>=1.10.0',
+    'pytest-asyncio>=0.9.0,<0.10',
+    'pytest-cov>=2.5.1,<3',
+    'pytest-mock>=1.10.0,<2',
     'flake8>=3.7.8',
     'isort>=5,<6',
     'collective.checkdocs>=0.2',
