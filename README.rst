@@ -145,7 +145,7 @@ imports (``isort``), do a static type analysis and run the project's tests:
 .. code-block:: bash
 
     flake8 .
-    isort -rc .
+    isort .
     MYPYPATH=${PWD}/stubs mypy saltyrtc examples
     py.test
 

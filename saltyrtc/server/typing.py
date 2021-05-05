@@ -17,6 +17,7 @@ import libnacl.public
 if TYPE_CHECKING:
     # noinspection PyUnresolvedReferences
     import logbook  # noqa
+
     # noinspection PyUnresolvedReferences
     from .events import Event  # noqa
 

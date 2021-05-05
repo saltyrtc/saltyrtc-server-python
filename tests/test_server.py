@@ -4,7 +4,6 @@ instance behaves as expected.
 """
 import asyncio
 import collections
-
 import pytest
 
 from saltyrtc.server import (

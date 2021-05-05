@@ -1,6 +1,3 @@
-import asyncio
-import os
-import struct
 # noinspection PyUnresolvedReferences
 from typing import Dict  # noqa
 from typing import Set  # noqa
@@ -14,8 +11,11 @@ from typing import (
     cast,
 )
 
+import asyncio
 import libnacl
 import libnacl.public
+import os
+import struct
 import websockets
 
 from . import util

@@ -1,8 +1,3 @@
-import asyncio
-import binascii
-import functools
-import ssl
-from collections import OrderedDict
 from typing import Awaitable  # noqa
 from typing import ClassVar  # noqa
 from typing import Dict  # noqa
@@ -22,7 +17,12 @@ from typing import (
     cast,
 )
 
+import asyncio
+import binascii
+import functools
+import ssl
 import websockets
+from collections import OrderedDict
 from websockets.typing import Subprotocol
 
 from . import util

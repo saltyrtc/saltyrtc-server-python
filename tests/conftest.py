@@ -1,19 +1,18 @@
 import asyncio
 import functools
+import libnacl.public
+import logbook
+import ordered_set
 import os
+import pytest
 import socket
 import ssl
 import struct
 import subprocess
 import sys
-from contextlib import closing
-
-import libnacl.public
-import logbook
-import ordered_set
-import pytest
 import umsgpack
 import websockets
+from contextlib import closing
 
 from saltyrtc.server import (
     NONCE_FORMATTER,

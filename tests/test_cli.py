@@ -1,10 +1,9 @@
 import binascii
 import os
+import pytest
 import signal
 import stat
 import subprocess
-
-import pytest
 
 from saltyrtc.server import (
     Server,

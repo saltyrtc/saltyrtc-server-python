@@ -1,19 +1,19 @@
 """
 The command line interface for the SaltyRTC signalling server.
 """
-import asyncio
-import enum
-import os
-import signal
-import stat
 from typing import Coroutine  # noqa
 from typing import List  # noqa
 from typing import Optional  # noqa
 from typing import Sequence  # noqa
 from typing import Any
 
+import asyncio
 import click
+import enum
 import libnacl.public
+import os
+import signal
+import stat
 
 from . import (
     __version__ as _version,

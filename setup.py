@@ -2,7 +2,6 @@ import ast
 import os
 import platform
 import sys
-
 from setuptools import setup
 
 
@@ -54,7 +53,7 @@ tests_require = [
     'pytest-cov>=2.5.1,<3',
     'pytest-mock>=1.10.0,<2',
     'flake8>=3.7.8',
-    'isort>=4.3.21',
+    'isort>=5,<6',
     'collective.checkdocs>=0.2',
     'Pygments>=2.2.0',  # required by checkdocs
     'ordered-set>=3.0.1',  # required by TestServer class
