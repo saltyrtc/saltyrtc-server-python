@@ -1,7 +1,8 @@
-import collections
-import enum
 from typing import Dict  # noqa
 from typing import List
+
+import collections
+import enum
 
 from .typing import EventCallback
 
