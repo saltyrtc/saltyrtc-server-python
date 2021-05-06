@@ -1,6 +1,14 @@
 Changelog
 *********
 
+Unreleased
+----------
+
+- Stop testing uvloop option on Python 3.6. If you want to keep using uvloop
+  with Python 3.6, you need to manually install a version <0.15, because 0.15+
+  of uvloop dropped Python 3.6 support. (Note that Python 3.6 is EOL by the end
+  of 2021.)
+
 `5.0.1`_ (2019-09-09)
 ---------------------
 
