@@ -3,8 +3,9 @@ SaltyRTC Signalling Server
 
 |CircleCI| |codecov| |PyPI| |Gitter|
 
-This is a SaltyRTC server implementation for Python 3.5+ using
-`asyncio`_.
+This is a SaltyRTC server implementation for Python 3.6 or 3.7 using
+`asyncio`_. (Note that currently Python 3.8+ is not supported! We recommend
+using Python 3.7.)
 
 Note
 ****
