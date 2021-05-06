@@ -17,6 +17,7 @@ import libnacl.public
 if TYPE_CHECKING:
     # noinspection PyUnresolvedReferences
     import logbook  # noqa
+
     # noinspection PyUnresolvedReferences
     from .events import Event  # noqa
 
@@ -64,7 +65,7 @@ T = TypeVar('T')  # Any type
 try:
     from typing import NoReturn
 except ImportError:
-    NoReturn = None
+    NoReturn = None  # type: ignore
 
 
 # Helpers

@@ -1,7 +1,3 @@
-import abc
-import binascii
-import io
-import struct
 from typing import ClassVar  # noqa
 from typing import (
     TYPE_CHECKING,
@@ -13,7 +9,11 @@ from typing import (
     cast,
 )
 
+import abc
+import binascii
+import io
 import libnacl
+import struct
 import umsgpack
 
 from .common import (
@@ -107,7 +107,7 @@ def _message_representation(
         encrypted_str = 'encrypted={}, '.format(encrypted)
     else:
         encrypted_str = ''
-    return '{}({}nonce={}, data={})'.format(
+    return '{}({}nonce={}, data={!r})'.format(
         class_name, encrypted_str, nonce_str, payload)
 
 

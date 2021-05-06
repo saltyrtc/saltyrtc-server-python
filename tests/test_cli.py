@@ -1,10 +1,9 @@
 import binascii
 import os
+import pytest
 import signal
 import stat
 import subprocess
-
-import pytest
 
 from saltyrtc.server import (
     Server,
@@ -19,7 +18,7 @@ class TestCLI:
     async def test_invalid_command(self, cli):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli('meow')
-        assert 'No such command "meow"' in exc_info.value.output
+        assert "No such command 'meow'" in exc_info.value.output
 
     @pytest.mark.asyncio
     async def test_invalid_verbosity(self, cli):

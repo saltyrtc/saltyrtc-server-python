@@ -1,8 +1,3 @@
-import asyncio
-import binascii
-import functools
-import ssl
-from collections import OrderedDict
 from typing import Awaitable  # noqa
 from typing import ClassVar  # noqa
 from typing import Dict  # noqa
@@ -22,7 +17,12 @@ from typing import (
     cast,
 )
 
+import asyncio
+import binascii
+import functools
+import ssl
 import websockets
+from collections import OrderedDict
 from websockets.typing import Subprotocol
 
 from . import util
@@ -949,9 +949,11 @@ class Paths:
 
 
 class Server:
+    # TODO: The type annotation could be constrained even more, so that only
+    #       valid subprotocols may be stored.
     subprotocols = [
         SubProtocol.saltyrtc_v1.value
-    ]  # type: ClassVar[Sequence[SubProtocol]]
+    ]  # type: ClassVar[Sequence[str]]
 
     def __init__(
             self,

@@ -1,6 +1,3 @@
-import asyncio
-import enum
-import functools
 from typing import (
     Any,
     Callable,
@@ -9,6 +6,10 @@ from typing import (
     Set,
     Union,
 )
+
+import asyncio
+import enum
+import functools
 
 from . import util
 from .exception import (

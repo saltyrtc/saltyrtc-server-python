@@ -1,14 +1,14 @@
-import asyncio
-import os
-import signal
-import ssl  # noqa
-import sys
 from typing import Any  # noqa
 from typing import Coroutine  # noqa
 from typing import List  # noqa
 from typing import Optional
 
+import asyncio
 import logbook.more
+import os
+import signal
+import ssl  # noqa
+import sys
 
 import saltyrtc.server
 from saltyrtc.server.typing import ServerSecretPermanentKey  # noqa

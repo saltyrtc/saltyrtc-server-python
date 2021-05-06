@@ -2,12 +2,13 @@
 This package will be moved to `saltyrtc.common` as soon as a SaltyRTC
 client is being written.
 """
-import enum
 from typing import (
     TYPE_CHECKING,
     Any,
     cast,
 )
+
+import enum
 
 from .exception import MessageError
 from .typing import (

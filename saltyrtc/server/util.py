@@ -2,10 +2,6 @@
 This module provides utility functions for the SaltyRTC Signalling
 Server.
 """
-import asyncio
-import binascii
-import logging
-import ssl
 # noinspection PyUnresolvedReferences
 from typing import Coroutine  # noqa
 from typing import (
@@ -19,8 +15,12 @@ from typing import (
     cast,
 )
 
+import asyncio
+import binascii
 import libnacl
 import libnacl.public
+import logging
+import ssl
 
 from .typing import (
     LogbookLevel,

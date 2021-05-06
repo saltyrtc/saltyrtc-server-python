@@ -3,8 +3,9 @@ SaltyRTC Signalling Server
 
 |CircleCI| |codecov| |PyPI| |Gitter|
 
-This is a SaltyRTC server implementation for Python 3.5+ using
-`asyncio`_.
+This is a SaltyRTC server implementation for Python 3.6 or 3.7 using
+`asyncio`_. (Note that currently Python 3.8+ is not supported! We recommend
+using Python 3.7.)
 
 Note
 ****
@@ -145,7 +146,7 @@ imports (``isort``), do a static type analysis and run the project's tests:
 .. code-block:: bash
 
     flake8 .
-    isort -rc .
+    isort .
     MYPYPATH=${PWD}/stubs mypy saltyrtc examples
     py.test
 

@@ -4,6 +4,16 @@ This is a SaltyRTC server implementation for Python 3.6.1+ using
 """
 import itertools
 
+from . import (
+    common,
+    events,
+    exception,
+    message,
+    protocol,
+    server,
+    task,
+    util,
+)
 from .common import *  # noqa
 from .events import *  # noqa
 from .exception import *  # noqa
@@ -15,14 +25,14 @@ from .util import *  # noqa
 
 __all__ = tuple(itertools.chain(
     ('bin', 'typing'),
-    common.__all__,  # noqa
-    events.__all__,  # noqa
-    exception.__all__,  # noqa
-    message.__all__,  # noqa
-    protocol.__all__,  # noqa
-    server.__all__,  # noqa
-    task.__all__,  # noqa
-    util.__all__,  # noqa
+    common.__all__,
+    events.__all__,
+    exception.__all__,
+    message.__all__,
+    protocol.__all__,
+    server.__all__,
+    task.__all__,
+    util.__all__,
 ))
 
 __author__ = 'Lennart Grahl <lennart.grahl@gmail.com>'
