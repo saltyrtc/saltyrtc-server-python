@@ -24,7 +24,7 @@ class TestCLI:
     async def test_invalid_verbosity(self, cli):
         with pytest.raises(subprocess.CalledProcessError) as exc_info:
             await cli('-v', '8')
-        assert 'is not in the valid range' in exc_info.value.output
+        assert 'is not in the range' in exc_info.value.output
 
     @pytest.mark.asyncio
     async def test_import_error_logbook(self, cli, fake_logbook_env):
@@ -181,7 +181,7 @@ class TestCLI:
                 '-p', '8443',
                 '-l', 'meow',
             )
-        assert 'invalid choice' in exc_info.value.output
+        assert 'is not one of' in exc_info.value.output
 
     @pytest.saltyrtc.no_uvloop
     @pytest.mark.asyncio

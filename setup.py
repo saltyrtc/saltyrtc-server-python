@@ -48,15 +48,15 @@ else:
 # Note: These are just tools that aren't required, so a version range
 #       is not necessary here.
 tests_require = [
-    'pytest>=3.7.3,<4',
+    'pytest>=3.10.1,<4',
     'pytest-asyncio>=0.9.0,<0.10',
-    'pytest-cov>=2.5.1,<3',
-    'pytest-mock>=1.10.0,<2',
-    'flake8>=3.7.8',
-    'isort>=5,<6',
+    'pytest-cov>=2.9.0,<3',
+    'pytest-mock>=1.13.0,<2',
+    'flake8==4.0.1',
+    'isort==5.10.1',
     'collective.checkdocs>=0.2',
-    'Pygments>=2.2.0',  # required by checkdocs
-    'ordered-set>=3.0.1',  # required by TestServer class
+    'Pygments>=2.11.2,<3',  # required by checkdocs
+    'ordered-set>=4.0.2,<5',  # required by TestServer class
 ] + logging_require + mypy_require
 
 setup(
@@ -66,7 +66,7 @@ setup(
     package_data={'saltyrtc.server': ['py.typed']},
     install_requires=[
         'libnacl>=1.5.0,<2',
-        'click>=6.7',  # doesn't seem to follow semantic versioning (see #57)
+        'click>=8.0.4,<9',  # doesn't seem to follow semantic versioning (see #57)
         'websockets>=8.0,<9',
         'u-msgpack-python>=2.3,<3',
     ],
