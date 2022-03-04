@@ -4,7 +4,7 @@
 #          the container behind a reverse proxy (e.g. Nginx) or make use of
 #          the -tc and -tk parameters to provide the certificate and key
 #          directly.
-FROM python:3
+FROM python:3.7
 
 # Install dependencies
 RUN apt-get update -qqy \
