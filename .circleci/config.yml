@@ -1,0 +1,21 @@
+version: 2.1
+
+jobs:
+  docker-builds:
+    docker:
+      - image: docker:stable
+    steps:
+      - run:
+          name: Install git
+          command: apk add bash git openssh
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: "Build, test and push Docker images"
+          command: .circleci/docker-builds.sh
+
+workflows:
+  version: 2
+  docker-builds:
+    jobs:
+      - docker-builds

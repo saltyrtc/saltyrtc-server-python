@@ -1,0 +1,136 @@
+diff --git a/setup.cfg b/setup.cfg
+index bd90b36..66515ef 100644
+--- a/setup.cfg
++++ b/setup.cfg
+@@ -41,7 +41,3 @@ ignore_missing_imports = true
+ ignore_missing_imports = true
+ 
+ [tool:pytest]
+-filterwarnings =
+-    ignore:.*asyncio\.async\(\) function is deprecated.*:DeprecationWarning
+-    ignore:'with \(yield from lock\)' is deprecated.*:DeprecationWarning
+-    ignore:.*instead of from 'collections.abc' is deprecated.*:DeprecationWarning
+diff --git a/setup.py b/setup.py
+index 6cf5100..c13b264 100644
+--- a/setup.py
++++ b/setup.py
+@@ -2,7 +2,6 @@ import ast
+ import os
+ import platform
+ import sys
+-
+ from setuptools import setup
+ 
+ 
+@@ -42,22 +41,22 @@ if platform.python_implementation() == 'PyPy':
+     mypy_require = []
+ else:
+     mypy_require = [
+-        'mypy==0.700',
++        'mypy==0.780',
+     ]
+ 
+ # Test requirements
+ # Note: These are just tools that aren't required, so a version range
+ #       is not necessary here.
+ tests_require = [
+-    'pytest>=3.7.3,<4',
+-    'pytest-asyncio>=0.9.0',
+-    'pytest-cov>=2.5.1',
+-    'pytest-mock>=1.10.0',
+-    'flake8>=3.7.8',
+-    'isort>=4.3.21',
++    'pytest>=3.10.1,<4',
++    'pytest-asyncio>=0.9.0,<0.10',
++    'pytest-cov>=2.9.0,<3',
++    'pytest-mock>=1.13.0,<2',
++    'flake8==4.0.1',
++    'isort==5.10.1',
+     'collective.checkdocs>=0.2',
+-    'Pygments>=2.2.0',  # required by checkdocs
+-    'ordered-set>=3.0.1',  # required by TestServer class
++    'Pygments>=2.11.2,<3',  # required by checkdocs
++    'ordered-set>=4.0.2,<5',  # required by TestServer class
+ ] + logging_require + mypy_require
+ 
+ setup(
+@@ -67,7 +66,7 @@ setup(
+     package_data={'saltyrtc.server': ['py.typed']},
+     install_requires=[
+         'libnacl>=1.5.0,<2',
+-        'click>=6.7',  # doesn't seem to follow semantic versioning (see #57)
++        'click>=8.0.4,<9',  # doesn't seem to follow semantic versioning (see #57)
+         'websockets>=8.0,<9',
+         'u-msgpack-python>=2.3,<3',
+     ],
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 57705d2..3916f0b 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -1,19 +1,18 @@
+ import asyncio
+ import functools
++import libnacl.public
++import logbook
++import ordered_set
+ import os
++import pytest
+ import socket
+ import ssl
+ import struct
+ import subprocess
+ import sys
+-from contextlib import closing
+-
+-import libnacl.public
+-import logbook
+-import ordered_set
+-import pytest
+ import umsgpack
+ import websockets
++from contextlib import closing
+ 
+ from saltyrtc.server import (
+     NONCE_FORMATTER,
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 5f62792..3cb6c2f 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,11 +1,10 @@
+ import binascii
+ import os
++import pytest
+ import signal
+ import stat
+ import subprocess
+ 
+-import pytest
+-
+ from saltyrtc.server import (
+     Server,
+     __version__ as _version,
+@@ -19,13 +18,13 @@ class TestCLI:
+     async def test_invalid_command(self, cli):
+         with pytest.raises(subprocess.CalledProcessError) as exc_info:
+             await cli('meow')
+-        assert 'No such command "meow"' in exc_info.value.output
++        assert "No such command 'meow'" in exc_info.value.output
+ 
+     @pytest.mark.asyncio
+     async def test_invalid_verbosity(self, cli):
+         with pytest.raises(subprocess.CalledProcessError) as exc_info:
+             await cli('-v', '8')
+-        assert 'is not in the valid range' in exc_info.value.output
++        assert 'is not in the range' in exc_info.value.output
+ 
+     @pytest.mark.asyncio
+     async def test_import_error_logbook(self, cli, fake_logbook_env):
+@@ -182,7 +181,7 @@ class TestCLI:
+                 '-p', '8443',
+                 '-l', 'meow',
+             )
+-        assert 'invalid choice' in exc_info.value.output
++        assert 'is not one of' in exc_info.value.output
+ 
+     @pytest.saltyrtc.no_uvloop
+     @pytest.mark.asyncio
