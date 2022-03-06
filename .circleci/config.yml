@@ -77,55 +77,6 @@ jobs:
           when: always
           command: python setup.py checkdocs
 
-  build-docker:
-    docker:
-      - image: docker:stable
-    parameters:
-      rebuild:
-        type: boolean
-        default: false
-    environment:
-      - SUPPORTED_TAGS: ^v[5-9][0-9]*\.[0-9]+\.[0-9]+$
-    steps:
-      - run:
-          name: Install git
-          command: apk add bash git openssh
-      - checkout
-      - setup_remote_docker
-      - run:
-          name: Determine tag name
-          command: |
-            tags="${CIRCLE_BRANCH}"
-            if [ -n "${CIRCLE_TAG}" ]; then
-              minortag=$(echo ${CIRCLE_TAG} | sed 's/^\(v[0-9]*\.[0-9]*\)\..*$/\1/')
-              majortag=$(echo ${CIRCLE_TAG} | sed 's/^\(v[0-9]*\)\..*$/\1/')
-              tags="${CIRCLE_TAG:1} ${minortag:1} ${majortag:1}"
-            fi
-            echo "Mapping to tags: ${tags}"
-            echo "export TAGS=\"${tags}\"" >> ${BASH_ENV}
-      - run:
-          name: Build Docker image
-          command: |
-            source ${BASH_ENV}
-            docker build --no-cache -t saltyrtc-server-python .
-            for tag in ${TAGS}; do
-              docker tag saltyrtc-server-python saltyrtc/saltyrtc-server-python:${tag}
-            done
-      - run:
-          name: Push Docker image
-          command: |
-            source ${BASH_ENV}
-            docker login -u ${DOCKER_USER} -p ${DOCKER_API_KEY}
-            for tag in ${TAGS}; do
-              docker push saltyrtc/saltyrtc-server-python:${tag}
-            done
-      - when:
-          condition: << parameters.rebuild >>
-          steps:
-            - run:
-                name: Build and push Docker images for supported tags
-                command: .circleci/build-docker.sh
-
 
 workflows:
   version: 2
@@ -135,20 +86,3 @@ workflows:
       - test-python-3_7-asyncio
       - test-python-3_7-uvloop
       - test-python-3_6-asyncio
-  docker:
-    jobs:
-      - build-docker:
-          filters:
-            tags:
-              only: /^v.*/
-  docker-weekly:
-    triggers:
-      - schedule:
-          cron: "0 5 * * 1"
-          filters:
-            branches:
-              only: master
-    jobs:
-      - build-docker:
-          rebuild: true
-
