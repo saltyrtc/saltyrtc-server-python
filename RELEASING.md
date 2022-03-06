@@ -57,11 +57,14 @@ Signing key: https://lgrahl.de/pub/pgp-key.txt
 
 8. Create a new release on GitHub.
 
-9. Prepare CHANGELOG.rst for upcoming changes:
+9. Push a Docker file to the ``ci/docker-builds`` branch (and remove
+   old images, if desired).
+
+10. Prepare CHANGELOG.rst for upcoming changes:
 
    ```rst
    `Unreleased`_ (YYYY-MM-DD)
    --------------------------
    ```
 
-10. Pat yourself on the back and celebrate!
+11. Pat yourself on the back and celebrate!
