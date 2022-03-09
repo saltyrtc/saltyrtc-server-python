@@ -36,9 +36,11 @@ for tag in ${build_tags}; do
         -f ${tag}.Dockerfile \
         .
     cd -
-    docker run --entrypoint /bin/bash \
+    docker run \
+        --entrypoint /bin/bash \
+        --user 0 \
         saltyrtc/saltyrtc-server-python:${tag:1} \
-        -c "pip install .[dev] && py.test -k 'not test_generate_key_invalid_permissions'"
+        -c "pip install .[dev] && su - saltyrtc -s /bin/bash -c \"py.test\""
     push_tags+=(${tag:1})
     minortag=$(echo ${tag} | sed 's/^\(v[0-9]*\.[0-9]*\)\..*$/\1/')
     if needs "${minortag:1}" "${push_tags[@]}"; then
