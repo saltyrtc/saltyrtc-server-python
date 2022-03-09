@@ -7,7 +7,7 @@ RUN apt-get update -qqy \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 # Set working directory
-WORKDIR /usr/src/saltyrtc-server
+WORKDIR /srv/saltyrtc
 
 # Copy sources
 COPY examples ./examples
@@ -17,6 +17,10 @@ COPY CHANGELOG.rst LICENSE README.rst setup.cfg setup.py ./
 
 # Install the server
 RUN pip install --no-cache-dir ".[logging, uvloop]"
+
+# Create 'saltyrtc' user and use it
+RUN useradd -d /srv/saltyrtc -M -s /sbin/nologin -U saltyrtc
+USER saltyrtc
 
 # Define server as entrypoint
 ENTRYPOINT ["/usr/local/bin/saltyrtc-server"]
